@@ -118,12 +118,12 @@ celery_app = Celery(
 3. **Dump de base HPS**: generar export SQL/CSV + diccionario de datos para planificar migraciones a Django.
 
 ### Fase 1 – Infraestructura base en Django
-1. **Crear apps Django específicas**:
-   - `hps_auth` (roles, equipos, perfiles) basada en `apps.productos` y `UserProfile`.
-   - `hps_requests` (modelos `HPSRequest`, `AuditLog`, plantillas/tokens).
-   - `hps_chat` (con Channels o ASGI FastAPI embebido pero gerenciado por Django).
-2. **Modelado**: traducir modelos SQLAlchemy a Django ORM con migraciones (incluyendo constraints y enums). Asegurar correspondencia de nombres para ETL.
-3. **Serializers y viewsets**: replicar endpoints `api/v1/...` usando DRF, manteniendo contratos (campos, validaciones, estados HTTP).
+1. **Crear apps Django específicas** (todo bajo `cryptotrace`):
+   - `hps_core` (ya iniciada) para roles, equipos, plantillas, solicitudes, tokens, auditoría.
+   - `hps_auth` o integración directa con `rest_framework_simplejwt` para login/logout, gestión de usuarios y perfiles HPS.
+   - `hps_chat` (Django Channels) y `hps_integrations` (extensiones, email).
+2. **Modelado**: terminar la traducción de todos los modelos SQLAlchemy a Django (faltan chat, equipos avanzados, métricas, plantillas de email, etc.).
+3. **Serializers y viewsets**: replicar endpoints `api/v1/...` usando DRF (autenticación, users, teams, HPS, chat, email, extension). Documentar mapping FastAPI ➜ DRF.
 4. **Celery en CryptoTrace**: crear `cryptotrace-backend/celery.py`, configurar broker Redis y portar tareas `src.tasks.email_tasks` y `analysis_tasks`.
 
 ### Fase 2 – Migración de datos y autenticación
