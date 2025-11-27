@@ -16,6 +16,11 @@ media/
 venv/
 env/
 .env
+.env.dev
+.env.prod
+.env.local
+.env.production
+.env.staging
 
 # Archivos Excel y temporales
 *.xls
