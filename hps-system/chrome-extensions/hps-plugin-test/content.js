@@ -1,0 +1,108 @@
+
+console.log('Content script cargado');
+
+chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+  if (message.action === 'rellenarFormulario') {
+    const numeroDocumento = message.dni;
+    console.log('Content script: recibida acción rellenarFormulario para:', numeroDocumento);
+
+    chrome.runtime.sendMessage({ action: 'getDatosPorDni', dni: numeroDocumento }, (response) => {
+      if (response.error) {
+        console.error("Content script: Error obteniendo datos:", response.error);
+        sendResponse({ error: response.error });
+        return;
+      }
+
+      const datos = response.data;
+      if (!datos) {
+        console.warn('Content script: No se recibieron datos para el número documento:', numeroDocumento);
+        sendResponse({ error: 'No hay datos para ese número' });
+        return;
+      }
+
+      console.log('Content script: Datos recibidos para rellenar:', datos);
+
+      // 1. Valor fijo para "Cargo/Perfil en Empresa"
+      const perfilEmpresa = document.getElementById('hps_requests_0_companyProfile');
+      if (perfilEmpresa) {
+        perfilEmpresa.value = '211';  // value para PERSONAL DEL CONTRATISTA
+        perfilEmpresa.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      // 2. Valor fijo para "Grado único HPS solicitada"
+      const gradoUnico = document.getElementById('hps_requests_0_hpsUniqueGrade');
+      if (gradoUnico) {
+        gradoUnico.value = '220';  // value para RESERVADO o equivalente (SECRET)
+        gradoUnico.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      // 3. Valor fijo para "El interesado es personal laboral ajeno"
+      const personalAjeno = document.getElementById('hps_requests_0_isCompanyProfileOutside');
+      if (personalAjeno) {
+        personalAjeno.value = '231';  // value para No
+        personalAjeno.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      // 4. Condición: si nacionalidad === "ESPAÑA", poner "No" en Solicitud al extranjero
+      if (datos.nacionalidad && datos.nacionalidad.toUpperCase() === 'ESPAÑA') {
+        const solicitudExtranjero = document.getElementById('hps_requests_0_foreignApplication');
+        if (solicitudExtranjero) {
+          solicitudExtranjero.value = '231'; // Valor para No
+          solicitudExtranjero.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } else {
+        const solicitudExtranjero = document.getElementById('hps_requests_0_foreignApplication');
+        if (solicitudExtranjero) {
+          solicitudExtranjero.value = '230'; // Valor para Sí
+          solicitudExtranjero.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+
+      // 5. Observaciones (campo después de los datos personales)
+      const observations = document.getElementById('field-10'); // Ajustado para el nuevo orden
+      if (observations) {
+        const nombreCompleto = `${datos.nombre} ${datos.primer_apellido} ${datos.segundo_apellido}`;
+        observations.value = `Se solicita nueva HPS para nuestro compañero ${nombreCompleto}, ya que va a participar en proyectos para los que necesita acceso a documentación clasificada.`;
+        observations.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
+
+      // Configuración inputs - Orden correcto de campos
+      const campoConfig = [
+        { id: 'field-0', tipo: 'select', key: 'tipo_documento' },        // Tipo de documento de identidad
+        { id: 'field-1', tipo: 'input', key: 'numero_documento' },      // Número de documento
+        { id: 'field-2', tipo: 'input', key: 'fecha_nacimiento' },      // Fecha de nacimiento
+        { id: 'field-3', tipo: 'input', key: 'nombre' },                // Nombre
+        { id: 'field-4', tipo: 'input', key: 'primer_apellido' },       // Primer Apellido
+        { id: 'field-5', tipo: 'input', key: 'segundo_apellido' },      // Segundo Apellido
+        { id: 'field-6', tipo: 'select', key: 'nacionalidad' },         // Nacionalidad
+        { id: 'field-7', tipo: 'input', key: 'lugar_nacimiento' },      // Lugar de nacimiento
+        { id: 'field-8', tipo: 'input', key: 'correo' },                // Correo
+        { id: 'field-9', tipo: 'input', key: 'telefono' },              // Teléfono
+      ];
+
+      // 🔄 Función para actualizar campos
+      const actualizarCampo = ({ id, tipo, key }) => {
+        const elemento = document.getElementById(id);
+        const valor = datos[key];
+
+        if (!elemento || valor == null) return;
+
+        elemento.value = valor;
+
+        // Disparar el evento adecuado
+        const evento = tipo === 'select'
+          ? new Event('change', { bubbles: true })
+          : new Event('input', { bubbles: true });
+
+        elemento.dispatchEvent(evento);
+      };
+
+      campoConfig.forEach(actualizarCampo);
+
+      sendResponse({ status: 'Formulario rellenado correctamente' });
+    });
+
+    return true;
+  }
+});

@@ -1,0 +1,3 @@
+# Este archivo asegura que el directorio 'static' se incluya en el control de versiones de Git,
+# incluso si está vacío inicialmente. Aquí podrían ir archivos CSS u otros assets estáticos
+# para las plantillas PDF, si se decide no incrustarlos directamente. 

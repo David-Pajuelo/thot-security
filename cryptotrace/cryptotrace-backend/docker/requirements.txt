@@ -1,0 +1,15 @@
+django
+djangorestframework
+gunicorn
+psycopg2-binary  # Para conectar PostgreSQL (lo usaremos más adelante)
+psycopg2-binary
+dj-database-url
+djangorestframework-simplejwt
+django-extensions
+django-cors-headers
+requests
+python-dotenv  # 🔥 Para leer archivos .env automáticamente
+Pillow  # Para ImageField en Django
+redis  # Para cache y sesiones
+django-redis  # Integración Django-Redis
+celery  # Tareas asíncronas (migración HPS)

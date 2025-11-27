@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Automatización HPS",
+  "version": "1.0",
+  "permissions": [
+    "scripting",
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://gobernanza.ccn-cert.cni.es/*",
+    "http://localhost:8001/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Seleccionar persona"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://gobernanza.ccn-cert.cni.es/*"
+      ],
+      "js": ["content.js"]
+    }
+  ]
+}

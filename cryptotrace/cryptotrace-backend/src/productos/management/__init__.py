@@ -1,0 +1,1 @@
+# Directorio para comandos de gestión de Django 

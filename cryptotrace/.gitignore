@@ -1,0 +1,130 @@
+# ============================================
+# CryptoTrace Monorepo - .gitignore Consolidado
+# ============================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node.js / Next.js
+node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+/.next/
+/out/
+/build
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+
+# Entornos virtuales
+venv/
+env/
+ENV/
+.venv/
+
+# Variables de entorno
+.env
+.env.local
+.env.development
+.env.production
+.env.prod
+.env.test
+*.env
+
+# Logs
+*.log
+logs/
+*.pot
+
+# Archivos Excel y temporales (comunes en el proyecto)
+*.xls
+*.xlsx
+*.xlsm
+*.csv
+~$*.xls*
+*.tmp
+
+# Base de datos
+db.sqlite3
+db.sqlite3-journal
+*.db
+
+# Media y documentos (backend)
+cryptotrace-backend/src/albaranes/documentos/*
+!cryptotrace-backend/src/albaranes/documentos/.gitkeep
+cryptotrace-backend/src/temp_documentos/*
+!cryptotrace-backend/src/temp_documentos/.gitkeep
+cryptotrace-backend/src/media/
+cryptotrace-backend/src/static/
+
+# Uploads (processing)
+cryptotrace-processing/uploads/*
+!cryptotrace-processing/uploads/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# Sistema operativo
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Docker
+.docker/
+
+# Backup y datos de desarrollo
+backup_desarrollo.sql
+datos_desarrollo.json
+
+# Tipos Documento (archivos de prueba)
+Tipos Documento/
+
+# Archivos de configuración local
+local_settings.py
+settings_local.py
+

@@ -1,0 +1,243 @@
+# =============================================================================
+# DOCKER COMPOSE - DESARROLLO (LOCAL)
+# =============================================================================
+# Uso: docker compose -f docker-compose.dev.yml --env-file .env.dev up
+
+services:
+  # Base de datos PostgreSQL
+  # NOTA: Usamos la misma base de datos que cryptotrace (compartida)
+  # Si necesitas una base separada, cambia el puerto a 5433
+  # db:
+  #   image: postgres:15-alpine
+  #   container_name: hps_postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: ${POSTGRES_DB}
+  #     POSTGRES_USER: ${POSTGRES_USER}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  #     POSTGRES_HOST_AUTH_METHOD: md5
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5433:5432"  # Cambiado para evitar conflicto con cryptotrace
+  #   networks:
+  #     - hps_network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Agente IA
+  agente-ia:
+    build:
+      context: ./agente-ia
+      dockerfile: Dockerfile
+    container_name: hps_agente_ia
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      - BACKEND_URL=${BACKEND_URL}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - AGENTE_IA_TIMEOUT=${AGENTE_IA_TIMEOUT}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./agente-ia:/app
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
+    # Usamos la base de datos compartida de cryptotrace
+    networks:
+      - hps_network
+      - cryptotrace_default  # Para acceder a cryptotrace-db y cryptotrace-redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis
+  # NOTA: Usamos el Redis compartido de cryptotrace (puerto 6379)
+  # No necesitamos un Redis separado para hps-system
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: hps_redis
+  #   restart: unless-stopped
+  #   command: redis-server --appendonly yes
+  #   volumes:
+  #     - redis_data:/data
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - hps_network
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Backend FastAPI Principal
+  # NOTA: El backend FastAPI se ha migrado a Django (cryptotrace-backend)
+  # Este servicio ya no es necesario, pero lo dejamos comentado por referencia
+  # backend:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   container_name: hps_backend
+  #   restart: unless-stopped
+  #   environment:
+  #     - POSTGRES_HOST=${POSTGRES_HOST}
+  #     - POSTGRES_PORT=${POSTGRES_PORT}
+  #     - POSTGRES_DB=${POSTGRES_DB}
+  #     - POSTGRES_USER=${POSTGRES_USER}
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+  #     - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - AGENTE_IA_HOST=${AGENTE_IA_HOST}
+  #     - AGENTE_IA_PORT=${AGENTE_IA_PORT}
+  #     - AGENTE_IA_URL=${AGENTE_IA_URL}
+  #     - SMTP_HOST=${SMTP_HOST}
+  #     - SMTP_PORT=${SMTP_PORT}
+  #     - SMTP_USER=${SMTP_USER}
+  #     - SMTP_PASSWORD=${SMTP_PASSWORD}
+  #     - IMAP_HOST=${IMAP_HOST}
+  #     - IMAP_PORT=${IMAP_PORT}
+  #     - IMAP_USER=${IMAP_USER}
+  #     - IMAP_PASSWORD=${IMAP_PASSWORD}
+  #     - IMAP_MAILBOX=${IMAP_MAILBOX}
+  #     - FRONTEND_URL=${FRONTEND_URL}
+  #     - REDIS_HOST=${REDIS_HOST}
+  #     - REDIS_PORT=${REDIS_PORT}
+  #   ports:
+  #     - "8001:8001"
+  #   volumes:
+  #     - ./backend:/app
+  #   depends_on:
+  #     # db:
+  #     #   condition: service_healthy
+  #     agente-ia:
+  #       condition: service_started
+  #   networks:
+  #     - hps_network
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Celery Worker para tareas asíncronas
+  # NOTA: Celery ahora está integrado en Django (cryptotrace-backend)
+  # Este servicio ya no es necesario
+  # celery-worker:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   container_name: hps_celery_worker
+  #   restart: unless-stopped
+  #   command: celery -A src.celery_app worker --loglevel=info --queues=email,analysis,default
+  #   environment:
+  #     - POSTGRES_HOST=${POSTGRES_HOST}
+  #     - POSTGRES_PORT=${POSTGRES_PORT}
+  #     - POSTGRES_DB=${POSTGRES_DB}
+  #     - POSTGRES_USER=${POSTGRES_USER}
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+  #     - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - AGENTE_IA_HOST=${AGENTE_IA_HOST}
+  #     - REDIS_HOST=${REDIS_HOST}
+  #     - REDIS_PORT=${REDIS_PORT}
+  #     - SMTP_HOST=${SMTP_HOST}
+  #     - SMTP_PORT=${SMTP_PORT}
+  #     - SMTP_USER=${SMTP_USER}
+  #     - SMTP_PASSWORD=${SMTP_PASSWORD}
+  #     - IMAP_HOST=${IMAP_HOST}
+  #     - IMAP_PORT=${IMAP_PORT}
+  #     - IMAP_USER=${IMAP_USER}
+  #     - IMAP_PASSWORD=${IMAP_PASSWORD}
+  #     - IMAP_MAILBOX=${IMAP_MAILBOX}
+  #     - SMTP_FROM_NAME=${SMTP_FROM_NAME}
+  #     - SMTP_REPLY_TO=${SMTP_REPLY_TO}
+  #     - FRONTEND_URL=${FRONTEND_URL}
+  #   volumes:
+  #     - ./backend:/app
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - hps_network
+  #   healthcheck:
+  #     test: ["CMD", "celery", "-A", "src.celery_app", "inspect", "ping"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Frontend React
+  # NOTA: Cambiado puerto a 3001 para evitar conflicto con cryptotrace-frontend (3000)
+  # NOTA: Backend ahora es Django (cryptotrace-backend en puerto 8080)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8080}
+        - REACT_APP_WS_URL=${REACT_APP_WS_URL:-ws://localhost:8080}
+        - REACT_APP_AGENTE_IA_WS_URL=${REACT_APP_AGENTE_IA_WS_URL:-ws://localhost:8000}
+    container_name: hps_frontend
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8080}
+      - REACT_APP_WS_URL=${REACT_APP_WS_URL:-ws://localhost:8080}
+      - REACT_APP_AGENTE_IA_WS_URL=${REACT_APP_AGENTE_IA_WS_URL:-ws://localhost:8000}
+    ports:
+      - "3001:3000"  # Cambiado para evitar conflicto con cryptotrace-frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    # depends_on:
+    #   - backend  # Backend ahora es Django
+    networks:
+      - hps_network
+      - cryptotrace_default  # Para acceder al backend Django
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# volumes:
+  # postgres_data:  # Usamos la base de datos compartida de cryptotrace
+  #   driver: local
+  # redis_data:  # Usamos el Redis compartido de cryptotrace
+  #   driver: local
+
+networks:
+  hps_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+  # Conectar con la red de cryptotrace para acceder a servicios compartidos
+  cryptotrace_default:
+    external: true

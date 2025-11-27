@@ -1,0 +1,40 @@
+# FastAPI
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entorno virtual
+venv/
+env/
+.env
+.venv/
+
+# Archivos Excel y temporales
+*.xls
+*.xlsx
+*.xlsm
+*.csv
+~$*.xls*
+*.tmp
+
+# Logs y datos
+*.log
+logs/
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing y caché
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Otros
+.DS_Store
+dist/
+build/

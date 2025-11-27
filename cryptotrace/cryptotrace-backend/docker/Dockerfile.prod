@@ -1,0 +1,41 @@
+# Imagen base con Python 3.9
+FROM python:3.9
+
+# Instalar dependencias del sistema (incluye el cliente PostgreSQL)
+RUN apt-get update && apt-get install -y postgresql-client && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Establecer el directorio de trabajo dentro del contenedor
+WORKDIR /app
+
+# Copiar los archivos de requerimientos
+COPY docker/requirements.txt /app/requirements.txt
+
+# Instalar dependencias de Python
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Crear usuario no-root para seguridad
+RUN groupadd -r django && useradd -r -g django django
+
+# Crear directorios necesarios con permisos correctos
+RUN mkdir -p /app/logs /app/static /app/media && \
+    chmod -R 755 /app/logs /app/static /app/media && \
+    touch /app/logs/django.log && \
+    chmod 644 /app/logs/django.log && \
+    chown -R django:django /app
+
+# Copiar el código fuente del backend
+COPY src /app
+
+# Cambiar ownership de los archivos
+RUN chown -R django:django /app
+
+# Cambiar al usuario django
+USER django
+
+# Exponer el puerto para gunicorn
+EXPOSE 8080
+
+# Comando por defecto (se puede sobrescribir en docker-compose)
+CMD ["gunicorn", "--workers", "3", "--bind", "0.0.0.0:8080", "--access-logfile", "-", "--error-logfile", "-", "cryptotrace_backend.wsgi:application"] 

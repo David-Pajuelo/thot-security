@@ -1,0 +1,44 @@
+# FastAPI y servidor
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+websockets==12.0
+
+# Base de datos y migraciones
+sqlalchemy==2.0.23
+alembic==1.12.1
+psycopg2-binary==2.9.9
+asyncpg==0.29.0
+
+# Autenticación y seguridad
+python-jose[cryptography]==3.3.0
+passlib==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.6
+
+# Validación de datos
+pydantic==2.5.0
+pydantic-settings==2.1.0
+email-validator==2.1.1
+
+# Utilidades
+python-dotenv==1.0.0
+httpx==0.25.2
+redis==4.6.0
+
+# Email
+aiosmtplib==3.0.1
+
+# PDF manipulation
+pypdf==4.0.1
+reportlab==4.0.7
+PyMuPDF==1.23.8
+PyPDF2==3.0.1
+pdfplumber==0.11.7
+
+# Celery para tareas asíncronas
+celery==5.3.4
+celery[redis]==5.3.4
+
+# Desarrollo y testing
+pytest==7.4.3
+pytest-asyncio==0.21.1

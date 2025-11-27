@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Automatización HPS test",
+  "version": "1.0",
+  "permissions": [
+    "scripting",
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://automation.idiaicox.com/form/*",
+    "http://localhost:8001/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Seleccionar persona"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://automation.idiaicox.com/form/*"
+      ],
+      "js": ["content.js"]
+    }
+  ]
+}

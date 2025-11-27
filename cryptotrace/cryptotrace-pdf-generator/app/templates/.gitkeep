@@ -1,0 +1,2 @@
+# Este archivo asegura que el directorio 'templates' se incluya en el control de versiones de Git,
+# incluso si está vacío inicialmente. Aquí irán las plantillas HTML para los PDFs. 

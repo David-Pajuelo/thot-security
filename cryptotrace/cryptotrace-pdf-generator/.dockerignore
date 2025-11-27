@@ -1,0 +1,35 @@
+# Ignorar el entorno virtual si se crea localmente
+venv/
+*.venv/
+ENV/
+env/
+
+# Ignorar archivos de Python compilados y caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignorar archivos de configuración de IDEs
+.vscode/
+.idea/
+
+# Ignorar archivos de sistema operativo
+.DS_Store
+Thumbs.db
+
+# Ignorar logs locales o archivos temporales
+*.log
+*.tmp
+
+# Archivos de Git
+.git
+.gitignore
+
+# Archivos de Docker que no deben ser copiados a la imagen (si estuvieran en subdirectorios)
+# Dockerfile # Usualmente no se copia a sí mismo, pero por si acaso
+
+# Documentación específica del desarrollo que no es necesaria en la imagen
+*.md
+# Excepto si algún .md es parte de la app/documentación que se sirve, lo cual no es común para un microservicio backend.
+# Si README.md o TASK.md estuvieran en `app/` y necesitaran ser copiados, se ajustarían las reglas.
+# Por ahora, los .md en la raíz no se copiarán si se hace `COPY . .`, pero con `COPY ./app ./app` no afecta. 

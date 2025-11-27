@@ -1,0 +1,167 @@
+services:
+  # Proxy reverso con SSL
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: cryptotrace-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - backend_static:/var/www/static:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - cryptotrace-network
+
+  # Frontend Next.js
+  frontend:
+    build:
+      context: ./cryptotrace-frontend
+      dockerfile: Dockerfile
+    container_name: cryptotrace-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=https://cryptotrace.idiaicox.com/api
+      - NEXT_PUBLIC_PROCESSING_URL=https://cryptotrace.idiaicox.com/processing
+      - NEXT_PUBLIC_OCR_URL=https://cryptotrace.idiaicox.com/ocr
+    networks:
+      - cryptotrace-network
+
+  # Backend Django
+  backend:
+    build:
+      context: ./cryptotrace-backend
+      dockerfile: docker/Dockerfile.prod
+    container_name: cryptotrace-backend
+    restart: unless-stopped
+    expose:
+      - "8080"
+    volumes:
+      - ./cryptotrace-backend/src/albaranes/documentos:/app/albaranes/documentos
+      - ./cryptotrace-backend/src/temp_documentos:/app/temp_documentos
+      - ./datos_desarrollo.json:/app/datos_desarrollo.json:ro
+      - backend_static:/app/static
+      - backend_media:/app/media
+    env_file:
+      - ./cryptotrace-backend/.env.prod
+    environment:
+      - DJANGO_SETTINGS_MODULE=cryptotrace_backend.settings_prod
+    depends_on:
+      - db
+      - redis
+    networks:
+      - cryptotrace-network
+    command: ["gunicorn", "--workers", "3", "--bind", "0.0.0.0:8080", "--access-logfile", "-", "--error-logfile", "-", "cryptotrace_backend.wsgi:application"]
+
+  # Servicio de procesamiento
+  processing:
+    build:
+      context: ./cryptotrace-processing
+      dockerfile: Dockerfile
+    container_name: cryptotrace-processing
+    restart: unless-stopped
+    expose:
+      - "5001"
+    volumes:
+      - ./cryptotrace-processing/uploads:/app/uploads
+    env_file:
+      - ./cryptotrace-processing/.env.prod
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - cryptotrace-network
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5001"]
+    environment:
+      - FASTAPI_ROOT_PATH=/processing
+
+  # Servicio OCR
+  ocr:
+    build:
+      context: ./cryptotrace-ocr
+      dockerfile: Dockerfile
+    container_name: cryptotrace-ocr
+    restart: unless-stopped
+    expose:
+      - "8000"
+    env_file:
+      - ./cryptotrace-ocr/.env.prod
+    environment:
+      - PYTHONPATH=/app
+      - TESSERACT_PATH=/usr/bin/tesseract
+    depends_on:
+      - backend
+    networks:
+      - cryptotrace-network
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  # Generador de PDFs
+  pdf-generator:
+    build:
+      context: ./cryptotrace-pdf-generator
+      dockerfile: Dockerfile
+    container_name: cryptotrace-pdf-generator
+    restart: unless-stopped
+    expose:
+      - "5003"
+    volumes:
+      - ./cryptotrace-pdf-generator/app/static:/usr/src/app/app/static:ro
+    networks:
+      - cryptotrace-network
+    command: ["gunicorn", "--workers", "2", "--bind", "0.0.0.0:5003", "app.main:app"]
+
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:15-alpine
+    container_name: cryptotrace-db
+    restart: unless-stopped
+    expose:
+      - "5432"
+    environment:
+      - POSTGRES_DB=${DB_NAME:-cryptotrace_prod}
+      - POSTGRES_USER=${DB_USER:-cryptotrace_user}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-M79Ltg480ROQR6fSP4j3SCosPuu3BpMl4cuKHX6rYD4}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-backup:/backup
+    networks:
+      - cryptotrace-network
+    command: postgres -c 'max_connections=200' -c 'shared_buffers=256MB'
+
+  # Redis para caché y sessions
+  redis:
+    image: redis:7-alpine
+    container_name: cryptotrace-redis
+    restart: unless-stopped
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - cryptotrace-network
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_static:
+    driver: local
+  backend_media:
+    driver: local
+
+networks:
+  cryptotrace-network:
+    driver: bridge 

@@ -1,0 +1,110 @@
+{
+  "documento": {
+    "tipo_documento": "LISTADO DE CONCESIONES",
+    "empresa": "DESCONOCIDA",
+    "nif_empresa": "A79534384",
+    "fecha_documento": "12/09/2025",
+    "expediente_base": "E-25-027334",
+    "estado_general": "APROBADO",
+    "archivo_origen": "E-25-027334-AICOX-0312_25.pdf",
+    "total_personas": 10
+  },
+  "personas": [
+    {
+      "numero": 1,
+      "dni": "51507637B",
+      "grado_especialidad": "R, NS, EU-S, ESA S ...",
+      "fecha_inicio": "12/09/2025",
+      "fecha_fin": "12/09/2030",
+      "expediente": "E-25-027334",
+      "estado": "APROBADO"
+    },
+    {
+      "numero": 2,
+      "dni": "54350067D",
+      "grado_especialidad": "R, NS, EU-S, ESA S ...",
+      "fecha_inicio": "12/09/2025",
+      "fecha_fin": "12/09/2030",
+      "expediente": "E-25-027334",
+      "estado": "APROBADO"
+    },
+    {
+      "numero": 3,
+      "dni": "02761088F",
+      "grado_especialidad": "R, NS, EU-S, ESA S ...",
+      "fecha_inicio": "12/09/2025",
+      "fecha_fin": "12/09/2030",
+      "expediente": "E-25-027334",
+      "estado": "APROBADO"
+    },
+    {
+      "numero": 4,
+      "dni": "73002919E",
+      "grado_especialidad": "R, NS, EU-S, ESA S ...",
+      "fecha_inicio": "12/09/2025",
+      "fecha_fin": "12/09/2030",
+      "expediente": "E-25-027334",
+      "estado": "APROBADO"
+    },
+    {
+      "numero": 5,
+      "dni": "33278831Q",
+      "grado_especialidad": "R, NS, EU-S, ESA S ...",
+      "fecha_inicio": "12/09/2025",
+      "fecha_fin": "12/09/2030",
+      "expediente": "E-25-027334",
+      "estado": "APROBADO"
+    },
+    {
+      "numero": 6,
+      "dni": "52994363V",
+      "grado_especialidad": "R, NS, EU-S, ESA S ...",
+      "fecha_inicio": "12/09/2025",
+      "fecha_fin": "12/09/2030",
+      "expediente": "E-25-027334",
+      "estado": "APROBADO"
+    },
+    {
+      "numero": 7,
+      "dni": "52755324V",
+      "grado_especialidad": "R, NS, EU-S, ESA S ...",
+      "fecha_inicio": "12/09/2025",
+      "fecha_fin": "12/09/2030",
+      "expediente": "E-25-027334",
+      "estado": "APROBADO"
+    },
+    {
+      "numero": 8,
+      "dni": "53504102F",
+      "grado_especialidad": "R, NS, EU-S, ESA S ...",
+      "fecha_inicio": "12/09/2025",
+      "fecha_fin": "12/09/2030",
+      "expediente": "E-25-027334",
+      "estado": "APROBADO"
+    },
+    {
+      "numero": 9,
+      "dni": "50319324Q",
+      "grado_especialidad": "R, NS, EU-S, ESA S (CRIPTO (C))",
+      "fecha_inicio": "12/09/2025",
+      "fecha_fin": "12/09/2030",
+      "expediente": "E-25-027334",
+      "estado": "APROBADO"
+    },
+    {
+      "numero": 10,
+      "dni": "53911223M",
+      "grado_especialidad": "R, NS, EU-S, ESA S ...",
+      "fecha_inicio": "12/09/2025",
+      "fecha_fin": "12/09/2030",
+      "expediente": "E-25-027334",
+      "estado": "APROBADO"
+    }
+  ],
+  "resumen": {
+    "total_aprobadas": 10,
+    "total_rechazadas": 0,
+    "empresa": "DESCONOCIDA",
+    "fecha_procesamiento": "2025-10-10T11:19:31.198649"
+  }
+}

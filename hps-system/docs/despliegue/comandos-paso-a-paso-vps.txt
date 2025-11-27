@@ -1,0 +1,133 @@
+# Comandos para ejecutar en la VPS - Paso a Paso
+# Copia y pega estos comandos UNO POR UNO en tu sesión SSH
+
+# =============================================================================
+# PASO 1: Verificar sistema y esperar a que termine la instalación automática
+# =============================================================================
+
+# Verificar procesos de apt
+ps aux | grep apt
+
+# Si hay procesos de apt corriendo, espera unos minutos y luego continúa
+
+# =============================================================================
+# PASO 2: Actualizar sistema
+# =============================================================================
+
+apt update && apt upgrade -y
+
+# =============================================================================
+# PASO 3: Instalar herramientas básicas
+# =============================================================================
+
+apt install -y git curl wget nano ufw
+
+# =============================================================================
+# PASO 4: Configurar firewall
+# =============================================================================
+
+ufw --force enable
+ufw allow 22/tcp comment 'SSH'
+ufw allow 80/tcp comment 'HTTP'
+ufw allow 443/tcp comment 'HTTPS'
+ufw status
+
+# =============================================================================
+# PASO 5: Instalar Docker
+# =============================================================================
+
+# Instalar dependencias
+apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
+
+# Agregar clave GPG de Docker
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+
+# Agregar repositorio de Docker
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Instalar Docker
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+# Verificar instalación
+docker --version
+docker compose version
+
+# =============================================================================
+# PASO 6: Instalar Nginx
+# =============================================================================
+
+apt install -y nginx
+systemctl enable nginx
+systemctl start nginx
+systemctl status nginx
+
+# =============================================================================
+# PASO 7: Instalar Certbot
+# =============================================================================
+
+apt install -y certbot python3-certbot-nginx
+
+# =============================================================================
+# PASO 8: Clonar repositorio
+# =============================================================================
+
+mkdir -p /opt
+cd /opt
+git clone https://github.com/calonsoaicox/hps-system.git hps-system
+cd hps-system
+
+# Verificar que se clonó
+ls -la
+
+# =============================================================================
+# PASO 9: Generar claves seguras
+# =============================================================================
+
+# Generar JWT_SECRET_KEY
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# Guarda esta clave, la necesitarás para el .env
+
+# Generar POSTGRES_PASSWORD
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+
+# Guarda esta clave también
+
+# =============================================================================
+# PASO 10: Crear archivo .env
+# =============================================================================
+
+# Copiar archivo de ejemplo
+cp env.example .env
+
+# Editar archivo .env
+nano .env
+
+# En nano:
+# - Busca las líneas que necesitas cambiar
+# - Edítalas con tus valores
+# - Guarda: Ctrl+X, luego Y, luego Enter
+
+# =============================================================================
+# PASO 11: Construir y levantar servicios
+# =============================================================================
+
+cd /opt/hps-system
+
+# Construir imágenes (esto puede tardar 10-15 minutos)
+docker compose build
+
+# Levantar servicios
+docker compose up -d
+
+# Ver estado
+docker compose ps
+
+# Ver logs
+docker compose logs -f
+
+# (Presiona Ctrl+C para salir de los logs)
+

@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pandas
+openpyxl
+pytesseract
+opencv-python-headless
+numpy
+python-multipart
+requests
+aiofiles  # Necesario para la subida de archivos
+httpx      # Cliente HTTP asíncrono para comunicarse con el backend

@@ -1,0 +1,240 @@
+services:
+  backend:
+    build:
+      context: ./cryptotrace-backend
+      dockerfile: docker/Dockerfile
+    container_name: cryptotrace-backend
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./cryptotrace-backend/src:/app
+    env_file:
+      - ./cryptotrace-backend/.env
+    environment:
+      - DEBUG=True
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/cryptotrace
+      - DB_NAME=cryptotrace
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=db
+      - DB_PORT=5432
+      # Redis y Celery
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # Email (SMTP e IMAP) - Las variables se cargan desde .env
+      # Si están en .env, se usarán desde ahí automáticamente
+    dns:
+      - 8.8.8.8  # 🔥 DNS público de Google
+      - 1.1.1.1  # 🔥 DNS de Cloudflare
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8080"]
+
+  processing:
+    build:
+      context: ./cryptotrace-processing
+      dockerfile: Dockerfile
+    container_name: cryptotrace-processing
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./cryptotrace-processing:/app
+    env_file:
+      - ./cryptotrace-processing/.env
+    depends_on:
+      - backend
+    networks:
+      - default
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5001", "--reload"]
+
+  ocr:
+    build:
+      context: ./cryptotrace-ocr
+      dockerfile: Dockerfile
+    container_name: cryptotrace-ocr
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./cryptotrace-ocr/app:/app/app
+      - ./cryptotrace-ocr/.env:/app/.env
+    environment:
+      - PYTHONPATH=/app
+      - TESSERACT_PATH=/usr/bin/tesseract
+    depends_on:
+      - backend
+    networks:
+      - default
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  db:
+    image: postgres:15
+    container_name: cryptotrace-db
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: cryptotrace
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cryptotrace"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: cryptotrace-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build: 
+      context: ./cryptotrace-frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:8080/api
+      - NEXT_PUBLIC_PROCESSING_URL=http://localhost:5001
+      - NEXT_PUBLIC_OCR_URL=http://localhost:8002
+      - WATCHPACK_POLLING=true
+    volumes:
+      - ./cryptotrace-frontend:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+    depends_on:
+      - backend
+      - processing
+      - ocr
+    networks:
+      - default
+
+  pdf-generator:
+    build:
+      context: ./cryptotrace-pdf-generator
+      dockerfile: Dockerfile
+    container_name: cryptotrace-pdf-generator
+    ports:
+      - "5003:5003"
+    volumes:
+      - ./cryptotrace-pdf-generator/app:/usr/src/app/app
+    command: ["gunicorn", "--workers", "2", "--bind", "0.0.0.0:5003", "--reload", "app.main:app"]
+    networks:
+      - default
+    # depends_on:
+      # - backend 
+
+  celery-worker:
+    build:
+      context: ./cryptotrace-backend
+      dockerfile: docker/Dockerfile
+    container_name: cryptotrace-celery-worker
+    restart: unless-stopped
+    command: celery -A cryptotrace_backend worker --loglevel=info --queues=email,analysis,default
+    volumes:
+      - ./cryptotrace-backend/src:/app
+    env_file:
+      - ./cryptotrace-backend/.env
+    environment:
+      - DEBUG=True
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/cryptotrace
+      - DB_NAME=cryptotrace
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=db
+      - DB_PORT=5432
+      # Redis y Celery
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_TIMEZONE=UTC
+      # Email (SMTP e IMAP) - Las variables se cargan desde .env
+      # Estas variables se pasan explícitamente para asegurar que estén disponibles
+      # Si están en .env, se usarán desde ahí; si no, se pueden definir aquí
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - default
+
+  celery-beat:
+    build:
+      context: ./cryptotrace-backend
+      dockerfile: docker/Dockerfile
+    container_name: cryptotrace-celery-beat
+    restart: unless-stopped
+    command: celery -A cryptotrace_backend beat --loglevel=info
+    volumes:
+      - ./cryptotrace-backend/src:/app
+    env_file:
+      - ./cryptotrace-backend/.env
+    environment:
+      - DEBUG=True
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/cryptotrace
+      - DB_NAME=cryptotrace
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=db
+      - DB_PORT=5432
+      # Redis y Celery
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_TIMEZONE=UTC
+      # Email (SMTP e IMAP) - Las variables se cargan desde .env
+      # Estas variables se pasan explícitamente para asegurar que estén disponibles
+      # Si están en .env, se usarán desde ahí; si no, se pueden definir aquí
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - default
+
+volumes:
+  postgres_data:
+  redis_data:
+  frontend_node_modules:
+  frontend_next:
+
+networks:
+  default:
+    name: cryptotrace_default
+    driver: bridge

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>HPS System - Gestión de Solicitudes</title>
+  <script type="module" src="popup.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 16px;
+      min-width: 300px;
+      margin: 0;
+    }
+    
+    .tabs {
+      display: flex;
+      border-bottom: 2px solid #e5e7eb;
+      margin-bottom: 16px;
+    }
+    
+    .tab {
+      flex: 1;
+      padding: 8px 12px;
+      background: #f3f4f6;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      border-radius: 6px 6px 0 0;
+      margin-right: 4px;
+    }
+    
+    .tab.active {
+      background: #3b82f6;
+      color: white;
+    }
+    
+    .tab-content {
+      display: none;
+    }
+    
+    .tab-content.active {
+      display: block;
+    }
+    
+    .form-group {
+      margin-bottom: 16px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+      color: #374151;
+    }
+    
+    select {
+      width: 100%;
+      padding: 8px;
+      font-size: 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: white;
+    }
+    
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    
+    button {
+      flex: 1;
+      padding: 10px;
+      font-size: 14px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    
+    .btn-primary {
+      background: #3b82f6;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #2563eb;
+    }
+    
+    .btn-secondary {
+      background: #6b7280;
+      color: white;
+    }
+    
+    .btn-secondary:hover {
+      background: #4b5563;
+    }
+    
+    .btn-success {
+      background: #10b981;
+      color: white;
+    }
+    
+    .btn-success:hover {
+      background: #059669;
+    }
+    
+    .loading {
+      text-align: center;
+      color: #6b7280;
+      font-style: italic;
+    }
+    
+    .error {
+      color: #ef4444;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Pestañas -->
+  <div class="tabs">
+    <button class="tab active" data-tab="solicitudes">Solicitudes</button>
+    <button class="tab" data-tab="traslados">Traspasos</button>
+  </div>
+
+  <!-- Contenido de Solicitudes -->
+  <div id="solicitudes-content" class="tab-content active">
+    <div class="form-group">
+      <label for="solicitudesSelect">Selecciona una persona:</label>
+      <select id="solicitudesSelect">
+        <option>Cargando...</option>
+      </select>
+    </div>
+    
+    <div class="button-group">
+      <button id="rellenarBtn" class="btn-primary">Rellenar formulario</button>
+      <button id="solicitudEnviadaBtn" class="btn-success">Solicitud enviada</button>
+    </div>
+  </div>
+
+  <!-- Contenido de Traslados -->
+  <div id="traslados-content" class="tab-content">
+    <div class="form-group">
+      <label for="trasladosSelect">Selecciona una persona:</label>
+      <select id="trasladosSelect">
+        <option>Cargando...</option>
+      </select>
+    </div>
+    
+    <div class="button-group">
+      <button id="descargarPdfBtn" class="btn-primary">Descargar PDF</button>
+      <button id="trasladoEnviadoBtn" class="btn-success">Traspaso enviado</button>
+    </div>
+  </div>
+
+</body>
+</html>

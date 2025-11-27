@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "react-beforeunload": "^2.6.0",
+    "tailwind-merge": "^3.3.0"
+  },
+  "devDependencies": {
+    "@types/react-beforeunload": "^2.1.5"
+  }
+}

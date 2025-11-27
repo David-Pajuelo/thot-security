@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bienvenido a CryptoTrace</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background-color: #2563eb;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .content {
+            padding: 30px;
+        }
+        .credentials-box {
+            background-color: #f8fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .credential-item {
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        .credential-label {
+            font-weight: bold;
+            color: #374151;
+        }
+        .credential-value {
+            font-family: 'Courier New', monospace;
+            background-color: #e5e7eb;
+            padding: 5px 8px;
+            border-radius: 4px;
+            color: #1f2937;
+        }
+        .button {
+            display: inline-block;
+            background-color: #2563eb;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        .warning {
+            background-color: #fef3cd;
+            border: 1px solid #fbbf24;
+            color: #92400e;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .footer {
+            background-color: #f3f4f6;
+            padding: 20px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔐 Bienvenido a CryptoTrace</h1>
+            <p>Sistema de Gestión y Trazabilidad de Productos</p>
+        </div>
+        
+        <div class="content">
+            <h2>¡Hola{% if first_name %} {{ first_name }}{% endif %}!</h2>
+            
+            <p>Se ha creado tu cuenta de usuario en <strong>CryptoTrace</strong>. A continuación encontrarás tus credenciales de acceso:</p>
+            
+            <div class="credentials-box">
+                <div class="credential-item">
+                    <span class="credential-label">🌐 URL del Sistema:</span><br>
+                    <a href="{{ frontend_url }}" class="credential-value">{{ frontend_url }}</a>
+                </div>
+                
+                <div class="credential-item">
+                    <span class="credential-label">👤 Usuario:</span><br>
+                    <span class="credential-value">{{ username }}</span>
+                </div>
+                
+                <div class="credential-item">
+                    <span class="credential-label">🔑 Contraseña Temporal:</span><br>
+                    <span class="credential-value">{{ password }}</span>
+                </div>
+            </div>
+            
+            <div class="warning">
+                <strong>⚠️ Importante:</strong> Por seguridad, deberás cambiar tu contraseña en el primer acceso al sistema.
+            </div>
+            
+            <div style="text-align: center;">
+                <a href="{{ frontend_url }}" class="button">🚀 Acceder al Sistema</a>
+            </div>
+            
+            <h3>📋 Instrucciones de Primer Acceso:</h3>
+            <ol>
+                <li>Haz clic en el botón "Acceder al Sistema" o copia la URL en tu navegador</li>
+                <li>Introduce tu usuario y contraseña temporal</li>
+                <li>El sistema te solicitará cambiar tu contraseña</li>
+                <li>Crea una nueva contraseña segura (mínimo 8 caracteres)</li>
+                <li>¡Ya podrás usar todas las funcionalidades!</li>
+            </ol>
+            
+            <p>Si tienes alguna duda o problema, contacta con el administrador del sistema.</p>
+        </div>
+        
+        <div class="footer">
+            <p>© 2025 CryptoTrace - Gestión y Trazabilidad de Productos</p>
+            <p>Este mensaje fue enviado automáticamente. No responder a este email.</p>
+        </div>
+    </div>
+</body>
+</html> 

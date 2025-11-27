@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>AC21</title>
+    <style>
+        /* Estilos específicos para impresión */
+        @media print {
+            body {
+                margin: 0 !important;
+                padding: 0 !important;
+                background-color: white !important;
+                -webkit-print-color-adjust: exact !important;
+                color-adjust: exact !important;
+            }
+            .container {
+                border: 0.25px solid #000 !important;
+                margin: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                box-shadow: none !important;
+                page-break-inside: avoid !important;
+            }
+            
+            /* Tabla de productos en impresión */
+            .productos-table {
+                border-collapse: separate !important;
+                border-spacing: 0 !important;
+            }
+            .productos-table thead tr:first-child th {
+                border-top: 0.25px solid #000 !important;
+                border-bottom: 0.25px solid #000 !important;
+                border-right: 0.25px solid #000 !important;
+            }
+            .productos-table th,
+            .productos-table td {
+                border-right: 0.25px solid #000 !important;
+                border-bottom: 0.25px solid #000 !important;
+            }
+            .productos-table th:first-child,
+            .productos-table td:first-child {
+                border-left: none !important;
+            }
+            .productos-table th.col-observaciones,
+            .productos-table td.col-observaciones {
+                border-right: none !important;
+            }
+            .productos-table th.col-serie:nth-child(5),
+            .productos-table td.col-serie:nth-child(5) {
+                border-right: 0.25px solid #000 !important;
+            }
+            .productos-table thead tr:first-child th:last-child {
+                border-right: none !important;
+            }
+            
+            /* Tabla de firmas en impresión */
+            .firmas-table {
+                border-collapse: separate !important;
+                border-spacing: 0 !important;
+            }
+            .firma-cell {
+                border-bottom: 0.25px solid #000 !important;
+                border-right: 0.25px solid #000 !important;
+            }
+            .firmas-table tr:first-child .firma-cell {
+                border-top: 0.25px solid #000 !important;
+            }
+            .firma-cell:last-child {
+                border-right: none !important;
+            }
+            
+            /* Otros elementos con bordes */
+            .header-checkboxes {
+                border-bottom: 0.25px solid #000 !important;
+            }
+            .left-column {
+                border-right: 0.25px solid #000 !important;
+            }
+            .seccion-de {
+                border-bottom: 0.25px solid #000 !important;
+            }
+            .checkbox-square {
+                border: 0.25px solid #000 !important;
+            }
+            .footer {
+                border-top: 0.25px solid #000 !important;
+            }
+            
+            @page {
+                margin: 0.5cm 0.6cm 0.5cm 0.6cm;
+                size: A4 portrait;
+            }
+            .page-break {
+                page-break-before: always !important;
+                height: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                background: none !important;
+                visibility: hidden !important;
+            }
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 10px;
+            margin: 0;
+            padding: 15px;
+            line-height: 1.1;
+            background-color: #eee;
+            min-height: 100vh;
+        }
+        .container {
+            border: 0.25px solid #000;
+            padding: 0;
+            width: 21cm;
+            min-height: 29.7cm;
+            height: auto;
+            max-width: 21cm;
+            margin: 20px auto;
+            box-sizing: border-box;
+            background-color: #fff;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .page-break {
+            height: 30px;
+            background-color: #f0f0f0;
+            margin: 20px 0;
+            border: 2px dashed #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: #888;
+            font-weight: bold;
+        }
+        .page-break::before {
+            content: "— SALTO DE PÁGINA —";
+        }
+
+        /* Header con checkboxes de tipo de transacción */
+        .header-checkboxes {
+            border-bottom: 0.25px solid #000;
+            padding: 6px 12px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 25px;
+            flex-wrap: wrap;
+            font-size: 10px;
+            font-weight: bold;
+            position: relative;
+        }
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .checkbox-square {
+            width: 12px;
+            height: 12px;
+            border: 0.25px solid #000;
+            display: inline-block;
+            text-align: center;
+            line-height: 12px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        /* Layout principal */
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            height: 200px;
+        }
+
+        /* Columna izquierda - Empresas */
+        .left-column {
+            border-right: 0.25px solid #000;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+
+        /* Sección DE (empresa origen) */
+        .seccion-de {
+            padding: 4px;
+            border-bottom: 0.25px solid #000;
+            display: grid;
+            grid-template-columns: 15px 1fr;
+            gap: 4px;
+            height: 100px;
+            position: relative;
+        }
+        .numero-seccion {
+            font-weight: bold;
+            font-size: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            line-height: 1;
+            writing-mode: initial;
+        }
+        .numero-esquina {
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            font-weight: normal;
+            font-size: 8px;
+        }
+        .empresa-content {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding-left: 20px;
+        }
+        .empresa-header {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 20px;
+        }
+        .empresa-de-label {
+            font-weight: bold;
+            font-size: 11px;
+        }
+        .empresa-odmc {
+            font-size: 9px;
+            font-weight: bold;
+        }
+        .empresa-odmc.sin-codigo {
+            margin-right: 45px;
+        }
+        .empresa-nombre {
+            font-weight: bold;
+            font-size: 14px;
+            margin: 2px 0;
+        }
+        .empresa-direccion {
+            font-size: 10px;
+            line-height: 1.1;
+        }
+
+        /* Sección PARA (empresa destino) */
+        .seccion-para {
+            padding: 4px;
+            display: grid;
+            grid-template-columns: 15px 1fr;
+            gap: 4px;
+            height: 80px;
+            position: relative;
+        }
+
+        /* Columna derecha - Datos */
+        .right-column {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Datos de registro superiores */
+        .datos-superiores {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            border-bottom: 0.25px solid #000;
+        }
+        .dato-item {
+            border-right: 0.25px solid #000;
+            padding: 4px;
+            height: 35px;
+            display: flex;
+            flex-direction: column;
+            position: relative; 
+        }
+        .dato-item:last-child {
+            border-right: none;
+        }
+        .dato-numero {
+            font-weight: normal;
+            font-size: 9px;
+            margin-bottom: 2px;
+        }
+        .dato-label {
+            font-size: 7px;
+            margin-bottom: 1px;
+            text-align: center;
+        }
+        .dato-value {
+            font-weight: bold;
+            font-size: 14px;
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Sección códigos de contabilidad */
+        .codigos-section {
+            padding: 4px;
+            height: 100px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .codigos-numero {
+            font-weight: normal;
+            font-size: 9px;
+            margin-bottom: 2px;
+        }
+        .codigos-title {
+            font-weight: bold;
+            font-size: 9px;
+            text-align: center;
+            margin-bottom: 4px;
+        }
+        .codigos-content {
+            font-size: 8px;
+            line-height: 1.3;
+            padding:10px;
+        }
+
+        /* Tabla de productos */
+        .productos-section {
+        }
+        .productos-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 8px;
+            border: none;
+        }
+        .productos-table tr {
+            height: 20px;
+        }
+        .productos-table thead tr {
+            height: 16px;
+        }
+        .productos-table th,
+        .productos-table td {
+            border-right: 0.25px solid #000;
+            border-bottom: 0.25px solid #000;
+            padding: 1px 2px;
+            text-align: center;
+            vertical-align: middle;
+            box-sizing: border-box;
+            min-height: 20px;
+            height: 20px;
+        }
+        .productos-table th {
+            height: 16px;
+            min-height: 16px;
+        }
+        .productos-table th.col-observaciones,
+        .productos-table td.col-observaciones {
+            border-right: none;
+        }
+        .productos-table th.col-serie:nth-child(5),
+        .productos-table td.col-serie:nth-child(5) {
+            border-right: 0.25px solid #000;
+        }
+        .productos-table thead tr:first-child th:last-child {
+            border-right: none;
+        }
+        .productos-table th:first-child,
+        .productos-table td:first-child {
+            border-left: none;
+        }
+        .productos-table thead tr:first-child th {
+            border-top: 0.25px solid #000;
+        }
+        .productos-table th {
+            background-color: transparent;
+            font-weight: bold;
+            font-size: 7px;
+            position: relative;
+            text-align: center !important;
+        }
+        .productos-table td {
+            font-size: 9px;
+        }
+        .productos-table .numero-esquina-tabla {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            font-size: 8px;
+            font-weight: normal;
+        }
+        .productos-table .col-num { width: 25px; }
+        .productos-table .col-titulo { width: auto; text-align: left; }
+        .productos-table .col-cantidad { width: 35px; text-align: center; }
+        .productos-table .col-serie { width: 65px; text-align: center; }
+        .productos-table .col-cc { width: 25px; text-align: center; }
+        .productos-table .col-observaciones { width: auto; text-align: left; }
+
+        /* Línea ULTIMA LINEA */
+        .ultima-linea {
+            text-align: center;
+            padding: 4px 0;
+            font-size: 9px;
+        }
+        .ultima-linea-celda {
+            text-align: center;
+            padding: 4px 0;
+            font-size: 9px;
+            border-top: 0.25px solid #000 !important;
+            border-bottom: 0.25px solid #000 !important;
+            border-left: none !important;
+            border-right: none !important;
+        }
+
+        /* Sección accesorios y equipos */
+        .accesorios-equipos {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            min-height: 120px;
+        }
+        .accesorios-col {
+            padding: 12px;
+        }
+        .equipos-col {
+            padding: 12px;
+        }
+        .acc-eq-title {
+            font-weight: bold;
+            font-size: 11px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .acc-eq-table {
+            width: 100%;
+            font-size: 8px;
+        }
+        .accesorios-table, .equipos-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            border: none;
+        }
+        .accesorios-table td, .equipos-table td {
+            border: none;
+            padding: 1px 8px;
+            font-size: 9px;
+            vertical-align: middle;
+        }
+        .acc-columna-izq {
+            width: 15%;
+        }
+        .acc-descripcion {
+            width: 50%;
+            text-align: left;
+        }
+        .acc-cantidad {
+            width: 20%;
+            text-align: right;
+        }
+        .acc-columna-der {
+            width: 15%;
+        }
+        .equipo-codigo {
+            width: 100%;
+            text-align: center;
+        }
+
+        /* Secciones COPIA */
+        .copias-section {
+            border-bottom: 0.25px solid #000;
+            padding: 8px;
+        }
+        .copias-container {
+            border: 0.25px solid #000;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            width: 30%;
+        }
+        .copia-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 9px;
+        }
+
+        /* Material ha sido - Nueva estructura */
+        .material-section {
+        }
+        
+        /* Fila 1: Celda 14 a todo ancho - todo en una línea */
+        .material-row-14 {
+            border-bottom: 0.25px solid #000;
+            padding: 4px 6px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            min-height: 25px;
+        }
+        .material-checkboxes-14 {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        
+        /* Fila 2: Celda 15 a la izquierda, celda 16 a la derecha */
+        .material-row-15-16 {
+            display: flex;
+            min-height: 25px;
+        }
+        .material-15 {
+            flex: 1;
+            border-right: 0.25px solid #000;
+            padding: 6px;
+            display: flex;
+            align-items: center;
+        }
+        .material-16 {
+            flex: 1;
+            padding: 6px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .material-checkboxes-16 {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        /* Estilos comunes */
+        .material-title {
+            font-weight: bold;
+            font-size: 8px;
+        }
+        .material-option {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 8px;
+        }
+
+        /* Tabla de firmas */
+        .firmas-section {
+        }
+        .firmas-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 8px;
+            border: none;
+        }
+        .firma-cell {
+            border-bottom: 0.25px solid #000;
+            border-right: 0.25px solid #000;
+            padding: 6px 8px;
+            text-align: left;
+            vertical-align: middle;
+            box-sizing: border-box;
+            width: 25%;
+        }
+        .firmas-table tr:first-child .firma-cell {
+            border-top: 0.25px solid #000;
+        }
+        .firma-cell:last-child {
+            border-right: none;
+        }
+        .firma-label {
+            font-size: 7px;
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+        .firma-area {
+            min-height: 30px;
+            font-size: 12px;
+            font-weight: bold;
+            padding-top: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Observaciones */
+        .observaciones-section {
+            padding: 8px;
+            min-height: 35px;
+        }
+        .obs-title {
+            font-weight: bold;
+            font-size: 9px;
+            margin-bottom: 8px;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: auto;
+            text-align: right;
+            padding: 10px 15px;
+            font-size: 7px;
+            border-top: 0.25px solid #000;
+        }
+
+        /* Marca de agua CONFIDENCIAL */
+        .watermark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-15deg);
+            font-size: 48px;
+            color: rgba(255, 0, 0, 0.2);
+            font-weight: bold;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* Estilos para impresión */
+        @page {
+            size: A4;
+            margin: 0.5cm 0.6cm;
+        }
+        
+        @media print {
+            body { 
+                margin: 0; 
+                padding: 0; 
+                background: white;
+                -webkit-print-color-adjust: exact;
+                color-adjust: exact;
+            }
+            .container { 
+                border: 0.25px solid #000 !important; 
+                width: 100%; 
+                height: auto;
+                min-height: 95vh;
+                page-break-inside: avoid;
+                box-sizing: border-box;
+            }
+            .watermark { display: none; }
+            
+            /* Evitar saltos de página en secciones críticas */
+            .main-content,
+            .productos-section,
+            .accesorios-equipos,
+            .material-section,
+            .firmas-section {
+                page-break-inside: avoid;
+            }
+            
+            /* Forzar salto de página entre páginas del documento */
+            .page-break {
+                page-break-before: always;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+
+        <!-- 1. Header con checkboxes de tipo de transacción -->
+        <div class="header-checkboxes">
+            <div class="numero-esquina">1.</div>
+                <div class="checkbox-item">
+                <span class="checkbox-square">{% if tipo_transaccion == "TRANSFERENCIA" %}X{% endif %}</span>
+                <span>TRANSFERENCIA</span>
+                </div>
+                <div class="checkbox-item">
+                <span class="checkbox-square">{% if tipo_transaccion == "INVENTARIO" %}X{% endif %}</span>
+                <span>INVENTARIO</span>
+                </div>
+                <div class="checkbox-item">
+                <span class="checkbox-square">{% if tipo_transaccion == "DESTRUCCION" %}X{% endif %}</span>
+                <span>DESTRUCCIÓN</span>
+                </div>
+                <div class="checkbox-item">
+                <span class="checkbox-square">{% if tipo_transaccion == "RECIBO_MANO" %}X{% endif %}</span>
+                <span>RECIBO EN MANO</span>
+                </div>
+                <div class="checkbox-item">
+                <span class="checkbox-square">{% if tipo_transaccion == "OTRO" %}X{% endif %}</span>
+                <span>OTRO (Especificar)</span>
+            </div>
+                        </div>
+
+        <!-- Layout principal -->
+        <div class="main-content">
+            <!-- Columna izquierda - Empresas -->
+            <div class="left-column">
+                <!-- 2. Sección DE -->
+                <div class="seccion-de">
+                    <div class="numero-esquina">2.</div>
+                    <div class="numero-seccion">
+                        <span>D</span>
+                        <span>E</span>
+                    </div>
+                    <div class="empresa-content">
+                        <div class="empresa-header">
+                            <div class="empresa-odmc{% if not empresa_origen.codigo_odmc and not 'EMAD-004' %} sin-codigo{% endif %}">ODMC Nº.{% if empresa_origen.codigo_odmc %} {{ empresa_origen.codigo_odmc }}{% elif 'EMAD-004' %} EMAD-004{% endif %}</div>
+                        </div>
+                                                 <div class="empresa-nombre">{{ empresa_origen.nombre | default('EMAD') }}</div>
+                         <div class="empresa-direccion">
+                             {{ empresa_origen.direccion | default('Estado Mayor de la Defensa') }}<br>
+                             {{ empresa_origen.localidad_provincia_cp | default('C/ Vitruvio, 1') }}<br>
+                             28071 – Madrid
+                            </div>
+                    </div>
+                </div>
+
+                <!-- 7. Sección PARA -->
+                <div class="seccion-para">
+                    <div class="numero-esquina">7.</div>
+                    <div class="numero-seccion">
+                        <span>P</span>
+                        <span>A</span>
+                        <span>R</span>
+                        <span>A</span>
+                        </div>
+                    <div class="empresa-content">
+                        <div class="empresa-header">
+                            <div class="empresa-odmc{% if not empresa_destino.codigo_odmc %} sin-codigo{% endif %}">ODMC Nº.{% if empresa_destino.codigo_odmc %} {{ empresa_destino.codigo_odmc }}{% endif %}</div>
+                        </div>
+                        <div class="empresa-nombre">{{ empresa_destino.nombre | default('SR. CRIPTOCUSTODIO AICOX') }}</div>
+                        <div class="empresa-direccion">
+                            {{ empresa_destino.direccion | default('') }}<br>
+                            {{ empresa_destino.localidad_provincia_cp | default('') }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Columna derecha - Datos -->
+            <div class="right-column">
+                <!-- Datos superiores -->
+                <div class="datos-superiores">
+                    <!-- 3. Fecha del informe -->
+                    <div class="dato-item">
+                        <div class="numero-esquina">3.</div>
+                        <div class="dato-label">FECHA DEL INFORME (Año, Mes, Día)</div>
+                        <div class="dato-value">{{ fecha_informe | default('2024-11-22') }}</div>
+                    </div>
+                    <!-- 4. Nº registro de salida -->
+                    <div class="dato-item">
+                        <div class="numero-esquina">4.</div>
+                        <div class="dato-label">Nº REGISTRO DE SALIDA</div>
+                        <div class="dato-value">{{ numero_registro_salida | default('NA-S-24-365') }}</div>
+                    </div>
+                </div>
+                <div class="datos-superiores">
+                    <!-- 5. Fecha de transacción -->
+                    <div class="dato-item">
+                        <div class="numero-esquina">5.</div>
+                        <div class="dato-label">FECHA DE TRANSACCIÓN (Año, Mes, Día)</div>
+                        <div class="dato-value">{{ fecha_transaccion_dma | default('') }}</div>
+                    </div>
+                    <!-- 6. Nº registro de entrada -->
+                    <div class="dato-item">
+                        <div class="numero-esquina">6.</div>
+                        <div class="dato-label">Nº REGISTRO DE ENTRADA</div>
+                        <div class="dato-value">{{ numero_registro_entrada | default('') }}</div>
+                    </div>
+                </div>
+                
+                <!-- 8. Códigos de contabilidad -->
+                <div class="codigos-section">
+                    <div class="numero-esquina">8.</div>
+                    <div class="codigos-title">CÓDIGOS DE CONTABILIDAD (CC)</div>
+                    <div class="codigos-content">
+                        1. Contabilizable por número de serie.<br>
+                        2. Contabilizable por cantidad.<br>
+                        3. Acuse de recibo inicial. Puede ser controlado según instrucciones particulares del órgano correspondiente.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 9-13. Tabla de productos -->
+        <div class="productos-section">
+                <table class="productos-table">
+                    <thead>
+                        <tr>
+                        <th rowspan="2" colspan="2" class="col-titulo">
+                            <div class="numero-esquina-tabla">9.</div>
+                            TÍTULO CORTO / EDICIÓN
+                        </th>
+                        <th rowspan="2" class="col-cantidad">
+                            <div class="numero-esquina-tabla">10.</div>
+                            CANTIDAD
+                        </th>
+                        <th colspan="2">
+                            <div class="numero-esquina-tabla">11.</div>
+                            NÚMERO DE SERIE
+                        </th>
+                        <th rowspan="2" class="col-cc">
+                            <div class="numero-esquina-tabla">12.</div>
+                            CC
+                        </th>
+                        <th rowspan="2" class="col-observaciones">
+                            <div class="numero-esquina-tabla">13.</div>
+                            OBSERVACIONES
+                        </th>
+                    </tr>
+                    <tr>
+                        <th class="col-serie">INICIO</th>
+                        <th class="col-serie">FIN</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% set num_productos = lineas_producto|length if lineas_producto else 0 %}
+                    {% for i in range(18) %}
+                    <tr>
+                        {% if i < num_productos %}
+                            <td class="col-num">{{ i + 1 }}.</td>
+                            <td class="col-titulo">{{ lineas_producto[i].codigo_producto }}</td>
+                            <td class="col-cantidad">{{ lineas_producto[i].cantidad }}</td>
+                            <td class="col-serie">{{ lineas_producto[i].numero_serie }}</td>
+                            <td class="col-serie">{{ lineas_producto[i].numero_serie }}</td>
+                            <td class="col-cc">1</td>
+                            <td class="col-observaciones">{{ lineas_producto[i].observaciones | default('') }}</td>
+                        {% elif i == num_productos %}
+                            <!-- Línea ULTIMA LINEA después del último producto -->
+                            <td colspan="7" class="ultima-linea-celda">
+                                /////////////////////////////////////// ULTIMA LINEA ///////////////////////////////////////
+                            </td>
+                        {% else %}
+                            <td class="col-num"></td>
+                            <td class="col-titulo"></td>
+                            <td class="col-cantidad"></td>
+                            <td class="col-serie"></td>
+                            <td class="col-serie"></td>
+                            <td class="col-cc"></td>
+                            <td class="col-observaciones"></td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+        <!-- Accesorios y Equipos de Prueba -->
+        <div class="accesorios-equipos">
+            <div class="accesorios-col">
+                <div class="acc-eq-title">ACCESORIOS ENTREGADOS CON CADA EQUIPO:</div>
+                <div class="acc-eq-table">
+                    <table class="accesorios-table">
+                        {% if accesorios and accesorios|length > 0 %}
+                            {% for accesorio in accesorios %}
+                            <tr>
+                                <td class="acc-columna-izq"></td>
+                                <td class="acc-descripcion">{{ accesorio.descripcion }}</td>
+                                <td class="acc-cantidad">{{ accesorio.cantidad }}</td>
+                                <td class="acc-columna-der"></td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td class="acc-columna-izq"></td>
+                                <td class="acc-descripcion">CABLE ALIMENTACION</td>
+                                <td class="acc-cantidad">1</td>
+                                <td class="acc-columna-der"></td>
+                            </tr>
+                            <tr>
+                                <td class="acc-columna-izq"></td>
+                                <td class="acc-descripcion">FUENTE DE ALIMENTACION</td>
+                                <td class="acc-cantidad">1</td>
+                                <td class="acc-columna-der"></td>
+                            </tr>
+                            <tr>
+                                <td class="acc-columna-izq"></td>
+                                <td class="acc-descripcion">CABLE CONSOLA</td>
+                                <td class="acc-cantidad">1</td>
+                                <td class="acc-columna-der"></td>
+                            </tr>
+                            <tr>
+                                <td class="acc-columna-izq"></td>
+                                <td class="acc-descripcion">MANUAL USUARIO</td>
+                                <td class="acc-cantidad">1</td>
+                                <td class="acc-columna-der"></td>
+                            </tr>
+                            <tr>
+                                <td class="acc-columna-izq"></td>
+                                <td class="acc-descripcion">BANDEJA</td>
+                                <td class="acc-cantidad">1</td>
+                                <td class="acc-columna-der"></td>
+                            </tr>
+                            <tr>
+                                <td class="acc-columna-izq"></td>
+                                <td class="acc-descripcion">SFP</td>
+                                <td class="acc-cantidad">2</td>
+                                <td class="acc-columna-der"></td>
+                            </tr>
+                        {% endif %}
+                    </table>
+                </div>
+            </div>
+            <div class="equipos-col">
+                <div class="acc-eq-title">EQUIPOS PRUEBAS AICOX:</div>
+                <div class="acc-eq-table">
+                    <table class="equipos-table">
+                        {% if equipos_prueba and equipos_prueba|length > 0 %}
+                            {% for equipo in equipos_prueba %}
+                            <tr>
+                                <td class="equipo-codigo">{{ equipo.codigo }}</td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td class="equipo-codigo">TLE-147</td>
+                            </tr>
+                            <tr>
+                                <td class="equipo-codigo">TLE-148</td>
+                            </tr>
+                            <tr>
+                                <td class="equipo-codigo">TLE-149</td>
+                            </tr>
+                            <tr>
+                                <td class="equipo-codigo">TLE-150</td>
+                            </tr>
+                            <tr>
+                                <td class="equipo-codigo">TLE-151</td>
+                            </tr>
+                            <tr>
+                                <td class="equipo-codigo">TLE-152</td>
+                            </tr>
+                        {% endif %}
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- COPIA 1 y COPIA 2 -->
+        <div class="copias-section">
+            <div class="copias-container">
+                <div class="copia-item">
+                    <span class="checkbox-square">{% if flags.copia1 %}X{% endif %}</span>
+                    <span><strong>COPIA 1 -</strong> Firmar y devolver al remitente</span>
+                </div>
+                <div class="copia-item">
+                    <span class="checkbox-square">{% if flags.copia2 %}X{% endif %}</span>
+                    <span><strong>COPIA 2 -</strong> Para su archivo</span>
+                </div>
+            </div>
+                            </div>
+
+        <!-- 14, 15, 16. Material ha sido / Destinatario autorizado -->
+        <div class="material-section">
+            <!-- Fila 1: Celda 14 a todo ancho con los 4 checkboxes -->
+            <div class="material-row-14">
+                <span class="material-title">14. EL MATERIAL HA SIDO (marcar con una X):</span>
+                <div class="material-checkboxes-14">
+                    <div class="material-option">
+                        <span class="checkbox-square">{% if material_ha_sido == "RECIBIDO" %}X{% endif %}</span>
+                        <span>RECIBIDO</span>
+                    </div>
+                    <div class="material-option">
+                        <span class="checkbox-square">{% if material_ha_sido == "INVENTARIADO" %}X{% endif %}</span>
+                        <span>INVENTARIADO</span>
+                    </div>
+                    <div class="material-option">
+                        <span class="checkbox-square">{% if material_ha_sido == "DESTRUIDO" %}X{% endif %}</span>
+                        <span>DESTRUIDO</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Fila 2: Celda 15 a la izquierda y celda 16 a la derecha -->
+            <div class="material-row-15-16">
+                <div class="material-15">
+                    <span class="material-title">15. DESTINATARIO AUTORIZADO DEL MATERIAL DE CIFRA</span>
+                </div>
+                <div class="material-16">
+                    <span class="material-title">16. ( marcar X ) ⇒</span>
+                    <div class="material-checkboxes-16">
+                        <div class="material-option">
+                            <span class="checkbox-square">{% if destinatario_autorizado.testigo %}X{% endif %}</span>
+                            <span>TESTIGO</span>
+                        </div>
+                        <div class="material-option">
+                            <span class="checkbox-square">{% if destinatario_autorizado.otro_especificar %}X{% endif %}</span>
+                            <span>OTRO (Especificar)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+            
+        <!-- 16. Tabla de firmas -->
+        <div class="firmas-section">
+            <table class="firmas-table">
+                <tbody>
+                    <tr>
+                        <td class="firma-cell">
+                            <div class="firma-label">a. Firma</div>
+                            <div class="firma-area">{{ firma_entrega.firma_texto | default('') }}</div>
+                        </td>
+                        <td class="firma-cell">
+                            <div class="firma-label">b. Empleo/Rango</div>
+                            <div class="firma-area">{{ firma_entrega.empleo_rango | default('') }}</div>
+                        </td>
+                        <td class="firma-cell">
+                            <div class="firma-label">a. Firma</div>
+                            <div class="firma-area">{{ firma_recibe.firma_texto | default('') }}</div>
+                        </td>
+                        <td class="firma-cell">
+                            <div class="firma-label">b. Empleo/Rango</div>
+                            <div class="firma-area">{{ firma_recibe.empleo_rango | default('') }}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="firma-cell">
+                            <div class="firma-label">c. Nombre y Apellidos</div>
+                            <div class="firma-area">{{ firma_entrega.nombre_apellidos | default('') }}</div>
+                        </td>
+                        <td class="firma-cell">
+                            <div class="firma-label">d. Cargo</div>
+                            <div class="firma-area">{{ firma_entrega.cargo | default('') }}</div>
+                        </td>
+                        <td class="firma-cell">
+                            <div class="firma-label">c. Nombre y Apellidos</div>
+                            <div class="firma-area">{{ firma_recibe.nombre_apellidos | default('') }}</div>
+                        </td>
+                        <td class="firma-cell">
+                            <div class="firma-label">d. Cargo</div>
+                            <div class="firma-area">{{ firma_recibe.cargo | default('') }}</div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            </div>
+
+        <!-- 17. Observaciones -->
+        <div class="observaciones-section">
+            <div class="obs-title">17. OBSERVACIONES DEL ODMC REMITENTE</div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            Página {{ pagina_actual | default('1') }} de {{ total_paginas | default('3') }} Páginas
+            </div>
+    </div>
+</body>
+</html> 
