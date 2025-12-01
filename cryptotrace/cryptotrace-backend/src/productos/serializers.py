@@ -10,8 +10,63 @@ class TipoProductoSerializer(serializers.ModelSerializer):
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """
-    Serializer personalizado para incluir información adicional del usuario en el JWT token
+    Serializer personalizado para incluir información adicional del usuario en el JWT token.
+    Permite autenticar con email o username.
     """
+    username = serializers.CharField(required=False)  # Hacer username opcional
+    
+    def validate(self, attrs):
+        """
+        Sobrescribir validate para permitir autenticación con email o username
+        """
+        from django.contrib.auth import get_user_model
+        
+        User = get_user_model()
+        username_or_email = attrs.get('username', '').strip()
+        password = attrs.get('password', '')
+        
+        if not username_or_email:
+            raise serializers.ValidationError({
+                'username': 'Este campo es requerido.'
+            })
+        
+        # Intentar buscar usuario por username primero
+        user = None
+        try:
+            user = User.objects.get(username=username_or_email)
+        except User.DoesNotExist:
+            # Si no se encuentra por username, intentar buscar por email
+            try:
+                user = User.objects.get(email=username_or_email)
+            except User.DoesNotExist:
+                # Usuario no encontrado, pero validar contraseña para evitar timing attacks
+                from django.contrib.auth.hashers import check_password
+                # Hash dummy para mantener tiempo constante
+                dummy_hash = 'pbkdf2_sha256$600000$dummy$dummyhash'
+                check_password(password, dummy_hash)
+                raise serializers.ValidationError({
+                    'username': 'Usuario o email no encontrado.',
+                    'password': 'Credenciales inválidas.'
+                })
+        
+        # Verificar contraseña
+        if not user.check_password(password):
+            raise serializers.ValidationError({
+                'password': 'Contraseña incorrecta.'
+            })
+        
+        # Verificar que el usuario esté activo
+        if not user.is_active:
+            raise serializers.ValidationError({
+                'username': 'Este usuario está inactivo.'
+            })
+        
+        # Actualizar attrs con el username correcto para el resto del proceso
+        attrs['username'] = user.username
+        
+        # Llamar al método validate del padre con los attrs actualizados
+        return super().validate(attrs)
+    
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
@@ -19,6 +74,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Agregar campos personalizados al token
         token['is_superuser'] = user.is_superuser
         token['username'] = user.username
+        token['email'] = user.email  # Agregar email al token
         token['first_name'] = user.first_name
         token['last_name'] = user.last_name
         

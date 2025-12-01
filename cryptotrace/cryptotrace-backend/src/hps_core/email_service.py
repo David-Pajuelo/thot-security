@@ -22,7 +22,8 @@ class HpsEmailService:
     """Servicio principal de email para HPS"""
     
     def __init__(self):
-        self.from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@cryptotrace.local')
+        # Priorizar SMTP_FROM_EMAIL si está definido, sino usar DEFAULT_FROM_EMAIL
+        self.from_email = getattr(settings, 'SMTP_FROM_EMAIL', None) or getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@cryptotrace.local')
         self.from_name = getattr(settings, 'SMTP_FROM_NAME', 'CryptoTrace HPS')
         self.reply_to = getattr(settings, 'SMTP_REPLY_TO', getattr(settings, 'EMAIL_HOST_USER', ''))
     
@@ -106,21 +107,25 @@ class HpsEmailService:
                 return False
             
             # Usar template específico según el estado
+            # Asegurar que los estados sean strings
+            new_status_str = str(new_status) if new_status else str(hps_request.status)
+            old_status_str = str(old_status) if old_status else None
+            
             template_data = {
                 'user_name': f"{hps_request.first_name} {hps_request.first_last_name}",
                 'user_email': user.email,
                 'document_number': hps_request.document_number,
                 'request_type': hps_request.get_request_type_display(),
-                'status': new_status,
-                'old_status': old_status or hps_request.status,
+                'status': new_status_str,
+                'old_status': old_status_str,
             }
             
             # Usar template específico para aprobación/rechazo, o genérico para otros estados
-            if new_status == 'approved':
+            if new_status_str == 'approved':
                 template_data['expires_at'] = hps_request.expires_at.strftime('%d/%m/%Y') if hps_request.expires_at else 'N/A'
                 template_data['notes'] = hps_request.notes or ''
                 template = HpsApprovedTemplate.get_template(template_data)
-            elif new_status == 'rejected':
+            elif new_status_str == 'rejected':
                 template_data['rejection_reason'] = hps_request.notes or 'No especificado'
                 template_data['notes'] = hps_request.notes or ''
                 template = HpsRejectedTemplate.get_template(template_data)

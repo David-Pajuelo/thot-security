@@ -180,7 +180,7 @@ Equipo HPS
             </div>
             <div class="credential-item">
                 <span class="credential-label">🔑 Contraseña temporal:</span>
-                <div class="credential-value">{temp_password}</div>
+                <div class="credential-value" style="font-size: 18px; letter-spacing: 2px; font-weight: bold;">{temp_password}</div>
             </div>
         </div>
         

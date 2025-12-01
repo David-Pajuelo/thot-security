@@ -179,8 +179,10 @@ class HpsRequest(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
         related_name="hps_requests",
+        null=True,
+        blank=True,
     )
     request_type = models.CharField(
         max_length=50, choices=RequestType.choices, default=RequestType.NEW
@@ -210,13 +212,15 @@ class HpsRequest(models.Model):
 
     submitted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
         related_name="submitted_hps_requests",
+        null=True,
+        blank=True,
     )
     submitted_at = models.DateTimeField(auto_now_add=True)
     approved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
         related_name="approved_hps_requests",
         null=True,
         blank=True,

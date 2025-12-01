@@ -6,6 +6,7 @@ const PermanentDeleteModal = ({
   onClose, 
   onConfirm, 
   userEmail, 
+  hpsRequestsCount = 0,
   loading = false 
 }) => {
   const [confirmText, setConfirmText] = useState('');
@@ -67,6 +68,18 @@ const PermanentDeleteModal = ({
                   <li>• Esta acción NO se puede deshacer</li>
                 </ul>
               </div>
+              
+              {hpsRequestsCount > 0 && (
+                <div className="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+                  <p className="text-sm text-orange-800 font-semibold mb-2">
+                    ⚠️ Solicitudes HPS asociadas:
+                  </p>
+                  <p className="text-sm text-orange-700">
+                    Este usuario tiene <strong>{hpsRequestsCount} solicitud{hpsRequestsCount !== 1 ? 'es' : ''} HPS</strong> asociada{hpsRequestsCount !== 1 ? 's' : ''}. 
+                    Al eliminar el usuario, estas solicitudes quedarán sin usuario asociado (el campo usuario se establecerá en NULL).
+                  </p>
+                </div>
+              )}
               
               <p className="text-gray-600">
                 ¿Estás seguro de que quieres continuar con la eliminación definitiva?

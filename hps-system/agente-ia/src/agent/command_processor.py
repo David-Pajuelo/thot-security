@@ -381,7 +381,7 @@ class CommandProcessor:
                 "mensaje": "¡Ups! 😅 Parece que hay un problema de conexión con el servidor. No te preocupes, esto puede pasar.\n\n**¿Qué puedes hacer?**\n• Esperar unos segundos y volver a intentar\n• Verificar tu conexión a internet\n• Contactar al administrador si el problema persiste\n\n¡Estoy aquí para ayudarte en cuanto se restablezca la conexión! 🤝"
             }
     
-    async def _solicitar_hps(self, parametros: Dict[str, Any], user_context: Dict[str, Any]) -> Dict[str, Any]:
+    async def _solicitar_hps(self, parametros: Dict[str, Any], user_context: Dict[str, Any], is_transfer: bool = False) -> Dict[str, Any]:
         """Generar token y URL para solicitud HPS"""
         
         user_role = user_context.get("role", "").lower()
@@ -389,7 +389,9 @@ class CommandProcessor:
         user_message = parametros.get("user_message", "").lower()
         
         # Detectar tipo de solicitud HPS
-        is_transfer = any(word in user_message for word in ["traslado", "traspaso", "trasladar", "traspasar", "transfer"])
+        # Si is_transfer se pasa explícitamente, usarlo; sino detectar del mensaje
+        if not is_transfer:
+            is_transfer = any(word in user_message for word in ["traslado", "traspaso", "trasladar", "traspasar", "transfer"])
         is_renewal = any(word in user_message for word in ["renovacion", "renovación", "renovar", "renovar hps", "renovación hps"])
         # Por defecto es nueva HPS, solo se bifurca si se detectan palabras específicas
         is_new = not (is_transfer or is_renewal)
@@ -407,13 +409,13 @@ class CommandProcessor:
                 "mensaje": "📧 Para solicitar una HPS para un miembro de tu equipo, necesito el email de la persona.\n\n**Por favor, proporciona el email del miembro:**\n• Ejemplo: 'solicitar hps para miembro@empresa.com'\n• O simplemente escribe: 'miembro@empresa.com'\n\n¿Para qué email quieres solicitar la HPS?"
             }
         
-        # Verificar permisos: traspasos solo para jefe_seguridad y jefe_seguridad_suplente
+        # Verificar permisos: traspasos solo para admin y jefes de seguridad
         if is_transfer:
-            # Solo jefes de seguridad pueden solicitar traspasos
-            if user_role not in ["jefe_seguridad", "jefe_seguridad_suplente"]:
+            # Solo administradores y jefes de seguridad pueden solicitar traspasos
+            if user_role not in ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]:
                 return {
                     "tipo": "error",
-                    "mensaje": "❌ Solo los jefes de seguridad pueden solicitar traspasos HPS. Si necesitas solicitar un traspaso, contacta con un jefe de seguridad."
+                    "mensaje": "❌ No tienes permisos para solicitar traspasos HPS. Solo los administradores y jefes de seguridad pueden realizar esta acción. Si necesitas solicitar un traspaso, contacta con un administrador o jefe de seguridad."
                 }
         else:
             # Para nuevas HPS y renovaciones, mantener permisos actuales
@@ -910,10 +912,11 @@ class CommandProcessor:
         user_role = user_context.get("role", "").lower()
         email = parametros.get("email")
         
-        if user_role not in ["admin", "team_lead", "team_leader"]:
+        # Solo administradores y jefes de seguridad pueden solicitar traspasos
+        if user_role not in ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]:
             return {
                 "tipo": "error",
-                "mensaje": "❌ No tienes permisos para iniciar traspasos HPS."
+                "mensaje": "❌ No tienes permisos para solicitar traspasos HPS. Solo los administradores y jefes de seguridad pueden realizar esta acción. Si necesitas solicitar un traspaso, contacta con un administrador o jefe de seguridad."
             }
         
         if not email:
@@ -935,8 +938,8 @@ class CommandProcessor:
                         "mensaje": f"❌ No se encontró HPS previa para {email}. Debe solicitar una nueva HPS primero."
                     }
             
-            # Generar nueva URL de traslado
-            return await self._solicitar_hps({"email": email}, user_context)
+            # Generar nueva URL de traslado pasando is_transfer=True
+            return await self._solicitar_hps({"email": email, "user_message": "trasladar hps"}, user_context, is_transfer=True)
                 
         except Exception as e:
             logger.error(f"Error en traspaso HPS: {e}")

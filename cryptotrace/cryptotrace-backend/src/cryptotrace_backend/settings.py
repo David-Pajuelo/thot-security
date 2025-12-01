@@ -172,6 +172,25 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# ===== CONFIGURACIÓN DE ARCHIVOS MEDIA =====
+# Directorio donde se guardan los archivos subidos por los usuarios
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# URL base para servir archivos media
+MEDIA_URL = '/media/'
+
+# Asegurarse de que el directorio media existe
+if not os.path.exists(MEDIA_ROOT):
+    os.makedirs(MEDIA_ROOT, exist_ok=True)
+
+# Crear subdirectorios necesarios para HPS
+HPS_TEMPLATES_DIR = os.path.join(MEDIA_ROOT, 'hps', 'templates')
+HPS_FILLED_DIR = os.path.join(MEDIA_ROOT, 'hps', 'filled')
+HPS_RESPONSES_DIR = os.path.join(MEDIA_ROOT, 'hps', 'responses')
+
+for directory in [HPS_TEMPLATES_DIR, HPS_FILLED_DIR, HPS_RESPONSES_DIR]:
+    if not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,

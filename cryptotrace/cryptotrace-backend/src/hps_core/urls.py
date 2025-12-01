@@ -20,6 +20,7 @@ router.register(r"hps/roles", views.HpsRoleViewSet, basename="hps-role")
 router.register(r"hps/teams", views.HpsTeamViewSet, basename="hps-team")
 router.register(r"hps/requests", views.HpsRequestViewSet, basename="hps-request")
 router.register(r"hps/tokens", views.HpsTokenViewSet, basename="hps-token")
+router.register(r"hps/templates", views.HpsTemplateViewSet, basename="hps-template")
 router.register(r"hps/audit-logs", views.HpsAuditLogViewSet, basename="hps-audit-log")
 router.register(r"hps/user/profiles", views.HpsUserProfileViewSet, basename="hps-user-profile")
 router.register(r"extension", views.HpsExtensionViewSet, basename="hps-extension")
@@ -207,5 +208,12 @@ urlpatterns = router.urls + [
     path('users/search/query/', views.search_users, name='users-search'),
     path('users/check/<str:email>/', views.check_user_exists, name='users-check'),
     path('email/send-hps-form-async/', views.send_hps_form_email_async, name='email-send-hps-form'),
+    
+    # Endpoints de monitoreo de chat
+    path('hps/chat/metrics/realtime/', views.get_chat_realtime_metrics, name='chat-metrics-realtime'),
+    path('hps/chat/metrics/historical/', views.get_chat_historical_metrics, name='chat-metrics-historical'),
+    path('hps/chat/analytics/', views.get_chat_analytics, name='chat-analytics'),
+    path('hps/chat/performance/', views.get_chat_performance, name='chat-performance'),
+    path('hps/chat/topics/', views.get_chat_topics, name='chat-topics'),
 ]
 

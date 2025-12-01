@@ -13,3 +13,4 @@ Pillow  # Para ImageField en Django
 redis  # Para cache y sesiones
 django-redis  # Integración Django-Redis
 celery  # Tareas asíncronas (migración HPS)
+PyMuPDF  # Para rellenar PDFs automáticamente

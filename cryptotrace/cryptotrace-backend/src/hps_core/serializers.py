@@ -49,6 +49,12 @@ class HpsRequestSerializer(serializers.ModelSerializer):
     # Campos calculados
     is_expired = serializers.BooleanField(read_only=True)
     can_be_approved = serializers.SerializerMethodField()
+    # Campo 'type' como alias de 'form_type' para compatibilidad con frontend
+    type = serializers.CharField(source='form_type', read_only=True)
+    # URLs de PDFs
+    filled_pdf_url = serializers.SerializerMethodField()
+    response_pdf_url = serializers.SerializerMethodField()
+    template_pdf_url = serializers.SerializerMethodField()
     # Información de usuarios relacionados (opcional)
     user_email = serializers.CharField(source='user.email', read_only=True)
     user_full_name = serializers.SerializerMethodField()
@@ -71,6 +77,19 @@ class HpsRequestSerializer(serializers.ModelSerializer):
             "submitted_by": {"required": False},
         }
     
+    def validate_form_type(self, value):
+        """Validar y normalizar form_type"""
+        if not value:
+            return models.HpsRequest.FormType.SOLICITUD
+        
+        value_lower = value.lower().strip()
+        # Normalizar valores comunes a "solicitud" o "traslado"
+        if value_lower in ["traslado", "traspaso", "transfer", "trasladar", "traspasar"]:
+            return models.HpsRequest.FormType.TRASLADO
+        else:
+            # Cualquier otro valor (incluyendo "nueva", "new", "solicitud", etc.) se convierte a "solicitud"
+            return models.HpsRequest.FormType.SOLICITUD
+    
     def get_can_be_approved(self, obj):
         """Verifica si la solicitud puede ser aprobada"""
         return obj.status == 'pending' and not obj.is_expired
@@ -80,6 +99,63 @@ class HpsRequestSerializer(serializers.ModelSerializer):
         if obj.user:
             return f"{obj.user.first_name} {obj.user.last_name}".strip()
         return ""
+    
+    def get_filled_pdf_url(self, obj):
+        """Obtener URL del PDF rellenado"""
+        if obj.filled_pdf:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.filled_pdf.url)
+            return obj.filled_pdf.url
+        return None
+    
+    def get_response_pdf_url(self, obj):
+        """Obtener URL del PDF de respuesta"""
+        if obj.response_pdf:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.response_pdf.url)
+            return obj.response_pdf.url
+        return None
+    
+    def get_template_pdf_url(self, obj):
+        """Obtener URL del PDF de la plantilla asociada"""
+        if obj.template and obj.template.template_pdf:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.template.template_pdf.url)
+            return obj.template.template_pdf.url
+        return None
+
+
+class HpsTemplateSerializer(serializers.ModelSerializer):
+    """Serializer para plantillas PDF de HPS"""
+    template_pdf_url = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = models.HpsTemplate
+        fields = [
+            "id",
+            "name",
+            "description",
+            "template_pdf",
+            "template_pdf_url",
+            "template_type",
+            "version",
+            "active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+    
+    def get_template_pdf_url(self, obj):
+        """Obtener URL del PDF de la plantilla"""
+        if obj.template_pdf:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.template_pdf.url)
+            return obj.template_pdf.url
+        return None
 
 
 class HpsTokenSerializer(serializers.ModelSerializer):
@@ -121,9 +197,14 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     role = serializers.CharField(source='role.name', read_only=True)
     role_name = serializers.CharField(source='role.name', read_only=True)
+    # Campo escribible para actualizar el rol (acepta el nombre del rol como string)
+    role_writable = serializers.CharField(write_only=True, required=False, allow_blank=True)
     team_id = serializers.SerializerMethodField()
     team_name = serializers.CharField(source='team.name', read_only=True, allow_null=True)
+    # Campo escribible para actualizar el equipo (acepta UUID como string)
+    team_id_writable = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
     is_active = serializers.BooleanField(source='user.is_active', read_only=True)
+    hps_requests_count = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(source='user.date_joined', read_only=True)
     updated_at = serializers.DateTimeField(source='user.date_joined', read_only=True)
 
@@ -139,12 +220,15 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
             "full_name",
             "role",
             "role_name",
+            "role_writable",
             "team_id",
             "team_name",
+            "team_id_writable",
             "is_active",
             "is_temp_password",
             "must_change_password",
             "email_verified",
+            "hps_requests_count",
             "created_at",
             "updated_at",
         ]
@@ -161,6 +245,200 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         if obj.team:
             return str(obj.team.id)
         return None
+    
+    def get_hps_requests_count(self, obj):
+        """Obtiene el número de solicitudes HPS asociadas al usuario"""
+        if obj.user:
+            return models.HpsRequest.objects.filter(user=obj.user).count()
+        return 0
+    
+    def _get_or_create_aicox_team(self):
+        """
+        Obtener o crear el equipo AICOX.
+        Retorna el equipo AICOX, creándolo si no existe.
+        """
+        import uuid
+        AICOX_TEAM_UUID = uuid.UUID('d8574c01-851f-4716-9ac9-bbda45469bdf')
+        
+        try:
+            # Intentar obtener el equipo por UUID
+            team = models.HpsTeam.objects.get(id=AICOX_TEAM_UUID)
+            return team
+        except models.HpsTeam.DoesNotExist:
+            # Si no existe, intentar obtenerlo por nombre
+            team = models.HpsTeam.objects.filter(name__iexact='AICOX').first()
+            if team:
+                return team
+            
+            # Crear el equipo AICOX
+            team = models.HpsTeam.objects.create(
+                id=AICOX_TEAM_UUID,
+                name='AICOX',
+                description='Equipo genérico AICOX',
+                is_active=True
+            )
+            return team
+    
+    def create(self, validated_data):
+        """Crear un nuevo perfil de usuario HPS con el rol especificado"""
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        # Extraer datos del usuario
+        email = validated_data.pop('email', None) or validated_data.pop('user', {}).get('email')
+        username = validated_data.pop('username', None) or email
+        password = validated_data.pop('password', None)
+        first_name = validated_data.pop('first_name', None) or validated_data.pop('user', {}).get('first_name', '')
+        last_name = validated_data.pop('last_name', None) or validated_data.pop('user', {}).get('last_name', '')
+        full_name = validated_data.pop('full_name', None)
+        
+        # Si se proporciona full_name, dividirlo en first_name y last_name
+        if full_name and not first_name:
+            name_parts = full_name.strip().split(' ', 1)
+            first_name = name_parts[0] if len(name_parts) > 0 else ''
+            last_name = name_parts[1] if len(name_parts) > 1 else ''
+        
+        # Manejar rol
+        role_writable = validated_data.pop('role_writable', None)
+        role = None
+        if role_writable:
+            try:
+                role = models.HpsRole.objects.get(name=role_writable)
+            except models.HpsRole.DoesNotExist:
+                raise serializers.ValidationError({'role_writable': f'El rol "{role_writable}" no existe'})
+        else:
+            # Rol por defecto: "member"
+            role = models.HpsRole.objects.filter(name="member").first()
+            if not role:
+                role, _ = models.HpsRole.objects.get_or_create(
+                    name="crypto",
+                    defaults={"description": "Perfil base para usuarios de CryptoTrace", "permissions": {}}
+                )
+        
+        # Manejar equipo
+        team_id_writable = validated_data.pop('team_id_writable', None)
+        team = None
+        if team_id_writable:
+            try:
+                import uuid
+                team_uuid = uuid.UUID(team_id_writable)
+                team = models.HpsTeam.objects.get(id=team_uuid)
+            except (ValueError, models.HpsTeam.DoesNotExist):
+                raise serializers.ValidationError({'team_id_writable': f'El equipo con ID "{team_id_writable}" no existe'})
+        else:
+            # Si no se especifica equipo, asignar automáticamente al equipo AICOX
+            team = self._get_or_create_aicox_team()
+        
+        # Crear o obtener usuario
+        if email:
+            user, user_created = User.objects.get_or_create(
+                email=email,
+                defaults={
+                    'username': username or email,
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'is_active': True,
+                }
+            )
+            
+            if user_created and password:
+                user.set_password(password)
+                user.save()
+            elif password:
+                # Actualizar contraseña si se proporciona
+                user.set_password(password)
+                user.save()
+            
+            # Actualizar nombre si se proporcionó
+            if first_name:
+                user.first_name = first_name
+            if last_name:
+                user.last_name = last_name
+            if username and user.username != username:
+                user.username = username
+            user.save()
+        else:
+            raise serializers.ValidationError({'email': 'El email es requerido para crear un usuario'})
+        
+        # Crear o actualizar perfil HPS
+        profile, profile_created = models.HpsUserProfile.objects.get_or_create(
+            user=user,
+            defaults={
+                'role': role,
+                'team': team,
+                **validated_data
+            }
+        )
+        
+        if not profile_created:
+            # Actualizar perfil existente
+            profile.role = role
+            if team is not None:
+                profile.team = team
+            for attr, value in validated_data.items():
+                setattr(profile, attr, value)
+            profile.save()
+        
+        return profile
+    
+    def validate_role_writable(self, value):
+        """Validar que el rol existe"""
+        if value:
+            try:
+                role = models.HpsRole.objects.get(name=value)
+                return value
+            except models.HpsRole.DoesNotExist:
+                raise serializers.ValidationError(f'El rol "{value}" no existe')
+        return value
+    
+    def validate_team_id_writable(self, value):
+        """Validar que el equipo existe si se proporciona"""
+        if value:
+            try:
+                import uuid
+                team_uuid = uuid.UUID(value)
+                team = models.HpsTeam.objects.get(id=team_uuid)
+                return value
+            except (ValueError, models.HpsTeam.DoesNotExist):
+                raise serializers.ValidationError(f'El equipo con ID "{value}" no existe')
+        return value
+    
+    def update(self, instance, validated_data):
+        """Actualizar el perfil, incluyendo el rol y el equipo si se proporcionan"""
+        # Manejar actualización del rol
+        role_writable = validated_data.pop('role_writable', None)
+        if role_writable:
+            try:
+                role = models.HpsRole.objects.get(name=role_writable)
+                instance.role = role
+            except models.HpsRole.DoesNotExist:
+                raise serializers.ValidationError({'role_writable': f'El rol "{role_writable}" no existe'})
+        
+        # Manejar actualización del equipo
+        team_id_writable = validated_data.pop('team_id_writable', None)
+        if team_id_writable is not None:  # Permite establecer a None explícitamente
+            if team_id_writable == '' or team_id_writable is None:
+                # Si se establece explícitamente a None, asignar al equipo AICOX por defecto
+                instance.team = self._get_or_create_aicox_team()
+            else:
+                try:
+                    import uuid
+                    team_uuid = uuid.UUID(team_id_writable)
+                    team = models.HpsTeam.objects.get(id=team_uuid)
+                    instance.team = team
+                except (ValueError, models.HpsTeam.DoesNotExist):
+                    raise serializers.ValidationError({'team_id_writable': f'El equipo con ID "{team_id_writable}" no existe'})
+        else:
+            # Si no se especifica equipo y el usuario no tiene uno, asignar automáticamente al equipo AICOX
+            if not instance.team:
+                instance.team = self._get_or_create_aicox_team()
+        
+        # Actualizar otros campos del perfil
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        instance.save()
+        return instance
 
 
 class ChatConversationSerializer(serializers.ModelSerializer):

@@ -76,7 +76,7 @@ def send_hps_confirmation_email(self, hps_request_id: str):
 
 
 @shared_task(bind=True)
-def send_hps_status_update_email(self, hps_request_id: int, status: str):
+def send_hps_status_update_email(self, hps_request_id: int, status: str, old_status: str = None):
     """
     Tarea Celery para envío de actualización de estado de solicitud HPS.
     """
@@ -84,7 +84,11 @@ def send_hps_status_update_email(self, hps_request_id: int, status: str):
         from .models import HpsRequest
         
         hps_request = HpsRequest.objects.get(id=hps_request_id)
-        success = email_service.send_status_update_email(hps_request, status)
+        success = email_service.send_hps_status_update_email(
+            hps_request, 
+            new_status=status,
+            old_status=old_status
+        )
         
         if success:
             logger.info("Email de actualización de estado enviado para HPS %s", hps_request_id)
@@ -110,7 +114,12 @@ def send_hps_approved_email(self, hps_request_id: int):
         from .models import HpsRequest
         
         hps_request = HpsRequest.objects.get(id=hps_request_id)
-        success = email_service.send_hps_approved_email(hps_request)
+        # Usar send_hps_status_update_email con estado 'approved'
+        success = email_service.send_hps_status_update_email(
+            hps_request,
+            new_status='approved',
+            old_status=None
+        )
         
         if success:
             logger.info("Email de aprobación enviado para HPS %s", hps_request_id)
@@ -136,7 +145,12 @@ def send_hps_rejected_email(self, hps_request_id: int, rejection_reason: str = "
         from .models import HpsRequest
         
         hps_request = HpsRequest.objects.get(id=hps_request_id)
-        success = email_service.send_hps_rejected_email(hps_request, rejection_reason)
+        # Usar send_hps_status_update_email con estado 'rejected'
+        success = email_service.send_hps_status_update_email(
+            hps_request,
+            new_status='rejected',
+            old_status=None
+        )
         
         if success:
             logger.info("Email de rechazo enviado para HPS %s", hps_request_id)

@@ -44,12 +44,18 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
     def _profile(self):
         user = self.request.user
         return getattr(user, "hps_profile", None)
+    
+    def get_serializer_context(self):
+        """Añadir request al contexto para generar URLs absolutas"""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
 
     def get_queryset(self):
         qs = super().get_queryset()
         status_param = self.request.query_params.get("status")
         request_type = self.request.query_params.get("request_type")
-        form_type = self.request.query_params.get("form_type")
+        form_type = self.request.query_params.get("form_type") or self.request.query_params.get("hps_type")  # Aceptar ambos
         user_id = self.request.query_params.get("user_id")
         team_id = self.request.query_params.get("team_id")
 
@@ -129,6 +135,86 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
         )
         return Response(self.get_serializer(hps_request).data)
 
+    @action(detail=True, methods=["get"], url_path="filled-pdf")
+    def filled_pdf(self, request, pk=None):
+        """
+        Obtener PDF rellenado de una solicitud HPS
+        GET /api/hps/requests/{id}/filled-pdf/
+        """
+        hps_request = self.get_object()
+        
+        if not hps_request.filled_pdf:
+            return Response(
+                {'detail': 'No hay PDF rellenado para esta solicitud'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        try:
+            from django.http import FileResponse
+            import re
+            
+            # Generar nombre del archivo
+            user_name = f"{hps_request.first_name} {hps_request.first_last_name}".strip()
+            if hps_request.second_last_name:
+                user_name += f" {hps_request.second_last_name}"
+            
+            # Limpiar caracteres no válidos
+            safe_name = re.sub(r'[<>:"/\\|?*]', '_', user_name)
+            filename = f"{safe_name} - HPS Filled.pdf"
+            
+            return FileResponse(
+                hps_request.filled_pdf.open('rb'),
+                content_type='application/pdf',
+                filename=filename,
+                as_attachment=False  # Mostrar en navegador, no descargar
+            )
+        except Exception as e:
+            logger.error(f"Error obteniendo PDF rellenado: {e}")
+            return Response(
+                {'detail': f'Error obteniendo PDF: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=["get"], url_path="response-pdf")
+    def response_pdf(self, request, pk=None):
+        """
+        Obtener PDF de respuesta de una solicitud HPS
+        GET /api/hps/requests/{id}/response-pdf/
+        """
+        hps_request = self.get_object()
+        
+        if not hps_request.response_pdf:
+            return Response(
+                {'detail': 'No hay PDF de respuesta para esta solicitud'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        try:
+            from django.http import FileResponse
+            import re
+            
+            # Generar nombre del archivo
+            user_name = f"{hps_request.first_name} {hps_request.first_last_name}".strip()
+            if hps_request.second_last_name:
+                user_name += f" {hps_request.second_last_name}"
+            
+            # Limpiar caracteres no válidos
+            safe_name = re.sub(r'[<>:"/\\|?*]', '_', user_name)
+            filename = f"{safe_name} - HPS Response.pdf"
+            
+            return FileResponse(
+                hps_request.response_pdf.open('rb'),
+                content_type='application/pdf',
+                filename=filename,
+                as_attachment=False  # Mostrar en navegador, no descargar
+            )
+        except Exception as e:
+            logger.error(f"Error obteniendo PDF de respuesta: {e}")
+            return Response(
+                {'detail': f'Error obteniendo PDF: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
         """Marcar solicitud como enviada (cambiar estado a 'submitted')"""
@@ -141,6 +227,7 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        old_status = hps_request.status
         hps_request.status = models.HpsRequest.RequestStatus.SUBMITTED
         hps_request.submitted_at = datetime.now()
         hps_request.submitted_by = request.user
@@ -148,6 +235,15 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
             # Guardar notas en algún campo si existe, o crear un audit log
             pass
         hps_request.save()
+        
+        # Enviar email de actualización de estado (convertir estado a string)
+        from .email_service import HpsEmailService
+        email_service = HpsEmailService()
+        email_service.send_hps_status_update_email(
+            hps_request,
+            new_status=str(hps_request.status),  # Convertir a string
+            old_status=str(old_status) if old_status else None  # Convertir a string
+        )
 
         return Response(self.get_serializer(hps_request).data)
 
@@ -164,6 +260,214 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
 
         hps_request = HpsRequestService.reject(hps_request, request.user, notes)
         return Response(self.get_serializer(hps_request).data)
+    
+    @action(detail=True, methods=["get"], url_path="extract-pdf-fields")
+    def extract_pdf_fields(self, request, pk=None):
+        """
+        Extraer campos del PDF rellenado usando PyMuPDF
+        GET /api/hps/requests/{id}/extract-pdf-fields/
+        """
+        hps_request = self.get_object()
+        
+        if not hps_request.filled_pdf:
+            return Response(
+                {'detail': 'No hay PDF rellenado para esta solicitud'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        try:
+            import fitz  # PyMuPDF
+            import os
+            
+            # Abrir el PDF rellenado
+            pdf_path = hps_request.filled_pdf.path
+            if not os.path.exists(pdf_path):
+                return Response(
+                    {'detail': 'Archivo PDF no encontrado'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            pdf_document = fitz.open(pdf_path)
+            page = pdf_document[0]
+            
+            # Extraer campos del formulario
+            extracted_fields = {}
+            widgets = page.widgets()
+            
+            for widget in widgets:
+                if widget.field_name and widget.field_value:
+                    field_name = widget.field_name.strip()
+                    field_value = str(widget.field_value).strip()
+                    if field_value:
+                        extracted_fields[field_name] = field_value
+            
+            # Si no hay campos de formulario, intentar extraer texto
+            if not extracted_fields:
+                # Extraer texto de la página
+                text_dict = page.get_text("dict")
+                # Buscar patrones comunes en el texto
+                full_text = page.get_text()
+                
+                # Mapeo de patrones para extraer valores
+                patterns = {
+                    'Nombre': r'(?:Nombre|NOMBRE)[:\s]*([^\n\r,]+)',
+                    'Apellidos': r'(?:Apellidos|APELLIDOS)[:\s]*([^\n\r,]+)',
+                    'DNI': r'(?:DNI|NIE)[:\s]*([A-Z0-9]{8,9})',
+                    'Fecha de nacimiento': r'(?:Fecha de nacimiento|Fecha nacimiento)[:\s]*([^\n\r,]+)',
+                    'Nacionalidad': r'(?:Nacionalidad|NACIONALIDAD)[:\s]*([^\n\r,]+)',
+                    'Lugar de nacimiento': r'(?:Lugar de nacimiento|Lugar nacimiento|LugarNacimiento)[:\s]*([^\n\r,]+)',
+                    'Teléfono': r'(?:Teléfono|Telefono|TELÉFONO)[:\s]*([^\n\r,]+)',
+                    'Email': r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+                }
+                
+                import re
+                for field_name, pattern in patterns.items():
+                    match = re.search(pattern, full_text, re.IGNORECASE)
+                    if match:
+                        extracted_fields[field_name] = match.group(1).strip()
+            
+            pdf_document.close()
+            
+            return Response(extracted_fields, status=status.HTTP_200_OK)
+            
+        except ImportError:
+            return Response(
+                {'detail': 'PyMuPDF no está instalado. No se pueden extraer campos del PDF.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error extrayendo campos del PDF: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {'detail': f'Error extrayendo campos: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=["post"], url_path="edit-filled-pdf")
+    def edit_filled_pdf(self, request, pk=None):
+        """
+        Editar campos del PDF rellenado
+        POST /api/hps/requests/{id}/edit-filled-pdf/
+        Body: { "Nombre": "valor", "Apellidos": "valor", ... }
+        """
+        hps_request = self.get_object()
+        
+        if not hps_request.filled_pdf:
+            return Response(
+                {'detail': 'No hay PDF rellenado para esta solicitud'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        field_updates = request.data
+        if not field_updates or not isinstance(field_updates, dict):
+            return Response(
+                {'detail': 'Se requieren campos para actualizar'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            import fitz  # PyMuPDF
+            import os
+            import io
+            from django.core.files.base import ContentFile
+            
+            # Abrir el PDF rellenado desde el almacenamiento de Django
+            with hps_request.filled_pdf.open('rb') as f:
+                pdf_bytes_original = f.read()
+            
+            # Crear documento desde bytes en memoria
+            pdf_document = fitz.open(stream=pdf_bytes_original, filetype="pdf")
+            page = pdf_document[0]
+            
+            # Obtener widgets y actualizar valores
+            widgets = list(page.widgets())  # Convertir a lista para iterar correctamente
+            updated_count = 0
+            updated_fields = []
+            
+            for field_name, field_value in field_updates.items():
+                if not field_value:
+                    continue
+                
+                field_name_lower = field_name.lower().strip()
+                field_value_str = str(field_value).strip()
+                
+                # Buscar el widget correspondiente
+                found = False
+                for widget in widgets:
+                    if widget.field_name:
+                        widget_name_lower = widget.field_name.lower().strip()
+                        
+                        # Coincidencia exacta o parcial
+                        if (widget_name_lower == field_name_lower or 
+                            field_name_lower in widget_name_lower or
+                            widget_name_lower in field_name_lower):
+                            try:
+                                widget.field_value = field_value_str
+                                widget.update()
+                                updated_count += 1
+                                updated_fields.append(widget.field_name)
+                                logger.info(f"Campo '{widget.field_name}' actualizado con '{field_value_str}'")
+                                found = True
+                                break
+                            except Exception as e:
+                                logger.warning(f"Error actualizando campo '{widget.field_name}': {e}")
+                
+                if not found:
+                    logger.warning(f"No se encontró widget para el campo '{field_name}'")
+            
+            # Guardar el PDF actualizado en un buffer en memoria
+            output_buffer = io.BytesIO()
+            pdf_document.save(output_buffer)
+            pdf_document.close()
+            
+            # Obtener los bytes del PDF actualizado
+            pdf_bytes = output_buffer.getvalue()
+            output_buffer.close()
+            
+            # Eliminar el archivo anterior si existe para evitar problemas de caché
+            if hps_request.filled_pdf:
+                try:
+                    old_path = hps_request.filled_pdf.path
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+                        logger.debug(f"Archivo PDF anterior eliminado: {old_path}")
+                except Exception as e:
+                    logger.warning(f"No se pudo eliminar el archivo PDF anterior: {e}")
+            
+            # Guardar el nuevo PDF
+            filename = f"hps_request_{hps_request.id}_filled.pdf"
+            hps_request.filled_pdf.save(
+                filename,
+                ContentFile(pdf_bytes),
+                save=True  # Guardar el modelo automáticamente
+            )
+            
+            # Forzar actualización del timestamp
+            hps_request.save(update_fields=['updated_at'])
+            
+            logger.info(f"PDF actualizado para solicitud {hps_request.id} ({updated_count} campos actualizados: {updated_fields})")
+            
+            return Response({
+                'detail': f'PDF actualizado correctamente ({updated_count} campos actualizados)',
+                'updated_fields': updated_count,
+                'field_names': updated_fields,
+                'success': True
+            }, status=status.HTTP_200_OK)
+            
+        except ImportError:
+            return Response(
+                {'detail': 'PyMuPDF no está instalado. No se puede editar el PDF.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error editando PDF: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {'detail': f'Error editando PDF: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=False, methods=["get"], url_path="pending/list")
     def pending(self, request):
@@ -186,7 +490,17 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
     def create_public(self, request):
         token_value = request.query_params.get("token")
         # Aceptar tanto form_type como hps_type (compatibilidad con frontend)
-        form_type = request.query_params.get("form_type") or request.query_params.get("hps_type", "solicitud")
+        raw_form_type = request.query_params.get("form_type") or request.query_params.get("hps_type", "solicitud")
+        
+        # Normalizar form_type: debe ser "solicitud" o "traslado"
+        # Si viene como "nueva", "new", etc., convertir a "solicitud"
+        form_type_lower = raw_form_type.lower().strip()
+        if form_type_lower in ["traslado", "traspaso", "transfer", "trasladar", "traspasar"]:
+            form_type = "traslado"
+        else:
+            # Por defecto, cualquier otro valor (incluyendo "nueva", "new", "solicitud", etc.) se convierte a "solicitud"
+            form_type = "solicitud"
+        
         if not token_value:
             return Response(
                 {"detail": "Token requerido."}, status=status.HTTP_400_BAD_REQUEST
@@ -306,16 +620,163 @@ class HpsTokenViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
 
+class HpsTemplateViewSet(viewsets.ModelViewSet):
+    """ViewSet para gestionar plantillas PDF de HPS"""
+    queryset = models.HpsTemplate.objects.all()
+    serializer_class = serializers.HpsTemplateSerializer
+    permission_classes = [permissions.IsAuthenticated, IsHpsAdmin]
+    
+    def get_serializer_context(self):
+        """Añadir request al contexto para generar URLs absolutas"""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+    
+    def list(self, request, *args, **kwargs):
+        """
+        Sobrescribir list para devolver formato compatible con el frontend
+        El frontend espera: { templates: [...], total: N }
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        # Aplicar paginación si se solicita
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            total = queryset.count()
+            return Response({
+                'templates': serializer.data,
+                'total': total,
+                'page': int(request.query_params.get('page', 1)),
+                'per_page': int(request.query_params.get('per_page', 10))
+            })
+        
+        # Sin paginación, devolver todas las plantillas
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            'templates': serializer.data,
+            'total': queryset.count()
+        })
+    
+    def perform_create(self, serializer):
+        """
+        Guardar plantilla y verificar que el archivo se guardó correctamente.
+        Si la plantilla se marca como activa, eliminar la plantilla anterior activa del mismo tipo.
+        """
+        try:
+            template = serializer.save()
+            
+            # Si la plantilla se marca como activa, eliminar la plantilla anterior activa del mismo tipo
+            if template.active:
+                old_templates = models.HpsTemplate.objects.filter(
+                    template_type=template.template_type,
+                    active=True
+                ).exclude(id=template.id)
+                
+                for old_template in old_templates:
+                    # Eliminar el archivo PDF asociado si existe
+                    if old_template.template_pdf:
+                        try:
+                            import os
+                            from django.conf import settings
+                            file_path = os.path.join(settings.MEDIA_ROOT, old_template.template_pdf.name)
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                                logger.info(f"Archivo PDF eliminado: {file_path}")
+                        except Exception as e:
+                            logger.warning(f"Error al eliminar archivo PDF de plantilla anterior: {e}")
+                    
+                    # Eliminar la plantilla de la base de datos
+                    old_template.delete()
+                    logger.info(f"Plantilla anterior '{old_template.name}' (ID: {old_template.id}) eliminada para tipo {template.template_type}")
+                
+                if old_templates.exists():
+                    logger.info(f"Plantilla {template.name} creada. {old_templates.count()} plantilla(s) anterior(es) de tipo {template.template_type} eliminada(s).")
+            
+            # Verificar que el archivo PDF se guardó
+            if template.template_pdf:
+                import os
+                from django.conf import settings
+                file_path = os.path.join(settings.MEDIA_ROOT, template.template_pdf.name)
+                if os.path.exists(file_path):
+                    logger.info(f"Plantilla {template.name} creada correctamente. PDF guardado en: {file_path}")
+                else:
+                    logger.warning(f"Plantilla {template.name} creada pero el archivo PDF no se encontró en: {file_path}")
+            else:
+                logger.warning(f"Plantilla {template.name} creada sin archivo PDF")
+        except Exception as e:
+            logger.error(f"Error al crear plantilla: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+    
+    def perform_update(self, serializer):
+        """
+        Actualizar plantilla. Si se marca como activa, eliminar otras plantillas activas del mismo tipo.
+        """
+        try:
+            template = serializer.save()
+            
+            # Si la plantilla se marca como activa, eliminar otras plantillas activas del mismo tipo
+            if template.active:
+                old_templates = models.HpsTemplate.objects.filter(
+                    template_type=template.template_type,
+                    active=True
+                ).exclude(id=template.id)
+                
+                for old_template in old_templates:
+                    # Eliminar el archivo PDF asociado si existe
+                    if old_template.template_pdf:
+                        try:
+                            import os
+                            from django.conf import settings
+                            file_path = os.path.join(settings.MEDIA_ROOT, old_template.template_pdf.name)
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                                logger.info(f"Archivo PDF eliminado: {file_path}")
+                        except Exception as e:
+                            logger.warning(f"Error al eliminar archivo PDF de plantilla anterior: {e}")
+                    
+                    # Eliminar la plantilla de la base de datos
+                    old_template.delete()
+                    logger.info(f"Plantilla anterior '{old_template.name}' (ID: {old_template.id}) eliminada para tipo {template.template_type}")
+                
+                if old_templates.exists():
+                    logger.info(f"Plantilla {template.name} actualizada. {old_templates.count()} plantilla(s) anterior(es) de tipo {template.template_type} eliminada(s).")
+        except Exception as e:
+            logger.error(f"Error al actualizar plantilla: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+    
+    @action(detail=False, methods=['get'], url_path='active')
+    def active_templates(self, request):
+        """Obtener solo las plantillas activas"""
+        active_templates = self.get_queryset().filter(active=True)
+        serializer = self.get_serializer(active_templates, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], url_path='by-type/(?P<template_type>[^/.]+)')
+    def by_type(self, request, template_type=None):
+        """Obtener plantillas por tipo (jefe_seguridad o jefe_seguridad_suplente)"""
+        templates = self.get_queryset().filter(
+            template_type=template_type,
+            active=True
+        )
+        serializer = self.get_serializer(templates, many=True)
+        return Response(serializer.data)
+
+
 class HpsAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = models.HpsAuditLog.objects.select_related("user")
     serializer_class = serializers.HpsAuditLogSerializer
     permission_classes = [permissions.IsAuthenticated, IsHpsAdminOrSelf]
 
 
-class HpsUserProfileViewSet(viewsets.ReadOnlyModelViewSet):
+class HpsUserProfileViewSet(viewsets.ModelViewSet):
     """
-    ViewSet para listar y ver perfiles de usuario HPS
-    Todos los usuarios con perfil HPS pueden acceder, con filtros según su rol
+    ViewSet para gestionar perfiles de usuario HPS
+    Permite listar, ver, crear, actualizar, desactivar y eliminar usuarios
     """
     queryset = models.HpsUserProfile.objects.select_related('user', 'role', 'team')
     serializer_class = serializers.HpsUserProfileSerializer
@@ -341,6 +802,124 @@ class HpsUserProfileViewSet(viewsets.ReadOnlyModelViewSet):
         # Otros usuarios (members) pueden ver todos los usuarios también
         # Según el requerimiento: todos los usuarios deben aparecer en la gestión
         return qs
+    
+    def get_permissions(self):
+        """
+        Solo admins pueden crear, actualizar, desactivar y eliminar usuarios
+        """
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'activate', 'permanent_delete']:
+            return [permissions.IsAuthenticated(), IsHpsAdmin()]
+        return [permissions.IsAuthenticated(), HasHpsProfile()]
+    
+    def destroy(self, request, *args, **kwargs):
+        """
+        Sobrescribir destroy para marcar usuario como inactivo en lugar de eliminarlo
+        DELETE /api/hps/user/profiles/{id}/ -> Marca como inactivo
+        """
+        try:
+            profile = self.get_object()
+            user = profile.user
+            
+            # No permitir desactivar a uno mismo
+            if user.id == request.user.id:
+                return Response(
+                    {'detail': 'No puedes desactivarte a ti mismo'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Marcar usuario como inactivo
+            user.is_active = False
+            user.save()
+            
+            logger.info(f"Usuario {user.email} (ID: {user.id}) marcado como inactivo por {request.user.email}")
+            
+            serializer = self.get_serializer(profile)
+            return Response({
+                'message': f'Usuario {user.email} marcado como inactivo',
+                **serializer.data
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error desactivando usuario: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {'detail': f'Error desactivando usuario: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['post'], url_path='activate')
+    def activate(self, request, pk=None):
+        """
+        Activar un usuario (marcar como activo)
+        POST /api/hps/user/profiles/{id}/activate/
+        """
+        try:
+            profile = self.get_object()
+            user = profile.user
+            
+            # Activar usuario
+            user.is_active = True
+            user.save()
+            
+            logger.info(f"Usuario {user.email} (ID: {user.id}) activado por {request.user.email}")
+            
+            serializer = self.get_serializer(profile)
+            return Response({
+                'message': f'Usuario {user.email} activado correctamente',
+                **serializer.data
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error activando usuario: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {'detail': f'Error activando usuario: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['delete'], url_path='permanent')
+    def permanent_delete(self, request, pk=None):
+        """
+        Eliminar definitivamente un usuario y su perfil HPS
+        DELETE /api/hps/user/profiles/{id}/permanent/
+        """
+        try:
+            profile = self.get_object()
+            user = profile.user
+            
+            # No permitir eliminarse a uno mismo
+            if user.id == request.user.id:
+                return Response(
+                    {'detail': 'No puedes eliminarte a ti mismo'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Guardar información para el log
+            user_email = user.email
+            user_id = user.id
+            
+            # Eliminar el perfil HPS primero (para evitar problemas de foreign key)
+            profile.delete()
+            
+            # Eliminar el usuario
+            user.delete()
+            
+            logger.info(f"Usuario {user_email} (ID: {user_id}) eliminado definitivamente por {request.user.email}")
+            
+            return Response({
+                'message': f'Usuario {user_email} eliminado definitivamente'
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error eliminando usuario: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {'detail': f'Error eliminando usuario: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
 
 
@@ -562,6 +1141,77 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
         messages = conversation.messages.all().order_by('created_at')
         message_serializer = serializers.ChatMessageSerializer(messages, many=True)
         return Response({'messages': message_serializer.data})
+    
+    @action(detail=True, methods=['get'], url_path='full')
+    def full(self, request, pk=None):
+        """Obtener conversación completa con todos los mensajes"""
+        conversation = self.get_object()
+        if conversation.user != request.user and not request.user.is_staff:
+            return Response(
+                {'detail': 'No tienes permiso para ver esta conversación'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        messages = conversation.messages.all().order_by('created_at')
+        message_serializer = serializers.ChatMessageSerializer(messages, many=True)
+        conversation_serializer = self.get_serializer(conversation)
+        
+        return Response({
+            'conversation': conversation_serializer.data,
+            'messages': message_serializer.data
+        })
+    
+    @action(detail=False, methods=['post'], url_path='reset')
+    def reset(self, request):
+        """
+        Resetear conversación: cerrar la conversación activa actual y crear una nueva.
+        Compatible con el frontend de hps-system.
+        
+        POST /api/hps/chat/conversations/reset/
+        """
+        try:
+            from django.utils import timezone
+            import uuid
+            
+            # Cerrar todas las conversaciones activas del usuario
+            active_conversations = models.ChatConversation.objects.filter(
+                user=request.user,
+                status='active'
+            )
+            
+            closed_count = active_conversations.update(
+                status='closed',
+                closed_at=timezone.now()
+            )
+            
+            # Crear una nueva conversación activa
+            new_session_id = str(uuid.uuid4())
+            new_conversation = models.ChatConversation.objects.create(
+                user=request.user,
+                session_id=new_session_id,
+                title='Nueva conversación',
+                status='active',
+                total_messages=0,
+                total_tokens_used=0
+            )
+            
+            serializer = self.get_serializer(new_conversation)
+            return Response({
+                'success': True,
+                'message': f'Conversación reseteada. {closed_count} conversación(es) cerrada(s).',
+                'conversation_id': str(new_conversation.id),
+                'session_id': new_session_id,
+                **serializer.data
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error reseteando conversación: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {'detail': f'Error reseteando conversación: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class ChatMessageViewSet(viewsets.ModelViewSet):
@@ -908,6 +1558,358 @@ def send_hps_form_email_async(request):
         logger.error(traceback.format_exc())
         return Response(
             {'detail': f'Error enviando email: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+# ============================================================================
+# Endpoints de monitoreo de chat
+# ============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_chat_realtime_metrics(request):
+    """
+    Obtener métricas en tiempo real del chat.
+    Compatible con el frontend de hps-system.
+    
+    GET /api/hps/chat/metrics/realtime/
+    """
+    try:
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        last_24h = now - timedelta(hours=24)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Usuarios activos en las últimas 24 horas
+        active_users_24h = models.ChatConversation.objects.filter(
+            created_at__gte=last_24h
+        ).values('user').distinct().count()
+        
+        # Mensajes hoy
+        total_messages_today = models.ChatMessage.objects.filter(
+            created_at__gte=today_start
+        ).count()
+        
+        # Conversaciones activas
+        active_conversations = models.ChatConversation.objects.filter(
+            status='active'
+        ).count()
+        
+        # Tasa de error (mensajes con error)
+        total_messages_24h = models.ChatMessage.objects.filter(
+            created_at__gte=last_24h
+        ).count()
+        error_messages_24h = models.ChatMessage.objects.filter(
+            created_at__gte=last_24h,
+            is_error=True
+        ).count()
+        error_rate = (error_messages_24h / total_messages_24h * 100) if total_messages_24h > 0 else 0
+        
+        # Tiempo promedio de respuesta
+        from django.db.models import Avg
+        avg_response_time_result = models.ChatMessage.objects.filter(
+            created_at__gte=last_24h,
+            message_type='assistant',
+            response_time_ms__isnull=False
+        ).aggregate(avg=Avg('response_time_ms'))
+        avg_response_time_ms = avg_response_time_result['avg'] or 0
+        
+        # Score de salud del sistema (0-100)
+        system_health_score = 100.0
+        if error_rate > 10:
+            system_health_score -= 30
+        elif error_rate > 5:
+            system_health_score -= 15
+        if avg_response_time_ms > 5000:
+            system_health_score -= 20
+        elif avg_response_time_ms > 3000:
+            system_health_score -= 10
+        
+        return Response({
+            'active_users_24h': active_users_24h,
+            'total_messages_today': total_messages_today,
+            'active_conversations': active_conversations,
+            'error_rate': round(error_rate, 2),
+            'avg_response_time_ms': round(avg_response_time_ms, 2),
+            'system_health_score': max(0, min(100, round(system_health_score, 2)))
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo métricas en tiempo real: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return Response(
+            {'detail': f'Error obteniendo métricas: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_chat_historical_metrics(request):
+    """
+    Obtener métricas históricas del chat.
+    Compatible con el frontend de hps-system.
+    
+    GET /api/hps/chat/metrics/historical/?days=7
+    """
+    try:
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.db.models import Avg, Count
+        
+        days = int(request.query_params.get('days', 7))
+        start_date = timezone.now() - timedelta(days=days)
+        
+        # Agrupar por día
+        metrics_by_day = []
+        for i in range(days):
+            day_start = start_date + timedelta(days=i)
+            day_end = day_start + timedelta(days=1)
+            
+            conversations = models.ChatConversation.objects.filter(
+                created_at__gte=day_start,
+                created_at__lt=day_end
+            )
+            messages = models.ChatMessage.objects.filter(
+                created_at__gte=day_start,
+                created_at__lt=day_end
+            )
+            
+            metrics_by_day.append({
+                'date': day_start.date().isoformat(),
+                'conversations': conversations.count(),
+                'messages': messages.count(),
+                'tokens_used': sum(c.total_tokens_used for c in conversations),
+                'active_users': conversations.values('user').distinct().count()
+            })
+        
+        return Response({
+            'historical_metrics': metrics_by_day
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo métricas históricas: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return Response(
+            {'detail': f'Error obteniendo métricas históricas: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_chat_analytics(request):
+    """
+    Obtener análisis completo del chat.
+    Compatible con el frontend de hps-system.
+    
+    GET /api/hps/chat/analytics/?days=7
+    """
+    try:
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.db.models import Avg, Count
+        
+        days = int(request.query_params.get('days', 7))
+        start_date = timezone.now() - timedelta(days=days)
+        last_24h = timezone.now() - timedelta(hours=24)
+        today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Calcular métricas en tiempo real directamente
+        active_users_24h = models.ChatConversation.objects.filter(
+            created_at__gte=last_24h
+        ).values('user').distinct().count()
+        
+        total_messages_today = models.ChatMessage.objects.filter(
+            created_at__gte=today_start
+        ).count()
+        
+        active_conversations = models.ChatConversation.objects.filter(
+            status='active'
+        ).count()
+        
+        total_messages_24h = models.ChatMessage.objects.filter(
+            created_at__gte=last_24h
+        ).count()
+        error_messages_24h = models.ChatMessage.objects.filter(
+            created_at__gte=last_24h,
+            is_error=True
+        ).count()
+        error_rate = (error_messages_24h / total_messages_24h * 100) if total_messages_24h > 0 else 0
+        
+        avg_response_time_result = models.ChatMessage.objects.filter(
+            created_at__gte=last_24h,
+            message_type='assistant',
+            response_time_ms__isnull=False
+        ).aggregate(avg=Avg('response_time_ms'))
+        avg_response_time_ms = avg_response_time_result['avg'] or 0
+        
+        system_health_score = 100.0
+        if error_rate > 10:
+            system_health_score -= 30
+        elif error_rate > 5:
+            system_health_score -= 15
+        if avg_response_time_ms > 5000:
+            system_health_score -= 20
+        elif avg_response_time_ms > 3000:
+            system_health_score -= 10
+        
+        realtime_metrics = {
+            'active_users_24h': active_users_24h,
+            'total_messages_today': total_messages_today,
+            'active_conversations': active_conversations,
+            'error_rate': round(error_rate, 2),
+            'avg_response_time_ms': round(avg_response_time_ms, 2),
+            'system_health_score': max(0, min(100, round(system_health_score, 2)))
+        }
+        
+        # Calcular métricas históricas directamente
+        metrics_by_day = []
+        for i in range(days):
+            day_start = start_date + timedelta(days=i)
+            day_end = day_start + timedelta(days=1)
+            
+            conversations = models.ChatConversation.objects.filter(
+                created_at__gte=day_start,
+                created_at__lt=day_end
+            )
+            messages = models.ChatMessage.objects.filter(
+                created_at__gte=day_start,
+                created_at__lt=day_end
+            )
+            
+            metrics_by_day.append({
+                'date': day_start.date().isoformat(),
+                'conversations': conversations.count(),
+                'messages': messages.count(),
+                'tokens_used': sum(c.total_tokens_used for c in conversations),
+                'active_users': conversations.values('user').distinct().count()
+            })
+        
+        historical_metrics = metrics_by_day
+        
+        # Conversaciones recientes
+        recent_conversations = models.ChatConversation.objects.filter(
+            created_at__gte=start_date
+        ).select_related('user').order_by('-created_at')[:20]
+        
+        conversation_serializer = serializers.ChatConversationSerializer(recent_conversations, many=True)
+        
+        # Temas más frecuentes (simplificado - basado en palabras clave en mensajes)
+        # TODO: Implementar análisis más sofisticado de temas
+        top_topics = []
+        
+        # Rendimiento del agente
+        agent_performance = {
+            'avg_response_time_ms': realtime_metrics.get('avg_response_time_ms', 0),
+            'error_rate': realtime_metrics.get('error_rate', 0),
+            'total_responses': models.ChatMessage.objects.filter(
+                created_at__gte=start_date,
+                message_type='assistant'
+            ).count()
+        }
+        
+        return Response({
+            'realtime_metrics': realtime_metrics,
+            'historical_metrics': historical_metrics,
+            'recent_conversations': conversation_serializer.data,
+            'top_topics': top_topics,
+            'agent_performance': agent_performance
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo análisis del chat: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return Response(
+            {'detail': f'Error obteniendo análisis: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_chat_performance(request):
+    """
+    Obtener rendimiento del agente IA.
+    Compatible con el frontend de hps-system.
+    
+    GET /api/hps/chat/performance/
+    """
+    try:
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        last_24h = timezone.now() - timedelta(hours=24)
+        
+        # Calcular métricas de rendimiento
+        total_responses = models.ChatMessage.objects.filter(
+            created_at__gte=last_24h,
+            message_type='assistant'
+        ).count()
+        
+        error_responses = models.ChatMessage.objects.filter(
+            created_at__gte=last_24h,
+            message_type='assistant',
+            is_error=True
+        ).count()
+        
+        response_times = models.ChatMessage.objects.filter(
+            created_at__gte=last_24h,
+            message_type='assistant',
+            response_time_ms__isnull=False
+        ).values_list('response_time_ms', flat=True)
+        
+        avg_response_time = sum(response_times) / len(response_times) if response_times else 0
+        
+        return Response({
+            'total_responses_24h': total_responses,
+            'error_responses_24h': error_responses,
+            'success_rate': ((total_responses - error_responses) / total_responses * 100) if total_responses > 0 else 0,
+            'avg_response_time_ms': round(avg_response_time, 2)
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo rendimiento del agente: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return Response(
+            {'detail': f'Error obteniendo rendimiento: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_chat_topics(request):
+    """
+    Obtener temas más frecuentes.
+    Compatible con el frontend de hps-system.
+    
+    GET /api/hps/chat/topics/?limit=10
+    """
+    try:
+        limit = int(request.query_params.get('limit', 10))
+        
+        # TODO: Implementar análisis de temas más sofisticado
+        # Por ahora, devolver lista vacía
+        top_topics = []
+        
+        return Response({
+            'topics': top_topics
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo temas: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return Response(
+            {'detail': f'Error obteniendo temas: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 

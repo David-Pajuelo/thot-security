@@ -33,6 +33,11 @@ const PDFViewerEditor = ({ hpsId, isOpen, onClose, onSave }) => {
   useEffect(() => {
     if (isOpen && hpsId) {
       loadPDF();
+    } else if (!isOpen && pdfUrl) {
+      // Limpiar blob URL cuando se cierra el componente
+      URL.revokeObjectURL(pdfUrl);
+      setPdfUrl('');
+      setPdfBytes(null);
     }
   }, [isOpen, hpsId]);
 
@@ -41,18 +46,27 @@ const PDFViewerEditor = ({ hpsId, isOpen, onClose, onSave }) => {
     setError('');
 
     try {
+      // Siempre usar el endpoint filled-pdf para obtener los bytes
+      // Esto asegura que la autenticación funcione correctamente
       const result = await hpsService.getFilledPDFBytes(hpsId);
       if (result.success) {
-        // Crear URL del PDF para mostrar
+        // Crear blob URL para el iframe (los iframes no pueden pasar headers de autenticación)
         const blob = new Blob([result.data], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         setPdfUrl(url);
         setPdfBytes(result.data);
       } else {
-        setError(String(result.error) || 'Error al cargar el PDF');
+        // Si no hay PDF, verificar si la solicitud existe
+        const requestResult = await hpsService.getRequest(hpsId);
+        if (requestResult.success && !requestResult.data.filled_pdf) {
+          setError('No hay PDF rellenado disponible para esta solicitud');
+        } else {
+          setError(String(result.error) || 'Error al cargar el PDF');
+        }
       }
     } catch (err) {
-      setError('Error al cargar el PDF');
+      console.error('Error cargando PDF:', err);
+      setError('Error al cargar el PDF: ' + (err.message || 'Error desconocido'));
     } finally {
       setLoading(false);
     }
@@ -84,6 +98,13 @@ const PDFViewerEditor = ({ hpsId, isOpen, onClose, onSave }) => {
       
       // Llamar al backend para extraer los valores usando PyMuPDF
       const result = await hpsService.extractPDFFields(hpsId);
+      
+      // Si el endpoint no existe, usar extracción local directamente
+      if (!result.success && result.error && result.error.includes('404')) {
+        console.log('Endpoint de extracción no disponible, usando extracción local...');
+        await extractTextFromPage();
+        return;
+      }
       
       if (result.success && result.data) {
         console.log('Valores extraídos del backend:', result.data);
@@ -259,14 +280,54 @@ const PDFViewerEditor = ({ hpsId, isOpen, onClose, onSave }) => {
       console.log('Resultado del backend:', result);
       
       if (result.success) {
-        // Cerrar la ventana y mostrar mensaje de éxito
-        handleClose();
+        // Mostrar mensaje de éxito
         alert('✅ PDF guardado correctamente');
+        
+        // Limpiar el blob URL anterior para forzar recarga
+        if (pdfUrl) {
+          URL.revokeObjectURL(pdfUrl);
+          setPdfUrl('');
+        }
+        setPdfBytes(null);
+        
+        // Recargar el PDF actualizado desde el servidor
+        setLoading(true);
+        try {
+          const bytesResult = await hpsService.getFilledPDFBytes(hpsId);
+          if (bytesResult.success) {
+            // Crear nuevo blob URL con el PDF actualizado
+            const blob = new Blob([bytesResult.data], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            setPdfUrl(url);
+            setPdfBytes(bytesResult.data);
+          } else {
+            setError('Error al recargar el PDF actualizado');
+          }
+        } catch (reloadErr) {
+          console.error('Error recargando PDF:', reloadErr);
+          setError('Error al recargar el PDF actualizado');
+        } finally {
+          setLoading(false);
+        }
+        
+        // Salir del modo edición pero mantener el modal abierto para ver los cambios
+        setIsEditing(false);
+        setAnnotations([]);
+        setCurrentAnnotation(null);
+        
+        // Notificar al componente padre que se guardó
         onSave && onSave();
       } else {
-        const errorMsg = String(result.error) || 'Error al guardar el PDF';
-        setError(errorMsg);
-        alert('❌ ' + errorMsg);
+        // Si el endpoint no existe, mostrar mensaje informativo
+        if (result.error && result.error.includes('404')) {
+          const errorMsg = 'La funcionalidad de edición de PDF no está disponible en el backend.';
+          setError(errorMsg);
+          alert('⚠️ ' + errorMsg);
+        } else {
+          const errorMsg = String(result.error) || 'Error al guardar el PDF';
+          setError(errorMsg);
+          alert('❌ ' + errorMsg);
+        }
       }
     } catch (err) {
       console.error('Error saving PDF:', err);

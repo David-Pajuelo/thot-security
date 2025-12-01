@@ -204,11 +204,18 @@ const UserManagement = () => {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
-      // El backend se encarga de asignar automáticamente al equipo AICOX si team_id es null
+      // Preparar datos para creación usando los campos escribibles del backend
+      const roleValue = typeof formData.role === 'string' ? formData.role : (formData.role?.name || formData.role || 'member');
+      
       const userData = {
-        ...formData
-        // No necesitamos modificar team_id aquí, el backend lo maneja
+        email: formData.email,
+        full_name: formData.full_name,
+        password: formData.password,
+        role_writable: roleValue,  // Usar role_writable en lugar de role
+        team_id_writable: formData.team_id || null  // Usar team_id_writable en lugar de team_id
       };
+      
+      console.log('Creando usuario con datos:', userData);
       
       await userService.createUser(userData);
       setShowCreateModal(false);
@@ -222,7 +229,11 @@ const UserManagement = () => {
       loadUsers();
     } catch (error) {
       console.error('Error creando usuario:', error);
-      const errorMessage = formatErrorForDisplay(error.response?.data || error);
+      const errorMessage = error.response?.data?.detail || 
+                          error.response?.data?.message || 
+                          (error.response?.data?.role_writable ? error.response.data.role_writable[0] : null) ||
+                          (error.response?.data?.team_id_writable ? error.response.data.team_id_writable[0] : null) ||
+                          formatErrorForDisplay(error.response?.data || error);
       alert('Error al crear usuario: ' + errorMessage);
     }
   };
@@ -231,10 +242,20 @@ const UserManagement = () => {
     e.preventDefault();
     try {
       // Asegurar que el rol siempre sea un string, no un objeto
+      const roleValue = typeof formData.role === 'string' ? formData.role : (formData.role?.name || formData.role || 'member');
+      
+      // Preparar datos para actualización usando los campos escribibles del backend
       const updateData = {
-        ...formData,
-        role: typeof formData.role === 'string' ? formData.role : (formData.role?.name || formData.role || 'member')
+        role_writable: roleValue,  // Usar role_writable en lugar de role
+        team_id_writable: formData.team_id || null  // Usar team_id_writable en lugar de team_id
       };
+      
+      // Solo incluir password si se proporcionó uno nuevo
+      if (formData.password && formData.password.trim() !== '') {
+        updateData.password = formData.password;
+      }
+      
+      console.log('Actualizando usuario con datos:', updateData);
       
       await userService.updateUser(selectedUser.id, updateData);
       setShowEditModal(false);
@@ -245,6 +266,8 @@ const UserManagement = () => {
       console.error('Error actualizando usuario:', error);
       const errorMessage = error.response?.data?.detail || 
                           error.response?.data?.message || 
+                          (error.response?.data?.role_writable ? error.response.data.role_writable[0] : null) ||
+                          (error.response?.data?.team_id_writable ? error.response.data.team_id_writable[0] : null) ||
                           error.message || 
                           'Error desconocido al actualizar usuario';
       alert('Error al actualizar usuario: ' + errorMessage);
@@ -1969,6 +1992,7 @@ const UserManagement = () => {
         }}
         onConfirm={handlePermanentDeleteUser}
         userEmail={userToPermanentDelete?.email || ''}
+        hpsRequestsCount={userToPermanentDelete?.hps_requests_count || 0}
         loading={permanentDeleteLoading}
       />
     </div>
