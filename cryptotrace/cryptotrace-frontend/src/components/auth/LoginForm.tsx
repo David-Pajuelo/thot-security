@@ -74,20 +74,8 @@ export default function LoginForm() {
         }
         
         if (!token) {
-          console.log("[LoginForm] No hay token, esperando postMessage de HPS System...");
-          // Esperar un poco para recibir el token mediante postMessage
-          // Reducido a 500ms para mejor rendimiento
-          setTimeout(() => {
-            const tokenAfterWait = localStorage.getItem("accessToken") || localStorage.getItem("hps_token");
-            if (!tokenAfterWait) {
-              console.log("[LoginForm] No se recibió token después de esperar, mostrando formulario de login");
-              setCheckingToken(false);
-            } else {
-              console.log("[LoginForm] Token recibido después de esperar, verificando...");
-              // Re-ejecutar la verificación con el token recibido
-              checkExistingToken();
-            }
-          }, 500); // Reducido de 2000ms a 500ms
+          console.log("[LoginForm] No hay token, mostrando formulario de login");
+          setCheckingToken(false);
           return;
         }
 
@@ -122,10 +110,14 @@ export default function LoginForm() {
           console.log("[LoginForm] Roles permitidos:", allowedRoles);
           
           if (payload.role && !allowedRoles.includes(payload.role)) {
-            console.log("[LoginForm] Usuario no tiene rol permitido, redirigiendo a página de acceso denegado");
-            // Usuario no tiene permisos, pero mantener sesión para HPS
-            // Redirigir a página de acceso denegado
-            router.push("/productos");
+            console.log("[LoginForm] Usuario no tiene rol permitido, limpiando token y mostrando formulario");
+            // Usuario no tiene permisos, limpiar token y mostrar formulario con error
+            localStorage.removeItem("accessToken");
+            localStorage.removeItem("refreshToken");
+            localStorage.removeItem("hps_token");
+            localStorage.removeItem("hps_refresh_token");
+            setError("No tienes permisos para acceder a CryptoTrace. Solo usuarios con rol 'admin' o 'crypto' pueden acceder.");
+            setCheckingToken(false);
             return;
           }
 
@@ -202,32 +194,36 @@ export default function LoginForm() {
       // Decodificar el token JWT para verificar si debe cambiar contraseña y rol
       try {
         const payload = jwtDecode<JWTPayload>(data.access);
+        console.log("[LoginForm] Payload después de login:", {
+          role: payload.role,
+          must_change_password: payload.must_change_password,
+          username: payload.username
+        });
         
         // Verificar que el usuario tenga un rol permitido (admin o crypto)
         const allowedRoles = ['admin', 'crypto'];
-        if (payload.role && !allowedRoles.includes(payload.role)) {
+        if (!payload.role || !allowedRoles.includes(payload.role)) {
           // Usuario no tiene permisos para acceder a CryptoTrace
-          // PERO mantener la sesión activa para permitir navegación a HPS
-          // NO limpiar tokens - la sesión se mantiene activa
-          setError("No tienes permisos para acceder a CryptoTrace. Solo usuarios con rol 'admin' o 'crypto' pueden acceder. Sin embargo, puedes acceder a HPS System con tu sesión actual.");
-          // Redirigir a la página de acceso denegado que mostrará opción de ir a HPS
-          setTimeout(() => {
-            router.push("/productos"); // Esto activará el ProtectedRoute que mostrará la página de acceso denegado
-          }, 100);
+          // Limpiar tokens y mostrar error
+          localStorage.removeItem("accessToken");
+          localStorage.removeItem("refreshToken");
+          setError(`No tienes permisos para acceder a CryptoTrace. Tu rol actual es: ${payload.role || 'sin rol'}. Solo usuarios con rol 'admin' o 'crypto' pueden acceder.`);
           return;
         }
         
+        // Usuario tiene rol permitido, proceder con la redirección
         if (payload.must_change_password) {
           // Si debe cambiar contraseña, redirigir a la página de cambio obligatorio
+          console.log("[LoginForm] Debe cambiar contraseña, redirigiendo a /cambiar-password");
           router.push("/cambiar-password");
         } else {
           // Si no, continuar al dashboard normal
+          console.log("[LoginForm] Login exitoso, redirigiendo a /productos");
           router.push("/productos");
         }
       } catch (jwtError) {
         console.error("Error decodificando JWT:", jwtError);
-        // Si hay error decodificando, verificar rol antes de permitir acceso
-        // Por seguridad, si no se puede decodificar, no permitir acceso
+        // Si hay error decodificando, limpiar tokens y mostrar error
         localStorage.removeItem("accessToken");
         localStorage.removeItem("refreshToken");
         setError("Error al verificar credenciales. Por favor, intenta de nuevo.");

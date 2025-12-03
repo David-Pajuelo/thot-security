@@ -268,6 +268,8 @@ IMAP_MAILBOX = os.getenv('IMAP_MAILBOX', 'INBOX')
 
 # URL base del frontend para incluir en emails
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+# URL del sistema HPS (para emails de credenciales HPS)
+HPS_SYSTEM_URL = os.getenv('HPS_SYSTEM_URL', 'http://localhost:3001')
 
 # === Celery / Redis (configuración unificada desde hps-system) ===
 # Redis Configuration

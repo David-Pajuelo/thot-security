@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import { useAuthStore } from './store/authStore';
 import { useSessionPersistence } from './hooks/useSessionPersistence';
@@ -108,6 +108,35 @@ const Unauthorized = () => (
     </div>
   </div>
 );
+
+// Componente interno para manejar el modal de cambio de contraseña
+// Debe estar dentro del Router para usar useLocation
+const ChangePasswordModalWrapper = () => {
+  const location = useLocation();
+  const { 
+    isAuthenticated, 
+    user, 
+    showChangePasswordModal, 
+    closeChangePasswordModal 
+  } = useAuthStore();
+  
+  // Rutas públicas donde NO se debe mostrar el modal de cambio de contraseña
+  const publicRoutes = ['/login', '/hps-form'];
+  const isPublicRoute = publicRoutes.some(route => location.pathname.startsWith(route));
+  
+  // Solo mostrar el modal si está autenticado Y NO está en una ruta pública
+  if (!isAuthenticated || isPublicRoute) {
+    return null;
+  }
+  
+  return (
+    <ChangePasswordModal
+      isOpen={showChangePasswordModal}
+      onClose={closeChangePasswordModal}
+      isRequired={user?.is_temp_password || false}
+    />
+  );
+};
 
 function App() {
   const { 
@@ -308,14 +337,8 @@ function App() {
         </Routes>
       </div>
       
-      {/* Modal de cambio de contraseña - Solo mostrar si está autenticado */}
-      {isAuthenticated && (
-        <ChangePasswordModal
-          isOpen={showChangePasswordModal}
-          onClose={closeChangePasswordModal}
-          isRequired={user?.is_temp_password || false}
-        />
-      )}
+      {/* Modal de cambio de contraseña - Solo mostrar si está autenticado Y NO está en una ruta pública */}
+      <ChangePasswordModalWrapper />
     </Router>
   );
 }

@@ -492,53 +492,6 @@ async def check_user_exists(
             detail=f"Error verificando usuario: {str(e)}"
         )
 
-@router.get("/temp-password/{email}")
-async def get_user_temp_password(
-    email: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Obtener la contraseña temporal de un usuario (solo para usuarios recién creados)
-    """
-    try:
-        # Solo permitir a admins y team leaders
-        if current_user.role.name not in ["admin", "team_leader"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No tienes permisos para acceder a esta información"
-            )
-        
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Usuario no encontrado"
-            )
-        
-        # Verificar si el usuario fue creado recientemente (últimas 24 horas)
-        from datetime import datetime, timedelta
-        if user.created_at and user.created_at > datetime.utcnow() - timedelta(hours=24):
-            # En un sistema real, aquí deberías tener un campo para almacenar la contraseña temporal
-            # Por ahora, retornamos un mensaje indicando que se debe contactar al admin
-            return {
-                "temp_password": None,
-                "message": "Usuario creado recientemente. Contacta al administrador para obtener las credenciales."
-            }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Este usuario no fue creado recientemente"
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error obteniendo contraseña temporal: {str(e)}"
-        )
-
 @router.get("/health", summary="Health check de usuarios")
 async def users_health():
     """
@@ -558,7 +511,6 @@ async def users_health():
             "Bulk Operations",
             "User Statistics",
             "Password Management",
-            "User Existence Check",
-            "Temporary Password Management"
+            "User Existence Check"
         ]
     }

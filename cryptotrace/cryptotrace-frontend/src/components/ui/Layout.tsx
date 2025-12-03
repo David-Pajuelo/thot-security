@@ -54,14 +54,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         setIsSuperuser(hasManagementPermissions || false);
         
         // Verificar rol permitido (admin o crypto)
-        if (role && !allowedRoles.includes(role)) {
+        // NO redirigir desde Layout si estamos en /login (evitar bucles)
+        if (role && !allowedRoles.includes(role) && pathname !== '/login') {
           // Si el usuario no tiene rol permitido, limpiar tokens y redirigir
-          localStorage.removeItem("accessToken");
-          localStorage.removeItem("refreshToken");
+          // Solo si NO estamos ya en la página de login (evitar bucles)
+          console.log('[Layout] Usuario sin rol permitido, pero estamos en:', pathname);
+          // No redirigir desde Layout - dejar que ProtectedRoute maneje esto
           setIsAuthenticated(false);
           setIsSuperuser(false);
           setUserRole(null);
-          window.location.href = "/login";
         }
       } catch (error) {
         console.error("Error parsing token:", error);
