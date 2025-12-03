@@ -318,10 +318,20 @@ async def websocket_endpoint(
                     # Crear contexto del usuario
                     # Priorizar role del token/user, luego del contexto del mensaje
                     role_from_context = message_data.get("context", {}).get("role") if "context" in message_data else None
+                    role_from_user = user.get("role")
+                    
+                    # Determinar el rol final (priorizar contexto del mensaje, luego user del token, luego default)
+                    final_role = role_from_context or role_from_user or "member"
+                    
+                    # Normalizar el rol (eliminar espacios, convertir a minúsculas)
+                    final_role = final_role.strip().lower() if final_role else "member"
+                    
+                    logger.info(f"🔍 [WebSocket] Construyendo user_context - role_from_context: '{role_from_context}', role_from_user: '{role_from_user}', final_role: '{final_role}'")
+                    
                     user_context = {
                         "id": user_id,
                         "email": user.get("email", ""),
-                        "role": role_from_context or user.get("role") or "member",  # Priorizar contexto, luego user, luego default
+                        "role": final_role,  # Rol normalizado
                         "first_name": user.get("first_name", ""),
                         "last_name": user.get("last_name", ""),
                         "team_id": user.get("team_id"),

@@ -103,6 +103,29 @@ class IsHpsAdminOrTeamLead(permissions.BasePermission):
         return is_team_lead
 
 
+class IsHpsAdminOrSecurityChief(permissions.BasePermission):
+    """
+    Permite acceso a administradores y jefes de seguridad (incluyendo suplentes).
+    """
+
+    message = "Solo administradores o jefes de seguridad pueden realizar esta acción."
+
+    def has_permission(self, request, view):
+        ctx = _extract_profile_context(request.user)
+        if not ctx.has_profile:
+            return False
+        
+        # Verificar si es admin
+        if ctx.role_name in ADMIN_ROLES:
+            return True
+        
+        # Verificar si es jefe de seguridad o jefe de seguridad suplente
+        if ctx.role_name in {"jefe_seguridad", "jefe_seguridad_suplente", "security_chief"}:
+            return True
+        
+        return False
+
+
 class IsHpsAdminOrSelf(permissions.BasePermission):
     """
     Permite a administradores ver todo y al resto solo sus propias entidades.

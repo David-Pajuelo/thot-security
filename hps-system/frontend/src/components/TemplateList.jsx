@@ -3,7 +3,6 @@ import {
   DocumentTextIcon, 
   TrashIcon,
   ArrowDownTrayIcon,
-  EyeIcon,
   PencilIcon,
   DocumentTextIcon as EditPDFIcon
 } from '@heroicons/react/24/outline';
@@ -77,17 +76,6 @@ const TemplateList = forwardRef((props, ref) => {
     }
   };
 
-  const handlePreview = async (id) => {
-    try {
-      const url = `/api/hps/templates/${id}/pdf/`;
-      const result = await pdfService.previewPDF(url);
-      if (!result.success) {
-        setError(result.error);
-      }
-    } catch (err) {
-      setError('Error al previsualizar la plantilla');
-    }
-  };
 
   const handleDownload = async (id, name) => {
     try {
@@ -274,13 +262,6 @@ const TemplateList = forwardRef((props, ref) => {
                             <EditPDFIcon className="h-5 w-5" />
                           </button>
                           <button
-                            onClick={() => handlePreview(template.id)}
-                            className="text-gray-400 hover:text-blue-600"
-                            title="Previsualizar PDF"
-                          >
-                            <EyeIcon className="h-5 w-5" />
-                          </button>
-                          <button
                             onClick={() => handleDownload(template.id, template.name)}
                             className="text-gray-400 hover:text-gray-600"
                             title="Descargar PDF"
@@ -349,13 +330,6 @@ const TemplateList = forwardRef((props, ref) => {
                             title="Editar PDF"
                           >
                             <EditPDFIcon className="h-5 w-5" />
-                          </button>
-                          <button
-                            onClick={() => handlePreview(template.id)}
-                            className="text-gray-400 hover:text-blue-600"
-                            title="Previsualizar PDF"
-                          >
-                            <EyeIcon className="h-5 w-5" />
                           </button>
                           <button
                             onClick={() => handleDownload(template.id, template.name)}

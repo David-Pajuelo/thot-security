@@ -428,24 +428,50 @@ class HpsRequestService:
                                 logger.warning(f"Error rellenando campo '{widget.field_name}': {e}")
                 
                 # Estrategia 2: Búsqueda parcial si no se encontró coincidencia exacta
+                # IMPORTANTE: Para campos de email, solo buscar coincidencias exactas o muy específicas
+                # para evitar rellenar campos compuestos que contengan palabras como "correo"
                 if field_name not in filled_fields:
                     for widget in widgets_list:
                         if widget.field_name:
                             widget_name_lower = widget.field_name.lower().strip()
                             field_name_lower = field_name.lower().strip()
                             
-                            # Coincidencia parcial (el nombre del campo contiene o está contenido en el nombre del widget)
-                            if (field_name_lower in widget_name_lower or 
-                                widget_name_lower in field_name_lower or
-                                any(word in widget_name_lower for word in field_name_lower.split() if len(word) > 3)):
-                                try:
-                                    widget.field_value = str(field_value)
-                                    widget.update()
-                                    filled_fields.add(field_name)
-                                    logger.info(f"Campo '{widget.field_name}' rellenado con '{field_value}' (coincidencia parcial)")
-                                    break
-                                except Exception as e:
-                                    logger.warning(f"Error rellenando campo '{widget.field_name}': {e}")
+                            # Para campos de email/correo, ser más estricto: solo coincidencias exactas o que empiecen/terminen con la palabra
+                            is_email_field = field_name_lower in ['email', 'correo', 'e-mail', 'correo electrónico']
+                            
+                            if is_email_field:
+                                # Para email: solo coincidencias exactas o que sean específicamente campos de email
+                                # No rellenar campos compuestos que contengan "correo" como parte de otro texto
+                                if (widget_name_lower == field_name_lower or
+                                    widget_name_lower == 'email' or
+                                    widget_name_lower == 'correo' or
+                                    widget_name_lower == 'e-mail' or
+                                    widget_name_lower == 'correo electrónico' or
+                                    widget_name_lower.startswith('email ') or
+                                    widget_name_lower.startswith('correo ') or
+                                    widget_name_lower.endswith(' email') or
+                                    widget_name_lower.endswith(' correo')):
+                                    try:
+                                        widget.field_value = str(field_value)
+                                        widget.update()
+                                        filled_fields.add(field_name)
+                                        logger.info(f"Campo '{widget.field_name}' rellenado con '{field_value}' (coincidencia parcial para email)")
+                                        break
+                                    except Exception as e:
+                                        logger.warning(f"Error rellenando campo '{widget.field_name}': {e}")
+                            else:
+                                # Para otros campos, usar búsqueda parcial normal
+                                if (field_name_lower in widget_name_lower or 
+                                    widget_name_lower in field_name_lower or
+                                    any(word in widget_name_lower for word in field_name_lower.split() if len(word) > 3)):
+                                    try:
+                                        widget.field_value = str(field_value)
+                                        widget.update()
+                                        filled_fields.add(field_name)
+                                        logger.info(f"Campo '{widget.field_name}' rellenado con '{field_value}' (coincidencia parcial)")
+                                        break
+                                    except Exception as e:
+                                        logger.warning(f"Error rellenando campo '{widget.field_name}': {e}")
             
             # Los widgets ya se actualizaron con widget.update(), no necesitamos page.update()
             

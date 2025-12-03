@@ -240,7 +240,7 @@ class CommandProcessor:
             elif accion in ["renovar_hps", "renovar hps", "renovar hps de", "renovar hps para", "renovacion hps", "renovación hps", "solicitar renovacion", "solicitar renovación"]:
                 return await self._renovar_hps(parametros, user_context)
             elif accion in ["trasladar_hps", "trasladar hps", "trasladar hps de", "trasladar hps para", "traspasar_hps", "traspasar hps", "traspasar hps de", "traspasar hps para", "solicitar traspaso", "solicitar traslado"]:
-                return await self._solicitar_hps(parametros, user_context)
+                return await self._solicitar_hps(parametros, user_context, is_transfer=True)
             elif accion in ["listar_usuarios", "listar usuarios", "ver usuarios", "mostrar usuarios", "usuarios del sistema"]:
                 return await self._listar_usuarios(user_context)
             elif accion in ["listar_equipos", "listar equipos", "ver equipos", "mostrar equipos", "equipos del sistema"]:
@@ -412,10 +412,19 @@ class CommandProcessor:
         # Verificar permisos: traspasos solo para admin y jefes de seguridad
         if is_transfer:
             # Solo administradores y jefes de seguridad pueden solicitar traspasos
-            if user_role not in ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]:
+            # Normalizar el rol para comparación (eliminar espacios, convertir a minúsculas)
+            user_role_normalized = user_role.strip().lower() if user_role else ""
+            allowed_roles = ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]
+            
+            logger.info(f"🔍 Verificando permisos de traspaso - Rol del usuario: '{user_role}' (normalizado: '{user_role_normalized}')")
+            logger.info(f"🔍 Roles permitidos: {allowed_roles}")
+            logger.info(f"🔍 ¿Tiene permisos?: {user_role_normalized in allowed_roles}")
+            
+            if user_role_normalized not in allowed_roles:
+                logger.warning(f"❌ Usuario con rol '{user_role}' (normalizado: '{user_role_normalized}') intentó solicitar traspaso sin permisos")
                 return {
                     "tipo": "error",
-                    "mensaje": "❌ No tienes permisos para solicitar traspasos HPS. Solo los administradores y jefes de seguridad pueden realizar esta acción. Si necesitas solicitar un traspaso, contacta con un administrador o jefe de seguridad."
+                    "mensaje": f"❌ No tienes permisos para solicitar traspasos HPS. Tu rol actual es: '{user_role}'. Solo los administradores y jefes de seguridad pueden realizar esta acción. Si necesitas solicitar un traspaso, contacta con un administrador o jefe de seguridad."
                 }
         else:
             # Para nuevas HPS y renovaciones, mantener permisos actuales
@@ -909,14 +918,23 @@ class CommandProcessor:
     async def _trasladar_hps(self, parametros: Dict[str, Any], user_context: Dict[str, Any]) -> Dict[str, Any]:
         """Iniciar proceso de traspaso HPS - IMPLEMENTACIÓN REAL"""
         
-        user_role = user_context.get("role", "").lower()
+        user_role = user_context.get("role", "")
         email = parametros.get("email")
         
+        # Normalizar el rol para comparación (eliminar espacios, convertir a minúsculas)
+        user_role_normalized = user_role.strip().lower() if user_role else ""
+        allowed_roles = ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]
+        
+        logger.info(f"🔍 [_trasladar_hps] Verificando permisos - Rol del usuario: '{user_role}' (normalizado: '{user_role_normalized}')")
+        logger.info(f"🔍 [_trasladar_hps] Roles permitidos: {allowed_roles}")
+        logger.info(f"🔍 [_trasladar_hps] User context completo: {user_context}")
+        
         # Solo administradores y jefes de seguridad pueden solicitar traspasos
-        if user_role not in ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]:
+        if user_role_normalized not in allowed_roles:
+            logger.warning(f"❌ [_trasladar_hps] Usuario con rol '{user_role}' (normalizado: '{user_role_normalized}') intentó solicitar traspaso sin permisos")
             return {
                 "tipo": "error",
-                "mensaje": "❌ No tienes permisos para solicitar traspasos HPS. Solo los administradores y jefes de seguridad pueden realizar esta acción. Si necesitas solicitar un traspaso, contacta con un administrador o jefe de seguridad."
+                "mensaje": f"❌ No tienes permisos para solicitar traspasos HPS. Tu rol actual es: '{user_role}'. Solo los administradores y jefes de seguridad pueden realizar esta acción. Si necesitas solicitar un traspaso, contacta con un administrador o jefe de seguridad."
             }
         
         if not email:

@@ -11,7 +11,7 @@ from rest_framework.response import Response
 logger = logging.getLogger(__name__)
 
 from . import models, serializers
-from .permissions import HasHpsProfile, IsHpsAdmin, IsHpsAdminOrSelf, IsHpsAdminOrTeamLead
+from .permissions import HasHpsProfile, IsHpsAdmin, IsHpsAdminOrSelf, IsHpsAdminOrTeamLead, IsHpsAdminOrSecurityChief
 from .services import HpsRequestService
 from .extension_service import ExtensionService
 from django.http import FileResponse, Http404
@@ -658,7 +658,22 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
 class HpsTokenViewSet(viewsets.ModelViewSet):
     queryset = models.HpsToken.objects.all()
     serializer_class = serializers.HpsTokenSerializer
-    permission_classes = [permissions.IsAuthenticated, IsHpsAdmin]
+    permission_classes = [permissions.IsAuthenticated, HasHpsProfile]
+    
+    def get_permissions(self):
+        """
+        Solo admins y jefes de seguridad (incluyendo suplentes) pueden crear tokens.
+        La validación de tokens es pública.
+        """
+        if self.action == 'create':
+            # Para crear tokens, se requiere ser admin o jefe de seguridad (incluyendo suplentes)
+            return [permissions.IsAuthenticated(), IsHpsAdminOrSecurityChief()]
+        elif self.action == 'validate_token':
+            # La validación de tokens es pública (AllowAny)
+            return [permissions.AllowAny()]
+        else:
+            # Para otras acciones (list, retrieve, etc.), se requiere ser admin
+            return [permissions.IsAuthenticated(), IsHpsAdmin()]
     
     def perform_create(self, serializer):
         """Crear token HPS usando el método del modelo que genera automáticamente token y expires_at"""
@@ -677,7 +692,7 @@ class HpsTokenViewSet(viewsets.ModelViewSet):
         # Actualizar el serializer con el token creado
         serializer.instance = token
     
-    @action(detail=False, methods=['get'], url_path='validate', permission_classes=[permissions.AllowAny])
+    @action(detail=False, methods=['get'], url_path='validate')
     def validate_token(self, request):
         """
         Validar un token HPS (endpoint público)
