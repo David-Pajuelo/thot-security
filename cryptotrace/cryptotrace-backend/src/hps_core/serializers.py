@@ -22,9 +22,13 @@ class HpsRoleSerializer(serializers.ModelSerializer):
 
 class HpsTeamSerializer(serializers.ModelSerializer):
     team_lead = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(), allow_null=True, required=False
+        allow_null=True, required=False, read_only=True
     )
+    team_lead_id = serializers.SerializerMethodField(read_only=True)
+    team_lead_id_writable = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    team_lead_name = serializers.SerializerMethodField()
     member_count = serializers.IntegerField(read_only=True)
+    members = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = models.HpsTeam
@@ -33,11 +37,192 @@ class HpsTeamSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "team_lead",
+            "team_lead_id",
+            "team_lead_id_writable",
+            "team_lead_name",
             "is_active",
             "member_count",
+            "members",
             "created_at",
             "updated_at",
         ]
+    
+    def get_team_lead_id(self, obj):
+        """Obtener el ID del líder del equipo como entero"""
+        if obj.team_lead:
+            return obj.team_lead.id
+        return None
+    
+    def get_team_lead_name(self, obj):
+        """Obtener el nombre completo del líder del equipo"""
+        if obj.team_lead:
+            full_name = f"{obj.team_lead.first_name} {obj.team_lead.last_name}".strip()
+            return full_name if full_name else obj.team_lead.email
+        return None
+    
+    def get_members(self, obj):
+        """Obtener lista de miembros del equipo"""
+        members = models.HpsUserProfile.objects.filter(
+            team=obj,
+            user__is_active=True
+        ).select_related('user', 'role')
+        
+        members_list = []
+        for profile in members:
+            members_list.append({
+                'id': profile.user.id,
+                'email': profile.user.email,
+                'full_name': f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.email,
+                'first_name': profile.user.first_name,
+                'last_name': profile.user.last_name,
+                'role': profile.role.name if profile.role else None,
+                'is_active': profile.user.is_active
+            })
+        
+        return members_list
+    
+    def create(self, validated_data):
+        """
+        Crear equipo, manejando team_lead_id_writable y actualizando roles de usuarios.
+        
+        Lógica de asignación de líder:
+        - Si el usuario tiene rol "member" y se le asigna como líder, cambiar a "team_lead"
+        - Si el usuario tiene otro rol (crypto, admin, etc.), mantenerlo pero internamente tiene permisos de líder
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        team_lead_id_writable = validated_data.pop('team_lead_id_writable', None)
+        # También aceptar team_lead_id para compatibilidad
+        team_lead_id = validated_data.pop('team_lead_id', None)
+        
+        # Usar team_lead_id_writable si está presente, sino team_lead_id
+        lead_id = team_lead_id_writable if team_lead_id_writable is not None else team_lead_id
+        
+        if lead_id is not None and lead_id != '':
+            try:
+                new_team_lead = User.objects.get(id=lead_id, is_active=True)
+                validated_data['team_lead'] = new_team_lead
+                
+                # Actualizar rol del nuevo líder si es necesario
+                try:
+                    new_profile = new_team_lead.hps_profile
+                    current_role_name = new_profile.role.name if new_profile.role else None
+                    
+                    # Si el rol actual es "member", cambiar a "team_lead"
+                    if current_role_name == "member":
+                        team_lead_role = models.HpsRole.objects.filter(name="team_lead").first()
+                        if team_lead_role:
+                            new_profile.role = team_lead_role
+                            new_profile.save(update_fields=['role'])
+                            logger.info(f"Usuario {new_team_lead.email} cambió de 'member' a 'team_lead' al asignarle liderazgo")
+                    # Si tiene otro rol (crypto, admin, etc.), mantenerlo
+                    elif current_role_name and current_role_name != "team_lead":
+                        logger.info(f"Usuario {new_team_lead.email} mantiene rol '{current_role_name}' pero tiene permisos de líder de equipo")
+                except models.HpsUserProfile.DoesNotExist:
+                    logger.warning(f"Usuario {new_team_lead.email} no tiene perfil HPS")
+                    
+            except User.DoesNotExist:
+                raise serializers.ValidationError({'team_lead_id_writable': f'Usuario con ID {lead_id} no existe o está inactivo'})
+        else:
+            validated_data['team_lead'] = None
+        
+        return super().create(validated_data)
+    
+    def validate_team_lead_id_writable(self, value):
+        """Validar que el usuario existe si se proporciona team_lead_id_writable"""
+        if value is not None and value != '':
+            try:
+                User.objects.get(id=value, is_active=True)
+            except User.DoesNotExist:
+                raise serializers.ValidationError(f'Usuario con ID {value} no existe o está inactivo')
+        return value
+    
+    def update(self, instance, validated_data):
+        """
+        Actualizar equipo, manejando team_lead_id_writable y actualizando roles de usuarios.
+        
+        Lógica de asignación de líder:
+        - Si el usuario tiene rol "member" y se le asigna como líder, cambiar a "team_lead"
+        - Si el usuario tiene otro rol (crypto, admin, etc.), mantenerlo pero internamente tiene permisos de líder
+        - Si se quita el liderazgo y el rol era "team_lead", volver a "member"
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        team_lead_id_writable = validated_data.pop('team_lead_id_writable', None)
+        # También aceptar team_lead_id para compatibilidad
+        team_lead_id = validated_data.pop('team_lead_id', None)
+        
+        # Usar team_lead_id_writable si está presente, sino team_lead_id
+        lead_id = team_lead_id_writable if team_lead_id_writable is not None else team_lead_id
+        
+        # Guardar el líder anterior para poder revertir cambios si es necesario
+        old_team_lead = instance.team_lead
+        
+        if lead_id is not None:
+            if lead_id == '' or lead_id is None:
+                # Se está quitando el liderazgo
+                if old_team_lead:
+                    try:
+                        old_profile = old_team_lead.hps_profile
+                        # Si el rol era "team_lead", volver a "member"
+                        if old_profile.role and old_profile.role.name == "team_lead":
+                            member_role = models.HpsRole.objects.filter(name="member").first()
+                            if member_role:
+                                old_profile.role = member_role
+                                old_profile.save(update_fields=['role'])
+                                logger.info(f"Usuario {old_team_lead.email} vuelve a rol 'member' al quitarle el liderazgo")
+                    except models.HpsUserProfile.DoesNotExist:
+                        pass
+                instance.team_lead = None
+            else:
+                # Se está asignando un nuevo líder
+                try:
+                    new_team_lead = User.objects.get(id=lead_id, is_active=True)
+                    instance.team_lead = new_team_lead
+                    
+                    # Actualizar rol del nuevo líder si es necesario
+                    try:
+                        new_profile = new_team_lead.hps_profile
+                        current_role_name = new_profile.role.name if new_profile.role else None
+                        
+                        # Si el rol actual es "member", cambiar a "team_lead"
+                        if current_role_name == "member":
+                            team_lead_role = models.HpsRole.objects.filter(name="team_lead").first()
+                            if team_lead_role:
+                                new_profile.role = team_lead_role
+                                new_profile.save(update_fields=['role'])
+                                logger.info(f"Usuario {new_team_lead.email} cambió de 'member' a 'team_lead' al asignarle liderazgo")
+                        # Si tiene otro rol (crypto, admin, etc.), mantenerlo
+                        # Los permisos se manejan en el sistema de permisos que verifica si es team_lead del equipo
+                        elif current_role_name and current_role_name != "team_lead":
+                            logger.info(f"Usuario {new_team_lead.email} mantiene rol '{current_role_name}' pero tiene permisos de líder de equipo")
+                    except models.HpsUserProfile.DoesNotExist:
+                        logger.warning(f"Usuario {new_team_lead.email} no tiene perfil HPS")
+                    
+                    # Si había un líder anterior diferente, revertir su rol si era "team_lead"
+                    if old_team_lead and old_team_lead.id != new_team_lead.id:
+                        try:
+                            old_profile = old_team_lead.hps_profile
+                            if old_profile.role and old_profile.role.name == "team_lead":
+                                member_role = models.HpsRole.objects.filter(name="member").first()
+                                if member_role:
+                                    old_profile.role = member_role
+                                    old_profile.save(update_fields=['role'])
+                                    logger.info(f"Usuario {old_team_lead.email} vuelve a rol 'member' al quitarle el liderazgo")
+                        except models.HpsUserProfile.DoesNotExist:
+                            pass
+                            
+                except User.DoesNotExist:
+                    raise serializers.ValidationError({'team_lead_id_writable': f'Usuario con ID {lead_id} no existe o está inactivo'})
+        
+        # Actualizar otros campos
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        instance.save()
+        return instance
 
 
 class HpsRequestSerializer(serializers.ModelSerializer):

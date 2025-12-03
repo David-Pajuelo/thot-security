@@ -156,8 +156,8 @@ class WebSocketService {
 
   async archiveActiveConversation() {
     try {
-      // Obtener token del localStorage
-      const token = localStorage.getItem('token');
+      // Obtener token del localStorage (compartido con CryptoTrace)
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
       if (!token) {
         console.log('No hay token para archivar conversación');
         return;

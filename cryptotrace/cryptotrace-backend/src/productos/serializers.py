@@ -78,20 +78,24 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['first_name'] = user.first_name
         token['last_name'] = user.last_name
         
-        # Agregar must_change_password desde el perfil (productos) o perfil HPS
+        # Agregar must_change_password desde el perfil HPS (prioridad) o perfil productos
+        # Usar la misma lógica que HPS System: is_temp_password o must_change_password
         must_change_password = False
         role = None
         team_id = None
         
-        if hasattr(user, 'profile'):
-            must_change_password = user.profile.must_change_password
-        elif hasattr(user, 'hps_profile'):
-            must_change_password = user.hps_profile.must_change_password
+        # Prioridad: usar perfil HPS si existe (mismo sistema que HPS System)
+        if hasattr(user, 'hps_profile') and user.hps_profile:
+            # Si tiene contraseña temporal O debe cambiar contraseña, marcar como requerido
+            must_change_password = user.hps_profile.is_temp_password or user.hps_profile.must_change_password
             # Agregar role y team_id desde el perfil HPS
             if user.hps_profile.role:
                 role = user.hps_profile.role.name
             if user.hps_profile.team:
                 team_id = str(user.hps_profile.team.id)
+        elif hasattr(user, 'profile'):
+            # Fallback: usar perfil de productos si no hay perfil HPS
+            must_change_password = user.profile.must_change_password
         
         token['must_change_password'] = must_change_password
         if role:

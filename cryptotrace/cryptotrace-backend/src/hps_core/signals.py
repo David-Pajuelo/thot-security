@@ -54,16 +54,29 @@ def ensure_hps_profile(sender, instance, created, **kwargs):
     except HpsUserProfile.DoesNotExist:
         pass
 
-    # Intentar obtener el rol "member", si no existe crear "crypto" como fallback
-    default_role = HpsRole.objects.filter(name="member").first()
-    if not default_role:
-        default_role, _ = HpsRole.objects.get_or_create(
-            name="crypto",
-            defaults={
-                "description": "Perfil base para usuarios de CryptoTrace",
-                "permissions": {},
-            },
-        )
+    # Determinar el rol por defecto según el tipo de usuario
+    if instance.is_superuser:
+        # Si es superusuario de Django, asignar rol "admin" de HPS
+        default_role = HpsRole.objects.filter(name="admin").first()
+        if not default_role:
+            default_role, _ = HpsRole.objects.get_or_create(
+                name="admin",
+                defaults={
+                    "description": "Administrador del sistema HPS",
+                    "permissions": {},
+                },
+            )
+    else:
+        # Para usuarios normales, usar rol "member" por defecto
+        default_role = HpsRole.objects.filter(name="member").first()
+        if not default_role:
+            default_role, _ = HpsRole.objects.get_or_create(
+                name="crypto",
+                defaults={
+                    "description": "Perfil base para usuarios de CryptoTrace",
+                    "permissions": {},
+                },
+            )
 
     # Obtener o crear el equipo AICOX
     aicox_team = get_or_create_aicox_team()

@@ -12,7 +12,8 @@ const apiClient = axios.create({
 // Interceptor para agregar token de autorización
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('hps_token');
+    // Usar accessToken (compartido con CryptoTrace) o hps_token (compatibilidad temporal)
+    const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -57,23 +58,29 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       
       try {
-        const refreshToken = localStorage.getItem('hps_refresh_token');
+        // Usar refreshToken (compartido con CryptoTrace) o hps_refresh_token (compatibilidad temporal)
+        const refreshToken = localStorage.getItem('refreshToken') || localStorage.getItem('hps_refresh_token');
         if (refreshToken) {
           const response = await apiClient.post('/api/token/refresh/', {
             refresh: refreshToken
           });
           
           const { access } = response.data;
-          localStorage.setItem('hps_token', access);
+          // Guardar en ambos lugares para compatibilidad durante la transición
+          localStorage.setItem('accessToken', access);
+          localStorage.setItem('hps_token', access); // Compatibilidad temporal
           
           // Reintentar la petición original con el nuevo token
           originalRequest.headers.Authorization = `Bearer ${access}`;
           return apiClient(originalRequest);
         }
       } catch (refreshError) {
-        // Si el refresh falla, limpiar tokens y redirigir al login
+        // Si el refresh falla, limpiar tokens (ambos sistemas)
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
         localStorage.removeItem('hps_token');
         localStorage.removeItem('hps_refresh_token');
+        localStorage.removeItem('user');
         localStorage.removeItem('hps_user');
         // No redirigir automáticamente, dejar que el componente maneje el error
         return Promise.reject(refreshError);
@@ -110,20 +117,30 @@ export const authService = {
     
     // Django SimpleJWT devuelve 'access' y 'refresh' en lugar de 'access_token'
     if (response.data.access) {
+      // Guardar en nombres estándar (compartidos con CryptoTrace)
+      localStorage.setItem('accessToken', response.data.access);
+      localStorage.setItem('refreshToken', response.data.refresh);
+      // También guardar en nombres antiguos para compatibilidad temporal
       localStorage.setItem('hps_token', response.data.access);
       localStorage.setItem('hps_refresh_token', response.data.refresh);
+      
+      // Nota: La sincronización de tokens se hace mediante iframe + postMessage
+      // cuando CryptoTrace intenta acceder. No es necesario notificar aquí.
       
       // Decodificar token para obtener información del usuario
       try {
         const tokenParts = response.data.access.split('.');
         if (tokenParts.length === 3) {
           const payload = JSON.parse(atob(tokenParts[1]));
-          localStorage.setItem('hps_user', JSON.stringify({
+          const userData = {
             id: payload.user_id,
             email: payload.username || email,
             role: payload.role || 'user',
             is_superuser: payload.is_superuser || false
-          }));
+          };
+          // Guardar en ambos lugares para compatibilidad
+          localStorage.setItem('user', JSON.stringify(userData));
+          localStorage.setItem('hps_user', JSON.stringify(userData));
         }
       } catch (e) {
         console.warn('Error decodificando token:', e);
@@ -144,8 +161,26 @@ export const authService = {
     } catch (error) {
       console.warn('Error en logout del servidor:', error);
     } finally {
+      // Limpiar tokens de ambos sistemas (compartidos)
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('user');
+      // También limpiar nombres antiguos
       localStorage.removeItem('hps_token');
+      localStorage.removeItem('hps_refresh_token');
       localStorage.removeItem('hps_user');
+      
+      // Limpiar también cookies
+      document.cookie = 'accessToken=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      document.cookie = 'refreshToken=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      
+      // Sincronizar logout con CryptoTrace
+      try {
+        const { syncLogoutWithCryptoTrace } = await import('../utils/tokenSync');
+        await syncLogoutWithCryptoTrace();
+      } catch (e) {
+        console.warn('[apiService] Error sincronizando logout con CryptoTrace:', e);
+      }
     }
   },
   
@@ -313,12 +348,14 @@ export const userService = {
 export const apiUtils = {
   // Verificar si hay token
   hasToken: () => {
-    return !!localStorage.getItem('hps_token');
+    // Verificar en ambos lugares (nuevo y antiguo)
+    return !!(localStorage.getItem('accessToken') || localStorage.getItem('hps_token'));
   },
   
   // Obtener usuario almacenado
   getStoredUser: () => {
-    const user = localStorage.getItem('hps_user');
+    // Intentar obtener de ambos lugares (nuevo y antiguo)
+    const user = localStorage.getItem('user') || localStorage.getItem('hps_user');
     return user ? JSON.parse(user) : null;
   },
   
@@ -424,10 +461,10 @@ export const teamService = {
     return response.data;
   },
 
-  // Obtener estadísticas de equipos (no implementado en Django aún)
+  // Obtener estadísticas de equipos
   getTeamStats: async () => {
-    // TODO: Implementar endpoint en Django si es necesario
-    return { total: 0, active: 0, members: 0 };
+    const response = await apiClient.get('/api/hps/teams/stats/');
+    return response.data;
   },
 
   // Obtener líderes disponibles (no implementado en Django aún)

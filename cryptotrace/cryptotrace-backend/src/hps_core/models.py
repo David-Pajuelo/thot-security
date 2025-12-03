@@ -61,7 +61,15 @@ class HpsTeam(models.Model):
 
     @property
     def member_count(self) -> int:
-        return self.memberships.filter(is_active=True).count()
+        """
+        Contar miembros del equipo a través de HpsUserProfile.
+        Los usuarios están asociados al equipo mediante HpsUserProfile.team.
+        """
+        from .models import HpsUserProfile
+        return HpsUserProfile.objects.filter(
+            team=self,
+            user__is_active=True
+        ).count()
 
 
 class HpsTeamMembership(models.Model):

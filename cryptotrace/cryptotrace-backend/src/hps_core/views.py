@@ -22,6 +22,39 @@ ADMIN_ROLES = {"admin", "jefe_seguridad", "security_chief"}
 TEAM_ROLES = {"team_lead", "team_leader", "jefe_seguridad_suplente"}
 
 
+def is_user_team_lead(user):
+    """
+    Verificar si un usuario es líder de algún equipo activo.
+    Esto permite que usuarios con otros roles (crypto, admin, etc.) 
+    tengan permisos de líder si son líderes de un equipo.
+    """
+    if not user or not user.is_authenticated:
+        return False
+    return models.HpsTeam.objects.filter(team_lead=user, is_active=True).exists()
+
+
+def has_team_lead_permissions(user, profile=None):
+    """
+    Verificar si un usuario tiene permisos de líder de equipo.
+    Esto incluye:
+    - Usuarios con rol en TEAM_ROLES
+    - Usuarios que son líderes de algún equipo activo (independientemente de su rol)
+    """
+    if not profile:
+        profile = getattr(user, "hps_profile", None)
+    if not profile:
+        return False
+    
+    role_name = profile.role.name if profile.role else None
+    
+    # Verificar si tiene rol de líder
+    if role_name in TEAM_ROLES:
+        return True
+    
+    # Verificar si es líder de algún equipo activo
+    return is_user_team_lead(user)
+
+
 class HpsRoleViewSet(viewsets.ModelViewSet):
     queryset = models.HpsRole.objects.all()
     serializer_class = serializers.HpsRoleSerializer
@@ -32,6 +65,79 @@ class HpsTeamViewSet(viewsets.ModelViewSet):
     queryset = models.HpsTeam.objects.prefetch_related("memberships")
     serializer_class = serializers.HpsTeamSerializer
     permission_classes = [permissions.IsAuthenticated, IsHpsAdminOrTeamLead]
+
+    def get_queryset(self):
+        """
+        Filtrar equipos: por defecto solo mostrar activos, a menos que se solicite explícitamente
+        """
+        qs = super().get_queryset()
+        # Si no se especifica 'include_inactive', solo mostrar equipos activos
+        include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        return qs
+
+    @action(detail=False, methods=["get"])
+    def stats(self, request):
+        """
+        Obtener estadísticas de equipos
+        GET /api/hps/teams/stats/
+        """
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        # Total de equipos
+        total_teams = models.HpsTeam.objects.count()
+        
+        # Equipos activos
+        active_teams = models.HpsTeam.objects.filter(is_active=True).count()
+        
+        # Total de miembros (usuarios con perfil HPS activo)
+        total_members = models.HpsUserProfile.objects.filter(
+            user__is_active=True
+        ).count()
+        
+        # Equipos con líderes asignados
+        teams_with_leaders = models.HpsTeam.objects.filter(
+            is_active=True,
+            team_lead__isnull=False
+        ).count()
+        
+        return Response({
+            'total_teams': total_teams,
+            'active_teams': active_teams,
+            'total_members': total_members,
+            'teams_with_leaders': teams_with_leaders
+        })
+
+    @action(detail=True, methods=["get"], url_path="members")
+    def members(self, request, pk=None):
+        """
+        Obtener miembros de un equipo
+        GET /api/hps/teams/{id}/members/
+        """
+        team = self.get_object()
+        
+        # Obtener todos los usuarios que pertenecen a este equipo a través de HpsUserProfile
+        members = models.HpsUserProfile.objects.filter(
+            team=team,
+            user__is_active=True
+        ).select_related('user', 'role')
+        
+        # Formatear respuesta para el frontend
+        members_list = []
+        for profile in members:
+            members_list.append({
+                'id': profile.user.id,
+                'email': profile.user.email,
+                'full_name': f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.email,
+                'first_name': profile.user.first_name,
+                'last_name': profile.user.last_name,
+                'role': profile.role.name if profile.role else None,
+                'is_active': profile.user.is_active
+            })
+        
+        return Response(members_list)
 
 
 class HpsRequestViewSet(viewsets.ModelViewSet):
@@ -78,7 +184,8 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
         if role_name in ADMIN_ROLES:
             return qs
 
-        if role_name in TEAM_ROLES and profile.team_id:
+        # Verificar si tiene permisos de líder (rol o es líder de equipo)
+        if has_team_lead_permissions(self.request.user, profile) and profile.team_id:
             return qs.filter(user__hps_profile__team_id=profile.team_id)
 
         return qs.filter(user=self.request.user)
@@ -765,6 +872,240 @@ class HpsTemplateViewSet(viewsets.ModelViewSet):
         )
         serializer = self.get_serializer(templates, many=True)
         return Response(serializer.data)
+    
+    @action(detail=True, methods=["get"], url_path="extract-pdf-fields")
+    def extract_pdf_fields(self, request, pk=None):
+        """
+        Extraer campos del PDF de la plantilla usando PyMuPDF
+        GET /api/hps/templates/{id}/extract-pdf-fields/
+        """
+        template = self.get_object()
+        
+        if not template.template_pdf:
+            return Response(
+                {'detail': 'No hay PDF para esta plantilla'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        try:
+            import fitz  # PyMuPDF
+            import os
+            
+            # Abrir el PDF de la plantilla
+            pdf_path = template.template_pdf.path
+            if not os.path.exists(pdf_path):
+                return Response(
+                    {'detail': 'Archivo PDF no encontrado'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            pdf_document = fitz.open(pdf_path)
+            page = pdf_document[0]
+            
+            # Extraer campos del formulario
+            extracted_fields = {}
+            widgets = page.widgets()
+            
+            for widget in widgets:
+                if widget.field_name and widget.field_value:
+                    field_name = widget.field_name.strip()
+                    field_value = str(widget.field_value).strip()
+                    if field_value:
+                        extracted_fields[field_name] = field_value
+            
+            # Si no hay campos de formulario, intentar extraer texto
+            if not extracted_fields:
+                # Extraer texto de la página
+                full_text = page.get_text()
+                
+                # Mapeo de patrones para extraer valores (campos específicos de plantillas)
+                patterns = {
+                    'Identificación': r'(?:Identificación|IDENTIFICACIÓN|DNI|NIE)[:\s]*([^\n\r,]+)',
+                    'Correo electrónico_2': r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+                    'Teléfono_2': r'(?:Teléfono|Telefono|TELÉFONO)[:\s]*([^\n\r,]+)',
+                }
+                
+                import re
+                for field_name, pattern in patterns.items():
+                    match = re.search(pattern, full_text, re.IGNORECASE)
+                    if match:
+                        extracted_fields[field_name] = match.group(1).strip()
+            
+            pdf_document.close()
+            
+            return Response(extracted_fields, status=status.HTTP_200_OK)
+            
+        except ImportError:
+            return Response(
+                {'detail': 'PyMuPDF no está instalado. No se pueden extraer campos del PDF.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error extrayendo campos del PDF de plantilla: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {'detail': f'Error extrayendo campos: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=["post"], url_path="edit-pdf")
+    def edit_pdf(self, request, pk=None):
+        """
+        Editar campos del PDF de la plantilla
+        POST /api/hps/templates/{id}/edit-pdf/
+        Body: { "Identificación": "valor", "Correo electrónico_2": "valor", ... }
+        """
+        template = self.get_object()
+        
+        if not template.template_pdf:
+            return Response(
+                {'detail': 'No hay PDF para esta plantilla'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        field_updates = request.data
+        if not field_updates or not isinstance(field_updates, dict):
+            return Response(
+                {'detail': 'Se requieren campos para actualizar'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            import fitz  # PyMuPDF
+            import os
+            import io
+            from django.core.files.base import ContentFile
+            
+            # Abrir el PDF de la plantilla desde el almacenamiento de Django
+            with template.template_pdf.open('rb') as f:
+                pdf_bytes_original = f.read()
+            
+            # Crear documento desde bytes en memoria
+            pdf_document = fitz.open(stream=pdf_bytes_original, filetype="pdf")
+            page = pdf_document[0]
+            
+            # Obtener widgets y actualizar valores
+            widgets = list(page.widgets())  # Convertir a lista para iterar correctamente
+            updated_count = 0
+            updated_fields = []
+            
+            for field_name, field_value in field_updates.items():
+                if not field_value:
+                    continue
+                
+                field_name_lower = field_name.lower().strip()
+                field_value_str = str(field_value).strip()
+                
+                # Buscar el widget correspondiente
+                found = False
+                for widget in widgets:
+                    if widget.field_name:
+                        widget_name_lower = widget.field_name.lower().strip()
+                        
+                        # Coincidencia exacta o parcial
+                        if (widget_name_lower == field_name_lower or 
+                            field_name_lower in widget_name_lower or
+                            widget_name_lower in field_name_lower):
+                            try:
+                                widget.field_value = field_value_str
+                                widget.update()
+                                updated_count += 1
+                                updated_fields.append(widget.field_name)
+                                logger.info(f"Campo '{widget.field_name}' actualizado con '{field_value_str}'")
+                                found = True
+                                break
+                            except Exception as e:
+                                logger.warning(f"Error actualizando campo '{widget.field_name}': {e}")
+                
+                if not found:
+                    logger.warning(f"No se encontró widget para el campo '{field_name}'")
+            
+            # Guardar el PDF actualizado en un buffer en memoria
+            output_buffer = io.BytesIO()
+            pdf_document.save(output_buffer)
+            pdf_document.close()
+            
+            # Obtener los bytes del PDF actualizado
+            pdf_bytes = output_buffer.getvalue()
+            output_buffer.close()
+            
+            # Eliminar el archivo anterior si existe para evitar problemas de caché
+            if template.template_pdf:
+                try:
+                    old_path = template.template_pdf.path
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+                        logger.debug(f"Archivo PDF anterior eliminado: {old_path}")
+                except Exception as e:
+                    logger.warning(f"No se pudo eliminar el archivo PDF anterior: {e}")
+            
+            # Guardar el nuevo PDF
+            filename = f"template_{template.id}_{template.name.replace(' ', '_')}.pdf"
+            template.template_pdf.save(
+                filename,
+                ContentFile(pdf_bytes),
+                save=True  # Guardar el modelo automáticamente
+            )
+            
+            logger.info(f"PDF de plantilla {template.name} actualizado. {updated_count} campo(s) modificado(s): {', '.join(updated_fields)}")
+            
+            return Response({
+                'detail': f'PDF actualizado correctamente. {updated_count} campo(s) modificado(s).',
+                'updated_fields': updated_fields,
+                'updated_count': updated_count
+            }, status=status.HTTP_200_OK)
+            
+        except ImportError:
+            return Response(
+                {'detail': 'PyMuPDF no está instalado. No se puede editar el PDF.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error editando PDF de plantilla: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {'detail': f'Error editando PDF: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=["get"], url_path="pdf")
+    def get_pdf(self, request, pk=None):
+        """
+        Obtener el PDF de la plantilla como archivo binario
+        GET /api/hps/templates/{id}/pdf/
+        """
+        template = self.get_object()
+        
+        if not template.template_pdf:
+            return Response(
+                {'detail': 'No hay PDF para esta plantilla'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        try:
+            from django.http import FileResponse
+            import os
+            
+            pdf_path = template.template_pdf.path
+            if not os.path.exists(pdf_path):
+                return Response(
+                    {'detail': 'Archivo PDF no encontrado'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            return FileResponse(
+                open(pdf_path, 'rb'),
+                content_type='application/pdf',
+                filename=os.path.basename(pdf_path)
+            )
+        except Exception as e:
+            logger.error(f"Error obteniendo PDF de plantilla: {e}")
+            return Response(
+                {'detail': f'Error obteniendo PDF: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class HpsAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
@@ -796,7 +1137,8 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
             return qs
         
         # Team leads solo pueden ver perfiles de su equipo
-        if role_name in TEAM_ROLES and profile.team_id:
+        # También incluye usuarios que son líderes de equipo aunque su rol no sea team_lead
+        if has_team_lead_permissions(self.request.user, profile) and profile.team_id:
             return qs.filter(team_id=profile.team_id)
         
         # Otros usuarios (members) pueden ver todos los usuarios también
@@ -920,6 +1262,55 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
                 {'detail': f'Error eliminando usuario: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    @action(detail=False, methods=["get"])
+    def stats(self, request):
+        """
+        Obtener estadísticas de usuarios
+        GET /api/hps/user/profiles/stats/
+        """
+        from django.contrib.auth import get_user_model
+        from django.db.models import Count
+        User = get_user_model()
+        
+        # Obtener estadísticas básicas
+        total_users = models.HpsUserProfile.objects.count()
+        active_users = models.HpsUserProfile.objects.filter(user__is_active=True).count()
+        
+        # Obtener conteo por rol
+        users_by_role = models.HpsUserProfile.objects.filter(
+            user__is_active=True
+        ).values(
+            'role__name'
+        ).annotate(
+            count=Count('id')
+        ).order_by('role__name')
+        
+        # Convertir a diccionario más legible
+        role_counts = {}
+        for item in users_by_role:
+            role_name = item['role__name'] or 'sin_rol'
+            role_counts[role_name] = item['count']
+        
+        # Contar usuarios que son líderes de equipo (independientemente de su rol)
+        team_leaders_count = models.HpsTeam.objects.filter(
+            is_active=True,
+            team_lead__isnull=False,
+            team_lead__is_active=True
+        ).count()
+        
+        return Response({
+            'total_users': total_users,
+            'active_users': active_users,
+            'users_by_role': role_counts,
+            # Campos específicos para compatibilidad con el Dashboard
+            'crypto': role_counts.get('crypto', 0),
+            'members': role_counts.get('member', 0),
+            'team_leaders': team_leaders_count,
+            'admin': role_counts.get('admin', 0),
+            'jefe_seguridad': role_counts.get('jefe_seguridad', 0),
+            'jefe_seguridad_suplente': role_counts.get('jefe_seguridad_suplente', 0),
+        })
     
 
 

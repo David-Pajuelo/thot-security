@@ -14,6 +14,7 @@ const nextConfig = {
   // Optimizaciones de build
   compress: true,
   poweredByHeader: false,
+  swcMinify: true, // Usar SWC para minificación más rápida
   // Configuración para evitar errores en build de producción
   serverExternalPackages: ['canvas', 'pdfjs-dist'],
   // Configuración para páginas que requieren client-side rendering

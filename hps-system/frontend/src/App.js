@@ -10,6 +10,10 @@ import ChangePasswordModal from './components/ChangePasswordModal';
 
 import './App.css';
 
+// Nota: La sincronización de tokens se hace mediante iframe + postMessage
+// en lugar de BroadcastChannel, ya que BroadcastChannel no funciona
+// entre diferentes orígenes (localhost:3001 y localhost:3000)
+
 // Componentes de páginas
 import UserManagement from './pages/UserManagement';
 import TeamManagement from './pages/TeamManagement';

@@ -9,12 +9,13 @@ import {
   ChartBarIcon,
   CogIcon,
   ChatBubbleLeftRightIcon,
-  DocumentTextIcon
+  DocumentTextIcon,
+  ArrowTopRightOnSquareIcon
 } from '@heroicons/react/24/outline';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { user, logout, getUserName, isAdmin, isTeamLeader, isSecurityChief, canManageUsers } = useAuthStore();
+  const { user, logout, getUserName, isAdmin, isTeamLeader, isSecurityChief, isCrypto, canManageUsers } = useAuthStore();
   
   // Debug: verificar el rol del usuario
   console.log('Dashboard - User:', user);
@@ -121,6 +122,15 @@ const Dashboard = () => {
       path: '/settings',
       color: 'bg-gray-500',
       visible: isAdmin()
+    },
+    {
+      name: 'CryptoTrace',
+      description: 'Acceder a la plataforma CryptoTrace',
+      icon: ArrowTopRightOnSquareIcon,
+      path: null, // Se manejará con redirección externa
+      color: 'bg-orange-500',
+      visible: isAdmin() || isCrypto(),
+      external: true
     }
   ].filter(item => item.visible);
 
@@ -323,15 +333,79 @@ const Dashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {menuItems.map((item) => {
             const Icon = item.icon;
+            const cryptoTraceUrl = process.env.REACT_APP_CRYPTOTRACE_URL || 'http://localhost:3000';
+            
             return (
               <button
                 key={item.name}
                 onClick={() => {
                   console.log(`Dashboard - Haciendo clic en: ${item.name}`);
-                  console.log(`Dashboard - Navegando a: ${item.path}`);
-                  console.log(`Dashboard - Usuario actual:`, user);
-                  console.log(`Dashboard - isSecurityChief():`, isSecurityChief());
-                  navigate(item.path);
+                  if (item.external) {
+                    console.log(`Dashboard - Redirigiendo a CryptoTrace: ${cryptoTraceUrl}`);
+                    // Abrir CryptoTrace y compartir el token mediante postMessage
+                    const newWindow = window.open(cryptoTraceUrl, '_blank');
+                    
+                    // Obtener tokens del localStorage
+                    const accessToken = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
+                    const refreshToken = localStorage.getItem('refreshToken') || localStorage.getItem('hps_refresh_token');
+                    
+                    if (accessToken) {
+                      console.log('Dashboard - Token encontrado, preparando para enviar...');
+                      console.log('Dashboard - accessToken (primeros 50 chars):', accessToken.substring(0, 50) + '...');
+                      console.log('Dashboard - cryptoTraceUrl:', cryptoTraceUrl);
+                      
+                      // Esperar a que la ventana esté lista y enviar el token
+                      const sendToken = () => {
+                        try {
+                          if (newWindow && !newWindow.closed) {
+                            console.log('Dashboard - ✅ Enviando token a CryptoTrace mediante postMessage');
+                            console.log('Dashboard - Destino URL:', cryptoTraceUrl);
+                            console.log('Dashboard - Destino Origin:', new URL(cryptoTraceUrl).origin);
+                            console.log('Dashboard - Origen actual:', window.location.origin);
+                            
+                            // postMessage requiere el origen (protocolo + dominio + puerto), no la URL completa
+                            const targetOrigin = new URL(cryptoTraceUrl).origin;
+                            
+                            newWindow.postMessage({
+                              type: 'HPS_AUTH_TOKEN',
+                              accessToken: accessToken,
+                              refreshToken: refreshToken
+                            }, targetOrigin);
+                            
+                            console.log('Dashboard - ✅ Mensaje postMessage enviado a:', targetOrigin);
+                          } else {
+                            console.warn('Dashboard - ⚠️ Ventana cerrada o no disponible');
+                          }
+                        } catch (error) {
+                          console.error('Dashboard - ❌ Error enviando token a CryptoTrace:', error);
+                        }
+                      };
+                      
+                      // Intentar enviar inmediatamente
+                      sendToken();
+                      
+                      // También intentar después de un pequeño delay para asegurar que la ventana esté lista
+                      setTimeout(() => {
+                        console.log('Dashboard - Reintentando envío de token (500ms)...');
+                        sendToken();
+                      }, 500);
+                      setTimeout(() => {
+                        console.log('Dashboard - Reintentando envío de token (1000ms)...');
+                        sendToken();
+                      }, 1000);
+                      setTimeout(() => {
+                        console.log('Dashboard - Reintentando envío de token (2000ms)...');
+                        sendToken();
+                      }, 2000);
+                    } else {
+                      console.warn('Dashboard - ❌ No hay token disponible para compartir con CryptoTrace');
+                    }
+                  } else {
+                    console.log(`Dashboard - Navegando a: ${item.path}`);
+                    console.log(`Dashboard - Usuario actual:`, user);
+                    console.log(`Dashboard - isSecurityChief():`, isSecurityChief());
+                    navigate(item.path);
+                  }
                 }}
                 className="bg-white p-6 rounded-lg shadow hover:shadow-lg transition-shadow duration-200 text-left group"
               >

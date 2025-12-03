@@ -63,16 +63,30 @@ const useAuthStore = create(
             team_name: userData.team_name
           };
 
-          // Actualizar localStorage con la información completa
-          localStorage.setItem('hps_user', JSON.stringify(userInfo));
+          // Actualizar localStorage con la información completa (ambos sistemas)
+          localStorage.setItem('user', JSON.stringify(userInfo));
+          localStorage.setItem('hps_user', JSON.stringify(userInfo)); // Compatibilidad temporal
           
           // Limpiar email guardado cuando el login es exitoso
           localStorage.removeItem('hps_saved_email');
           
+          // Guardar tokens en nombres estándar (compartidos con CryptoTrace)
+          const accessToken = response.access || response.access_token;
+          const refreshToken = response.refresh || response.refresh_token;
+          
+          if (accessToken) {
+            localStorage.setItem('accessToken', accessToken);
+            localStorage.setItem('hps_token', accessToken); // Compatibilidad temporal
+          }
+          if (refreshToken) {
+            localStorage.setItem('refreshToken', refreshToken);
+            localStorage.setItem('hps_refresh_token', refreshToken); // Compatibilidad temporal
+          }
+          
           set({
             isAuthenticated: true,
             user: userInfo,
-            token: response.access || response.access_token,  // Django devuelve 'access', FastAPI devolvía 'access_token'
+            token: accessToken,
             loading: false,
             error: null,
             showChangePasswordModal: userData.is_temp_password || false
@@ -155,8 +169,13 @@ const useAuthStore = create(
           console.warn('Error en logout:', error);
         } finally {
           // Limpiar datos de sesión
-          localStorage.removeItem('hps_token');
-          localStorage.removeItem('hps_user');
+            // Limpiar tokens de ambos sistemas
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            localStorage.removeItem('user');
+            localStorage.removeItem('hps_token');
+            localStorage.removeItem('hps_refresh_token');
+            localStorage.removeItem('hps_user');
           localStorage.removeItem('hps_saved_email'); // Limpiar email guardado también
           
           set({
@@ -194,13 +213,14 @@ const useAuthStore = create(
             team_name: userData.team_name
           };
 
-          // Actualizar localStorage con la información completa
-          localStorage.setItem('hps_user', JSON.stringify(userInfo));
+          // Actualizar localStorage con la información completa (ambos sistemas)
+          localStorage.setItem('user', JSON.stringify(userInfo));
+          localStorage.setItem('hps_user', JSON.stringify(userInfo)); // Compatibilidad temporal
 
           set({
             isAuthenticated: true,
             user: userInfo,
-            token: localStorage.getItem('hps_token'),
+            token: localStorage.getItem('accessToken') || localStorage.getItem('hps_token'),
             loading: false,
             error: null
           });
@@ -238,12 +258,14 @@ const useAuthStore = create(
             team_name: userData.team_name
           };
           
+          // Guardar en ambos lugares para compatibilidad
+          localStorage.setItem('user', JSON.stringify(userInfo));
           localStorage.setItem('hps_user', JSON.stringify(userInfo));
           
           set({
             isAuthenticated: true,
             user: userInfo,
-            token: apiUtils.hasToken() ? localStorage.getItem('hps_token') : null,
+            token: apiUtils.hasToken() ? (localStorage.getItem('accessToken') || localStorage.getItem('hps_token')) : null,
             verifying: false
           });
           
@@ -255,7 +277,10 @@ const useAuthStore = create(
           if (error.response?.status === 401 || error.response?.status === 403) {
             console.log('verifyToken - Token inválido (401/403), limpiando sesión');
             
-            // Limpiar datos de sesión
+            // Limpiar datos de sesión (ambos sistemas)
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            localStorage.removeItem('user');
             localStorage.removeItem('hps_token');
             localStorage.removeItem('hps_refresh_token');
             localStorage.removeItem('hps_user');
@@ -306,6 +331,8 @@ const useAuthStore = create(
             team_name: userData.team_name
           };
           
+          // Guardar en ambos lugares para compatibilidad
+          localStorage.setItem('user', JSON.stringify(userInfo));
           localStorage.setItem('hps_user', JSON.stringify(userInfo));
           set({ user: userInfo });
           
@@ -355,7 +382,8 @@ const useAuthStore = create(
 
       // Inicializar autenticación desde localStorage
       initializeAuth: async () => {
-        const token = localStorage.getItem('hps_token');
+        // Verificar en ambos lugares (nuevo y antiguo)
+        const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
         const user = apiUtils.getStoredUser();
         
         console.log('initializeAuth - Token:', !!token, 'User:', !!user);
@@ -385,6 +413,8 @@ const useAuthStore = create(
               team_name: userData.team_name
             };
             
+            // Guardar en ambos lugares para compatibilidad
+            localStorage.setItem('user', JSON.stringify(userInfo));
             localStorage.setItem('hps_user', JSON.stringify(userInfo));
             
             // Si la verificación es exitosa, establecer sesión
@@ -406,8 +436,12 @@ const useAuthStore = create(
           } catch (error) {
             console.log('initializeAuth - Token inválido o error:', error);
             
-            // Si el token es inválido, limpiar todo y redirigir al login
+            // Si el token es inválido, limpiar todo (ambos sistemas)
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            localStorage.removeItem('user');
             localStorage.removeItem('hps_token');
+            localStorage.removeItem('hps_refresh_token');
             localStorage.removeItem('hps_user');
             localStorage.removeItem('hps_saved_email'); // Limpiar email guardado también
             
@@ -461,6 +495,13 @@ const useAuthStore = create(
         const role = user?.role || user?.role_name;
         console.log('isSecurityChief - User role:', role);
         return role === 'jefe_seguridad' || role === 'security_chief';
+      },
+
+      isCrypto: () => {
+        const user = get().user;
+        const role = user?.role || user?.role_name;
+        console.log('isCrypto - User role:', role);
+        return role === 'crypto';
       },
 
       canManageUsers: () => {

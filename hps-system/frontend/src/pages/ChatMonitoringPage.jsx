@@ -117,7 +117,7 @@ const ChatMonitoringPage = () => {
   const loadAllConversations = async () => {
     try {
       const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
-      const token = localStorage.getItem('hps_token');
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
       
       // Cargar todas las conversaciones usando el nuevo endpoint
       // TODO: Implementar endpoint en Django si es necesario
@@ -148,7 +148,7 @@ const ChatMonitoringPage = () => {
   const loadUsers = async () => {
     try {
       const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
-      const token = localStorage.getItem('hps_token');
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
       
       // Cargar usuarios desde el endpoint de perfiles HPS
       // TODO: Implementar endpoint de usuarios en Django si es necesario
@@ -175,7 +175,7 @@ const ChatMonitoringPage = () => {
   const viewConversationDetails = async (conversationId) => {
     try {
       const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
-      const token = localStorage.getItem('hps_token');
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
       
       console.log('🔍 Token:', token ? `${token.substring(0, 20)}...` : 'No token');
       console.log('🔍 URL:', `${API_BASE_URL}/api/hps/chat/conversations/${conversationId}/full/`);

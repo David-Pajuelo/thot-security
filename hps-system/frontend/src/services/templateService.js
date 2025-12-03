@@ -223,13 +223,17 @@ class TemplateService {
    */
   async editTemplatePDF(templateId, fieldUpdates) {
     try {
-      const response = await apiService.post(`${this.baseURL}/${templateId}/edit-pdf`, fieldUpdates);
+      console.log(`📤 Enviando edición de PDF para plantilla ${templateId}:`, fieldUpdates);
+      const response = await apiService.post(`${this.baseURL}/${templateId}/edit-pdf/`, fieldUpdates);
+      console.log('📥 Respuesta del backend:', response.data);
       return { success: true, data: response.data };
     } catch (error) {
-      console.error('Error editing template PDF:', error);
+      console.error('❌ Error editing template PDF:', error);
+      console.error('   Error response:', error.response);
+      console.error('   Error data:', error.response?.data);
       return { 
         success: false, 
-        error: error.response?.data?.detail || 'Error al editar el PDF' 
+        error: error.response?.data?.detail || error.response?.data?.error || 'Error al editar el PDF' 
       };
     }
   }

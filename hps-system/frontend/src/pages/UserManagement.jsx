@@ -151,7 +151,8 @@ const UserManagement = () => {
   const loadTeams = async () => {
     try {
       const response = await teamService.getTeams();
-      const teamsList = response.teams || [];
+      // Django REST Framework devuelve los datos directamente como array o en results si hay paginación
+      const teamsList = Array.isArray(response) ? response : (response.results || response.teams || []);
       setTeams(teamsList);
       
       // Actualizar la lista de equipos disponibles para usuarios
@@ -427,7 +428,7 @@ const UserManagement = () => {
       const cleanData = {
         name: teamFormData.name,
         description: teamFormData.description || null,
-        team_lead_id: teamFormData.team_lead_id || null
+        team_lead_id_writable: teamFormData.team_lead_id ? parseInt(teamFormData.team_lead_id) : null
       };
       
       console.log('Datos a enviar:', cleanData);
@@ -457,7 +458,7 @@ const UserManagement = () => {
       const cleanData = {
         name: teamFormData.name,
         description: teamFormData.description || null,
-        team_lead_id: teamFormData.team_lead_id || null
+        team_lead_id_writable: teamFormData.team_lead_id ? parseInt(teamFormData.team_lead_id) : null
       };
       
       console.log('Datos a enviar:', cleanData);
@@ -508,10 +509,12 @@ const UserManagement = () => {
 
   const openEditTeamModal = (team) => {
     setSelectedTeam(team);
+    // team_lead_id puede venir como team_lead (ID del usuario) o team_lead_id
+    const teamLeadId = team.team_lead_id || team.team_lead || '';
     setTeamFormData({
       name: team.name,
       description: team.description || '',
-      team_lead_id: team.team_lead_id || ''
+      team_lead_id: teamLeadId ? String(teamLeadId) : ''
     });
     // Cargar líderes disponibles para este equipo específico
     loadAvailableLeaders(team.id);
@@ -1070,7 +1073,7 @@ const UserManagement = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-                            {team.member_count} miembros
+                            {team.member_count !== undefined && team.member_count !== null ? `${team.member_count} miembros` : '0 miembros'}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -1205,9 +1208,11 @@ const UserManagement = () => {
                   <option value="jefe_seguridad">Jefe de Seguridad</option>
                   <option value="jefe_seguridad_suplente">Jefe de Seguridad Suplente</option>
                   <option value="crypto">Crypto</option>
-                  <option value="team_lead">Líder de Equipo</option>
                   <option value="member">Miembro</option>
                 </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Nota: Los líderes de equipo se asignan desde la gestión de equipos, no desde aquí.
+                </p>
               </div>
               
               <div>
@@ -1306,9 +1311,11 @@ const UserManagement = () => {
                   <option value="jefe_seguridad">Jefe de Seguridad</option>
                   <option value="jefe_seguridad_suplente">Jefe de Seguridad Suplente</option>
                   <option value="crypto">Crypto</option>
-                  <option value="team_lead">Líder de Equipo</option>
                   <option value="member">Miembro</option>
                 </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Nota: Los líderes de equipo se asignan desde la gestión de equipos, no desde aquí.
+                </p>
               </div>
               
               <div>
@@ -1764,13 +1771,24 @@ const UserManagement = () => {
 
       {/* Modal Ver Equipo */}
       {showViewTeamModal && selectedTeam && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">Detalles del Equipo</h3>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl my-8 max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-200 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900">Detalles del Equipo</h3>
+                <button
+                  onClick={() => setShowViewTeamModal(false)}
+                  className="text-gray-400 hover:text-gray-600 focus:outline-none"
+                  aria-label="Cerrar"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
             
-            <div className="px-6 py-4">
+            <div className="px-6 py-4 overflow-y-auto flex-1">
               <div className="space-y-6">
                 {/* Información básica */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1819,36 +1837,61 @@ const UserManagement = () => {
                   </label>
                   
                   {selectedTeam.members && selectedTeam.members.length > 0 ? (
-                    <div className="bg-gray-50 p-4 rounded-md">
-                      <div className="space-y-3">
-                        {selectedTeam.members.map((member) => (
-                          <div key={member.id} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
-                            <div className="flex-1">
-                              <div className="flex items-center space-x-3">
-                                <div className="flex-shrink-0">
-                                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                                    <span className="text-sm font-medium text-blue-600">
-                                      {member.full_name?.charAt(0) || member.email?.charAt(0) || '?'}
-                                    </span>
+                    <div className="bg-gray-50 px-4 py-2 rounded-md">
+                      <div className="space-y-2">
+                        {(() => {
+                          // Ordenar miembros por rol: líder > admin > jefe seguridad > js suplente > crypto > miembro
+                          const roleOrder = {
+                            'team_lead': 1,
+                            'team_leader': 1,
+                            'admin': 2,
+                            'jefe_seguridad': 3,
+                            'jefe_seguridad_suplente': 4,
+                            'crypto': 5,
+                            'member': 6
+                          };
+                          
+                          const sortedMembers = [...selectedTeam.members].sort((a, b) => {
+                            const roleA = roleOrder[a.role] || 999;
+                            const roleB = roleOrder[b.role] || 999;
+                            
+                            // Si tienen el mismo rol, ordenar alfabéticamente por nombre
+                            if (roleA === roleB) {
+                              return (a.full_name || a.email || '').localeCompare(b.full_name || b.email || '');
+                            }
+                            
+                            return roleA - roleB;
+                          });
+                          
+                          return sortedMembers.map((member) => (
+                            <div key={member.id} className="flex items-center justify-between py-2 px-3 bg-white rounded-lg border border-gray-200">
+                              <div className="flex-1">
+                                <div className="flex items-center space-x-3">
+                                  <div className="flex-shrink-0">
+                                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                      <span className="text-sm font-medium text-blue-600">
+                                        {member.full_name?.charAt(0) || member.email?.charAt(0) || '?'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                      {member.full_name || 'Sin nombre'}
+                                    </p>
+                                    <p className="text-sm text-gray-500 truncate">
+                                      {member.email}
+                                    </p>
                                   </div>
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-gray-900 truncate">
-                                    {member.full_name || 'Sin nombre'}
-                                  </p>
-                                  <p className="text-sm text-gray-500 truncate">
-                                    {member.email}
-                                  </p>
-                                </div>
+                              </div>
+                              <div className="flex-shrink-0">
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleColors(member.role)}`}>
+                                  {getRoleLabel(member.role)}
+                                </span>
                               </div>
                             </div>
-                            <div className="flex-shrink-0">
-                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleColors(member.role)}`}>
-                                {getRoleLabel(member.role)}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
+                          ));
+                        })()}
                       </div>
                     </div>
                   ) : (
@@ -1860,7 +1903,7 @@ const UserManagement = () => {
               </div>
             </div>
             
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3 flex-shrink-0">
               <button
                 onClick={() => setShowViewTeamModal(false)}
                 className="px-6 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"

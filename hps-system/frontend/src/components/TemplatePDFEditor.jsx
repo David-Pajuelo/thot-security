@@ -26,6 +26,11 @@ const TemplatePDFEditor = ({ templateId, isOpen, onClose, onSave }) => {
   useEffect(() => {
     if (isOpen && templateId) {
       loadPDF();
+    } else if (!isOpen && pdfUrl) {
+      // Limpiar blob URL cuando se cierra el componente
+      URL.revokeObjectURL(pdfUrl);
+      setPdfUrl('');
+      setPdfBytes(null);
     }
   }, [isOpen, templateId]);
 
@@ -224,16 +229,55 @@ const TemplatePDFEditor = ({ templateId, isOpen, onClose, onSave }) => {
     setError('');
 
     try {
+      console.log('Guardando PDF de plantilla con anotaciones:', validAnnotations);
+      
       const fieldUpdates = {};
       validAnnotations.forEach(annotation => {
         fieldUpdates[annotation.field] = annotation.text;
       });
       
+      console.log('Enviando campos al backend:', fieldUpdates);
+      
       const result = await templateService.editTemplatePDF(templateId, fieldUpdates);
+      console.log('Resultado del backend:', result);
       
       if (result.success) {
-        handleClose();
+        // Mostrar mensaje de éxito
         alert('✅ PDF de plantilla guardado correctamente');
+        
+        // Limpiar el blob URL anterior para forzar recarga
+        if (pdfUrl) {
+          URL.revokeObjectURL(pdfUrl);
+          setPdfUrl('');
+        }
+        setPdfBytes(null);
+        
+        // Recargar el PDF actualizado desde el servidor
+        setLoading(true);
+        try {
+          const bytesResult = await templateService.getTemplatePDFBytes(templateId);
+          if (bytesResult.success) {
+            // Crear nuevo blob URL con el PDF actualizado
+            const blob = new Blob([bytesResult.data], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            setPdfUrl(url);
+            setPdfBytes(bytesResult.data);
+          } else {
+            setError('Error al recargar el PDF actualizado');
+          }
+        } catch (reloadErr) {
+          console.error('Error recargando PDF:', reloadErr);
+          setError('Error al recargar el PDF actualizado');
+        } finally {
+          setLoading(false);
+        }
+        
+        // Salir del modo edición pero mantener el modal abierto para ver los cambios
+        setIsEditing(false);
+        setAnnotations([]);
+        setCurrentAnnotation(null);
+        
+        // Notificar al componente padre que se guardó
         onSave && onSave();
       } else {
         const errorMsg = String(result.error) || 'Error al guardar el PDF';

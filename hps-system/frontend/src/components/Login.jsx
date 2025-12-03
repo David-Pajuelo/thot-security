@@ -5,11 +5,12 @@ import { useForm } from 'react-hook-form';
 import useAuthStore from '../store/authStore';
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import { formatErrorForDisplay } from '../utils/errorHandler';
+import { getTokenFromCryptoTrace } from '../utils/tokenSync';
 
 const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, loading, error, errorType, clearError, isAuthenticated } = useAuthStore();
+  const { login, loading, error, errorType, clearError, isAuthenticated, verifyToken } = useAuthStore();
   const [showPassword, setShowPassword] = useState(false);
   
   const {
@@ -19,6 +20,40 @@ const Login = () => {
     setFocus,
     setValue
   } = useForm();
+
+  // Verificar si hay token desde CryptoTrace al cargar
+  useEffect(() => {
+    const checkTokenFromCryptoTrace = async () => {
+      // Solo verificar si no hay token en localStorage
+      const existingToken = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
+      if (!existingToken) {
+        console.log('[Login] Verificando token desde CryptoTrace...');
+        const token = await getTokenFromCryptoTrace();
+        if (token) {
+          console.log('[Login] ✅ Token encontrado en CryptoTrace, guardando...');
+          localStorage.setItem('accessToken', token);
+          localStorage.setItem('hps_token', token); // Compatibilidad
+          
+          // Verificar el token y obtener el perfil del usuario
+          // Esto establecerá la sesión correctamente
+          const isValid = await verifyToken();
+          
+          if (isValid) {
+            console.log('[Login] ✅ Token verificado, sesión establecida desde CryptoTrace');
+            // Redirigir al dashboard
+            const from = location.state?.from?.pathname || '/dashboard';
+            navigate(from, { replace: true });
+          } else {
+            console.log('[Login] ⚠️ Token inválido, limpiando...');
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('hps_token');
+          }
+        }
+      }
+    };
+    
+    checkTokenFromCryptoTrace();
+  }, [navigate, location]);
 
   // Redirigir si ya está autenticado
   useEffect(() => {

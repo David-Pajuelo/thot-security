@@ -122,6 +122,7 @@ services:
       - NEXT_PUBLIC_API_URL=http://localhost:8080/api
       - NEXT_PUBLIC_PROCESSING_URL=http://localhost:5001
       - NEXT_PUBLIC_OCR_URL=http://localhost:8002
+      - NEXT_PUBLIC_HPS_SYSTEM_URL=http://localhost:3001
       - WATCHPACK_POLLING=true
     volumes:
       - ./cryptotrace-frontend:/app

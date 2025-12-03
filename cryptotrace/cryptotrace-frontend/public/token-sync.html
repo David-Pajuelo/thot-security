@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Sync</title>
+</head>
+<body>
+    <script>
+        // Escuchar mensajes desde HPS System
+        window.addEventListener('message', function(event) {
+            // Verificar origen para seguridad
+            const hpsSystemUrl = 'http://localhost:3001';
+            const allowedOrigin = new URL(hpsSystemUrl).origin;
+            
+            if (event.origin !== allowedOrigin) {
+                console.log('[token-sync] Origen no permitido:', event.origin);
+                return;
+            }
+            
+            if (event.data.type === 'REQUEST_TOKEN_SYNC') {
+                console.log('[token-sync] Solicitud de token recibida desde HPS System');
+                
+                // Leer token del localStorage
+                const accessToken = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
+                const refreshToken = localStorage.getItem('refreshToken') || localStorage.getItem('hps_refresh_token');
+                
+                if (accessToken) {
+                    console.log('[token-sync] ✅ Enviando token a HPS System');
+                    // Enviar token de vuelta a HPS System
+                    event.source.postMessage({
+                        type: 'TOKEN_SYNC_RESPONSE',
+                        token: accessToken,
+                        refreshToken: refreshToken
+                    }, event.origin);
+                } else {
+                    console.log('[token-sync] ⚠️ No hay token disponible');
+                    event.source.postMessage({
+                        type: 'TOKEN_SYNC_RESPONSE',
+                        token: null
+                    }, event.origin);
+                }
+            }
+            
+            if (event.data.type === 'LOGOUT_SYNC') {
+                console.log('[token-sync] Solicitud de logout recibida desde HPS System');
+                // Limpiar tokens
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('refreshToken');
+                localStorage.removeItem('hps_token');
+                localStorage.removeItem('hps_refresh_token');
+                localStorage.removeItem('user');
+                localStorage.removeItem('hps_user');
+                // Limpiar cookies
+                document.cookie = 'accessToken=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                document.cookie = 'refreshToken=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+                // Notificar que se completó el logout
+                event.source.postMessage({
+                    type: 'LOGOUT_SYNC_RESPONSE',
+                    success: true
+                }, event.origin);
+                // Redirigir a login
+                window.location.href = '/login';
+            }
+        });
+        
+        console.log('[token-sync] Página de sincronización de tokens cargada (CryptoTrace)');
+    </script>
+</body>
+</html>
+

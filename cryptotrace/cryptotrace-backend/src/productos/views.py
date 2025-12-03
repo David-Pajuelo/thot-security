@@ -1221,7 +1221,16 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        base_queryset = LineaTemporalProducto.objects.all() if user.is_superuser else LineaTemporalProducto.objects.filter(usuario=user)
+        # Verificar permisos basándose en el rol de HPS (admin o crypto)
+        has_admin_permissions = False
+        if hasattr(user, 'hps_profile') and user.hps_profile and user.hps_profile.role:
+            role_name = user.hps_profile.role.name
+            has_admin_permissions = role_name in ['admin', 'crypto']
+        # Fallback a is_superuser si no tiene perfil HPS (compatibilidad)
+        if not has_admin_permissions:
+            has_admin_permissions = user.is_superuser
+        
+        base_queryset = LineaTemporalProducto.objects.all() if has_admin_permissions else LineaTemporalProducto.objects.filter(usuario=user)
         
         # Filtros opcionales por parámetros de consulta
         procesado = self.request.query_params.get('procesado', 'false').lower()
@@ -1469,8 +1478,17 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
         dias = int(request.data.get('dias', 30))
         fecha_limite = timezone.now() - timedelta(days=dias)
         
-        # Solo el usuario puede limpiar sus propios registros, excepto superusuarios
-        if request.user.is_superuser:
+        # Solo el usuario puede limpiar sus propios registros, excepto admins/cryptos
+        # Verificar permisos basándose en el rol de HPS (admin o crypto)
+        has_admin_permissions = False
+        if hasattr(request.user, 'hps_profile') and request.user.hps_profile and request.user.hps_profile.role:
+            role_name = request.user.hps_profile.role.name
+            has_admin_permissions = role_name in ['admin', 'crypto']
+        # Fallback a is_superuser si no tiene perfil HPS (compatibilidad)
+        if not has_admin_permissions:
+            has_admin_permissions = request.user.is_superuser
+        
+        if has_admin_permissions:
             registros_antiguos = LineaTemporalProducto.objects.filter(
                 procesado=True,
                 created_at__lt=fecha_limite  # Asumiendo que tienes un campo created_at
@@ -1838,11 +1856,24 @@ def cambiar_password(request):
         user.set_password(new_password)
         user.save()
         
-        # Si el usuario tenía que cambiar la contraseña, marcar como completado
+        # Actualizar must_change_password en ambos perfiles (productos y HPS)
+        password_was_required = False
+        
+        # Actualizar perfil de productos (si existe)
         if hasattr(user, 'profile') and user.profile.must_change_password:
             user.profile.must_change_password = False
             user.profile.save()
-            
+            password_was_required = True
+        
+        # Actualizar perfil HPS (si existe) - usar el mismo sistema que HPS System
+        if hasattr(user, 'hps_profile'):
+            if user.hps_profile.must_change_password or user.hps_profile.is_temp_password:
+                user.hps_profile.must_change_password = False
+                user.hps_profile.is_temp_password = False
+                user.hps_profile.save(update_fields=['must_change_password', 'is_temp_password'])
+                password_was_required = True
+        
+        if password_was_required:
             return Response({
                 'message': 'Contraseña cambiada exitosamente. Ya puedes acceder al sistema.',
                 'password_change_required': False

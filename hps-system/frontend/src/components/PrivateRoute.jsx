@@ -27,8 +27,12 @@ const PrivateRoute = ({
   // Si requiere autenticación y no está autenticado
   if (requireAuth && !isAuthenticated) {
     console.log('PrivateRoute - No autenticado, redirigiendo a login');
-    // Limpiar cualquier dato residual de localStorage
+    // Limpiar cualquier dato residual de localStorage (ambos sistemas)
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('user');
     localStorage.removeItem('hps_token');
+    localStorage.removeItem('hps_refresh_token');
     localStorage.removeItem('hps_user');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }

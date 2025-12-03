@@ -8,30 +8,78 @@ import { usePathname } from "next/navigation";
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isSuperuser, setIsSuperuser] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const pathname = usePathname();
+
+  // Helper para leer cookies
+  const getCookie = (name: string): string | null => {
+    if (typeof document === 'undefined') return null;
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop()?.split(';').shift() || null;
+    return null;
+  };
 
   // 🔥 Función para actualizar estado del usuario
   const updateUserState = () => {
-    const token = localStorage.getItem("accessToken");
+    // Buscar token en localStorage primero (más rápido, evita leer cookies innecesariamente)
+    let token = localStorage.getItem("accessToken") || localStorage.getItem("hps_token");
+    
+    // Solo verificar cookies si no hay token en localStorage
+    if (!token) {
+      token = getCookie("accessToken");
+      if (token) {
+        localStorage.setItem("accessToken", token);
+        const refreshToken = getCookie("refreshToken");
+        if (refreshToken) {
+          localStorage.setItem("refreshToken", refreshToken);
+        }
+        console.log('[Layout] Token encontrado en cookie, copiado a localStorage');
+      }
+    }
     setIsAuthenticated(!!token);
     
-    // Verificar si el usuario es superusuario
+    // Verificar si el usuario tiene rol permitido (admin o crypto) desde HPS
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
-        setIsSuperuser(payload.is_superuser || false);
+        
+        // Usar el rol de HPS (admin o crypto) para determinar permisos
+        const allowedRoles = ['admin', 'crypto'];
+        const role = payload.role;
+        setUserRole(role || null);
+        
+        // isSuperuser será true si el rol es admin o crypto (roles con permisos de gestión)
+        const hasManagementPermissions = role && allowedRoles.includes(role);
+        setIsSuperuser(hasManagementPermissions || false);
+        
+        // Verificar rol permitido (admin o crypto)
+        if (role && !allowedRoles.includes(role)) {
+          // Si el usuario no tiene rol permitido, limpiar tokens y redirigir
+          localStorage.removeItem("accessToken");
+          localStorage.removeItem("refreshToken");
+          setIsAuthenticated(false);
+          setIsSuperuser(false);
+          setUserRole(null);
+          window.location.href = "/login";
+        }
       } catch (error) {
         console.error("Error parsing token:", error);
         setIsSuperuser(false);
+        setUserRole(null);
       }
     } else {
       setIsSuperuser(false);
+      setUserRole(null);
     }
   };
 
   useEffect(() => {
-    // 🔥 Actualizar estado inicial
+    // 🔥 Actualizar estado inicial (solo una vez al montar)
     updateUserState();
+    
+    // Nota: La sincronización de tokens se hace mediante iframe + postMessage
+    // cuando se accede directamente a CryptoTrace. No es necesario escuchar aquí.
 
     // 🔥 Escuchar cambios en localStorage (para cuando se actualice el token)
     const handleStorageChange = (e: StorageEvent) => {
@@ -45,14 +93,73 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       updateUserState();
     };
 
+    // 🔥 Listener para recibir token desde HPS System mediante postMessage
+    const handleMessage = (event: MessageEvent) => {
+      console.log('[Layout] Mensaje recibido:', {
+        origin: event.origin,
+        data: event.data,
+        type: event.data?.type
+      });
+      
+      // Verificar origen para seguridad (solo aceptar desde HPS System)
+      const hpsSystemUrl = process.env.NEXT_PUBLIC_HPS_SYSTEM_URL || 'http://localhost:3001';
+      const allowedOrigin = new URL(hpsSystemUrl).origin;
+      
+      console.log('[Layout] Origen permitido:', allowedOrigin);
+      console.log('[Layout] Origen del mensaje:', event.origin);
+      
+      if (event.origin !== allowedOrigin) {
+        console.log('[Layout] Mensaje rechazado - origen no permitido. Esperado:', allowedOrigin, 'Recibido:', event.origin);
+        return;
+      }
+
+      if (event.data && event.data.type === 'HPS_AUTH_TOKEN') {
+        console.log('[Layout] ✅ Recibido token desde HPS System mediante postMessage');
+        console.log('[Layout] Token recibido (primeros 50 chars):', event.data.accessToken ? event.data.accessToken.substring(0, 50) + '...' : 'No hay token');
+        
+        // Guardar tokens en localStorage y cookies
+        if (event.data.accessToken) {
+          localStorage.setItem('accessToken', event.data.accessToken);
+          const cookieOptions = 'path=/; SameSite=Lax; max-age=28800'; // 8 horas
+          document.cookie = `accessToken=${event.data.accessToken}; ${cookieOptions}`;
+          console.log('[Layout] ✅ Token guardado en localStorage y cookie');
+        }
+        if (event.data.refreshToken) {
+          localStorage.setItem('refreshToken', event.data.refreshToken);
+          const cookieOptions = 'path=/; SameSite=Lax; max-age=28800'; // 8 horas
+          document.cookie = `refreshToken=${event.data.refreshToken}; ${cookieOptions}`;
+          console.log('[Layout] ✅ Refresh token guardado en localStorage y cookie');
+        }
+        
+        // Actualizar estado y disparar evento
+        console.log('[Layout] Actualizando estado del usuario...');
+        updateUserState();
+        window.dispatchEvent(new Event('tokenUpdated'));
+        console.log('[Layout] ✅ Estado actualizado y evento tokenUpdated disparado');
+        
+        // Si estamos en la página de login, redirigir automáticamente
+        if (window.location.pathname === '/login') {
+          console.log('[Layout] Estamos en /login, redirigiendo a /productos...');
+          // Pequeño delay para asegurar que el estado se actualice
+          setTimeout(() => {
+            window.location.href = '/productos';
+          }, 100);
+        }
+      } else {
+        console.log('[Layout] Mensaje recibido pero no es de tipo HPS_AUTH_TOKEN:', event.data);
+      }
+    };
+
     // Agregar listeners
     window.addEventListener("storage", handleStorageChange);
     window.addEventListener("tokenUpdated", handleTokenUpdate);
+    window.addEventListener("message", handleMessage);
 
     // Cleanup listeners
     return () => {
       window.removeEventListener("storage", handleStorageChange);
       window.removeEventListener("tokenUpdated", handleTokenUpdate);
+      window.removeEventListener("message", handleMessage);
     };
   }, []);
 
@@ -61,9 +168,27 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     updateUserState();
   }, [pathname]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Limpiar tokens de ambos sistemas (compartidos)
     localStorage.removeItem("accessToken");
     localStorage.removeItem("refreshToken");
+    localStorage.removeItem("user");
+    // También limpiar nombres antiguos de HPS por si acaso
+    localStorage.removeItem("hps_token");
+    localStorage.removeItem("hps_refresh_token");
+    localStorage.removeItem("hps_user");
+    
+    // Limpiar también cookies
+    document.cookie = 'accessToken=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    document.cookie = 'refreshToken=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    
+    // Sincronizar logout con HPS System
+    try {
+      const { syncLogoutWithHPS } = await import('../../utils/tokenSync');
+      await syncLogoutWithHPS();
+    } catch (e) {
+      console.warn('[Layout] Error sincronizando logout con HPS System:', e);
+    }
     
     // 🔥 Disparar evento para actualizar el estado inmediatamente
     window.dispatchEvent(new Event('tokenUpdated'));
