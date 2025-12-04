@@ -28,49 +28,47 @@ services:
   #     timeout: 10s
   #     retries: 3
 
-  # Agente IA
-  agente-ia:
-    build:
-      context: ./agente-ia
-      dockerfile: Dockerfile
-    container_name: hps_agente_ia
-    restart: unless-stopped
-    env_file:
-      - .env.dev
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL}
-      - POSTGRES_HOST=${POSTGRES_HOST}
-      - POSTGRES_PORT=${POSTGRES_PORT}
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
-      - BACKEND_URL=${BACKEND_URL}
-      - FRONTEND_URL=${FRONTEND_URL}
-      - AGENTE_IA_TIMEOUT=${AGENTE_IA_TIMEOUT}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - SECRET_KEY=${SECRET_KEY}
-      - SMTP_HOST=${SMTP_HOST}
-      - SMTP_PORT=${SMTP_PORT}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASSWORD=${SMTP_PASSWORD}
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./agente-ia:/app
-    # depends_on:
-    #   db:
-    #     condition: service_healthy
-    # Usamos la base de datos compartida de cryptotrace
-    networks:
-      - hps_network
-      - cryptotrace_default  # Para acceder a cryptotrace-db y cryptotrace-redis
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # Agente IA - MIGRADO A DJANGO (cryptotrace-backend)
+  # El agente IA ahora corre en Django Channels dentro de cryptotrace-backend
+  # Este servicio FastAPI ya no es necesario
+  # agente-ia:
+  #   build:
+  #     context: ./agente-ia
+  #     dockerfile: Dockerfile
+  #   container_name: hps_agente_ia
+  #   restart: unless-stopped
+  #   env_file:
+  #     - .env.dev
+  #   environment:
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - OPENAI_MODEL=${OPENAI_MODEL}
+  #     - POSTGRES_HOST=${POSTGRES_HOST}
+  #     - POSTGRES_PORT=${POSTGRES_PORT}
+  #     - POSTGRES_DB=${POSTGRES_DB}
+  #     - POSTGRES_USER=${POSTGRES_USER}
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+  #     - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+  #     - BACKEND_URL=${BACKEND_URL}
+  #     - FRONTEND_URL=${FRONTEND_URL}
+  #     - AGENTE_IA_TIMEOUT=${AGENTE_IA_TIMEOUT}
+  #     - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+  #     - SECRET_KEY=${SECRET_KEY}
+  #     - SMTP_HOST=${SMTP_HOST}
+  #     - SMTP_PORT=${SMTP_PORT}
+  #     - SMTP_USER=${SMTP_USER}
+  #     - SMTP_PASSWORD=${SMTP_PASSWORD}
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - ./agente-ia:/app
+  #   networks:
+  #     - hps_network
+  #     - cryptotrace_default
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
   # Redis
   # NOTA: Usamos el Redis compartido de cryptotrace (puerto 6379)
@@ -199,7 +197,7 @@ services:
       args:
         - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8080}
         - REACT_APP_WS_URL=${REACT_APP_WS_URL:-ws://localhost:8080}
-        - REACT_APP_AGENTE_IA_WS_URL=${REACT_APP_AGENTE_IA_WS_URL:-ws://localhost:8000}
+        - REACT_APP_AGENTE_IA_WS_URL=${REACT_APP_AGENTE_IA_WS_URL:-ws://localhost:8080}
     container_name: hps_frontend
     restart: unless-stopped
     env_file:

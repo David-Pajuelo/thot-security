@@ -79,7 +79,7 @@ const config = {
     
     // Chat/Agente IA (WebSocket)
     chat: {
-      websocket: process.env.REACT_APP_AGENTE_IA_WS_URL || 'ws://localhost:8000',
+      websocket: process.env.REACT_APP_AGENTE_IA_WS_URL || 'ws://localhost:8080',
       conversations: '/api/hps/chat/conversations/',
       metrics: '/api/hps/chat/metrics/',
       reset: '/api/hps/chat/conversations/reset/'

@@ -14,3 +14,7 @@ redis  # Para cache y sesiones
 django-redis  # Integración Django-Redis
 celery  # Tareas asíncronas (migración HPS)
 PyMuPDF  # Para rellenar PDFs automáticamente
+channels>=4.0.0  # Django Channels para WebSocket
+channels-redis>=4.1.0  # Redis channel layer para Channels
+openai>=1.3.0  # Cliente OpenAI para agente IA
+httpx>=0.24.0  # Cliente HTTP async para agente IA

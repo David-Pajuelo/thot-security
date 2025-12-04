@@ -275,16 +275,58 @@ class AlbaranViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         print(f"DEBUG AC21: request.data={request.data}")
-        cabecera = request.data.get('cabecera', {})
+        print(f"DEBUG AC21: request.content_type={request.content_type}")
+        
+        # Manejar FormData (cuando se envía imagen)
+        parsed_data = request.data
+        if 'multipart/form-data' in request.content_type:
+            print("🖼️ [BACKEND] Recibiendo FormData con imagen")
+            # Extraer imagen del FormData
+            imagen_documento = request.FILES.get('imagen_documento')
+            if imagen_documento:
+                print(f"🖼️ [BACKEND] Imagen recibida: {imagen_documento.name}, {imagen_documento.size} bytes")
+            
+            # Extraer datos JSON del FormData
+            data_str = request.data.get('data')
+            if data_str:
+                import json
+                try:
+                    # Parsear el JSON string
+                    if isinstance(data_str, str):
+                        parsed_data = json.loads(data_str)
+                    else:
+                        parsed_data = data_str
+                    print(f"✅ [BACKEND] Datos parseados desde FormData")
+                except (json.JSONDecodeError, TypeError) as e:
+                    print(f"❌ [BACKEND] Error parseando JSON de FormData: {e}")
+                    return Response({"error": f"Error parseando datos JSON: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                print("⚠️ [BACKEND] No se encontró campo 'data' en FormData, usando request.data directamente")
+                parsed_data = request.data
+        
+        # Usar parsed_data si es dict, sino usar request.data
+        data_source = parsed_data if isinstance(parsed_data, dict) else request.data
+        cabecera = data_source.get('cabecera', {})
+        
+        # Asegurar que cabecera sea un dict (puede venir como string JSON desde FormData)
+        if isinstance(cabecera, str):
+            import json
+            try:
+                cabecera = json.loads(cabecera)
+            except (json.JSONDecodeError, TypeError):
+                cabecera = {}
+        elif not isinstance(cabecera, dict):
+            cabecera = {}
+        
         def get_first_nonempty(*args):
             for v in args:
                 if v is not None and str(v).strip() != '':
                     return v
             return None
         numero = get_first_nonempty(
-            request.data.get('numero'),
-            request.data.get('numero_registro_entrada'),
-            request.data.get('numero_registro_salida'),
+            data_source.get('numero'),
+            data_source.get('numero_registro_entrada'),
+            data_source.get('numero_registro_salida'),
             cabecera.get('numero'),
             cabecera.get('numero_registro_entrada'),
             cabecera.get('numero_registro_salida')
@@ -293,13 +335,13 @@ class AlbaranViewSet(viewsets.ModelViewSet):
         if not numero:
             return Response({'error': 'No se encontró número de registro en el AC21. El payload debe incluir un campo "numero_registro_salida" o equivalente.'}, status=status.HTTP_400_BAD_REQUEST)
         # Si el frontend pide agregar productos a un albarán existente
-        if request.data.get('modo') == 'agregar_a_existente':
+        if data_source.get('modo') == 'agregar_a_existente':
             albaran = Albaran.objects.filter(
                 models.Q(numero=numero) | models.Q(numero_registro_salida=numero)
             ).first()
             if not albaran:
                 return Response({'error': 'No existe un albarán con ese número'}, status=status.HTTP_404_NOT_FOUND)
-            articulos = request.data.get('articulos', [])
+            articulos = data_source.get('articulos', [])
             nuevos = 0
             for articulo in articulos:
                 codigo = articulo.get('codigo')
@@ -340,8 +382,8 @@ class AlbaranViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(albaran)
             return Response({"success": True, "data": serializer.data, "nuevos": nuevos}, status=status.HTTP_200_OK)
         # --- Nueva lógica: bloquear alta directa de AC21 DE ENTRADA (no salida) ---
-        tipo_documento = request.data.get('tipo_documento') or cabecera.get('tipo_transaccion')
-        direccion_transferencia = request.data.get('direccion_transferencia', 'ENTRADA')
+        tipo_documento = data_source.get('tipo_documento') or cabecera.get('tipo_transaccion')
+        direccion_transferencia = data_source.get('direccion_transferencia', 'ENTRADA')
         
         # Solo bloquear AC21s de ENTRADA - las SALIDAS pueden crearse directamente
         if (tipo_documento and str(tipo_documento).upper() in ['TRANSFERENCIA', 'RECIBO_MANO', 'DESTRUCCION', 'OTRO'] 
@@ -362,7 +404,8 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                     "productos_existentes": productos_existentes,
                     "albaran_id": albaran_existente.id
                 }, status=status.HTTP_409_CONFLICT)
-        serializer = self.get_serializer(data=request.data)
+        # Usar parsed_data si es dict, sino usar request.data
+        serializer = self.get_serializer(data=parsed_data if isinstance(parsed_data, dict) else request.data)
         serializer.is_valid(raise_exception=True)
         albaran_instance = self.perform_create(serializer, numero)
         response_serializer = self.get_serializer(albaran_instance)

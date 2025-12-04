@@ -421,9 +421,11 @@ function UploadAC21PageContent() {
       console.log(`📤 [OCR] Enviando imagen con rotación ${rotation}° aplicada al servicio OCR`);
       const response = await processAC21Image(formData);
 
-      if (response && response.success) {
+      // El OCR devuelve los datos directamente, no en formato { success, data }
+      if (response) {
         // Mapeo cuidadoso de la respuesta a la estructura del estado
-        const responseData = response.data;
+        // Si viene en formato { success, data }, usar response.data, sino usar response directamente
+        const responseData = response.data || response;
         // --- LIMPIEZA Y SINCRONIZACIÓN DE CAMPOS ---
         let tipoTransaccion = responseData.cabecera?.tipo_transaccion;
         let numeroRegistroEntrada = responseData.cabecera?.numero_registro_entrada;
@@ -672,8 +674,19 @@ function UploadAC21PageContent() {
   };
 
   const handleConfirm = async () => {
-    if (!processedData || !selectedArticulos || selectedArticulos.size === 0) {
-      toast.error("No hay artículos seleccionados para procesar");
+    // Verificar primero si hay artículos procesados
+    if (!processedData || !processedData.articulos || processedData.articulos.length === 0) {
+      toast.error("No hay artículos para procesar. Asegúrate de que el OCR haya detectado artículos en el documento.");
+      return;
+    }
+    
+    // Verificar si hay artículos seleccionados
+    if (!selectedArticulos || selectedArticulos.size === 0) {
+      toast.error(
+        "No hay artículos seleccionados para procesar. " +
+        "Selecciona al menos un artículo de la lista o usa 'Seleccionar todos'.",
+        { duration: 5000 }
+      );
       return;
     }
 
@@ -699,7 +712,8 @@ function UploadAC21PageContent() {
         console.log('🔍 [AC21] Verificando documento existente con número:', numeroRegistro);
         const verificacion = await verificarDocumentoExistente(numeroRegistro);
         
-        if (verificacion.existe && verificacion.documento) {
+        // Verificar que verificacion no sea null y tenga la propiedad existe
+        if (verificacion && verificacion.existe && verificacion.documento) {
           console.log('📄 [AC21] Documento existente encontrado:', verificacion.documento);
           setDocumentoExistente(verificacion.documento);
           setNumeroRegistroDetectado(numeroRegistro);
@@ -1054,9 +1068,19 @@ function UploadAC21PageContent() {
   }, [processedData?.cabecera?.numero_registro_entrada]);
 
   // useEffect para seleccionar todos los artículos detectados por defecto al recibirlos del OCR
+  // Solo selecciona si no hay artículos ya seleccionados (para evitar sobrescribir selecciones manuales)
   useEffect(() => {
     if (processedData.articulos && processedData.articulos.length > 0) {
-      setSelectedArticulos(new Set(processedData.articulos.map((_: any, idx: number) => idx)));
+      // Solo seleccionar automáticamente si no hay artículos seleccionados previamente
+      // o si el número de artículos cambió (nuevo procesamiento)
+      setSelectedArticulos(prev => {
+        // Si no hay selección previa o el tamaño cambió, seleccionar todos
+        if (prev.size === 0 || prev.size !== processedData.articulos.length) {
+          return new Set(processedData.articulos.map((_: any, idx: number) => idx));
+        }
+        // Mantener la selección actual
+        return prev;
+      });
     }
   }, [processedData.articulos]);
 
@@ -1165,12 +1189,27 @@ function UploadAC21PageContent() {
                 newSet.delete(dup.index);
               }
             });
+            
+            // Si después de deseleccionar duplicados no quedan artículos seleccionados,
+            // mostrar un mensaje más claro
+            if (newSet.size === 0 && processedData.articulos && processedData.articulos.length > 0) {
+              console.warn('⚠️ [AC21] Todos los artículos son duplicados');
+              toast.warning(
+                `Todos los artículos de este AC21 ya están en el albarán ${response.albaran_numero}. ` +
+                `Puedes seleccionarlos manualmente si deseas agregarlos de nuevo.`,
+                { duration: 5000 }
+              );
+            }
+            
             return newSet;
           });
           
           if (duplicados.length > 0) {
             console.log('🔍 [AC21] Se encontraron productos duplicados, mostrando indicadores visuales');
-            toast.info(`Se encontraron ${duplicados.length} producto(s) que ya están en el albarán ${response.albaran_numero}`);
+            const mensaje = duplicados.length === processedData.articulos?.length
+              ? `Todos los ${duplicados.length} producto(s) ya están en el albarán ${response.albaran_numero}`
+              : `Se encontraron ${duplicados.length} producto(s) que ya están en el albarán ${response.albaran_numero}`;
+            toast.info(mensaje, { duration: 5000 });
           }
         } else {
           console.log('🔍 [AC21] No se encontró albarán o no tiene productos');

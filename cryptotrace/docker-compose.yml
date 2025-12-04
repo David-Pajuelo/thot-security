@@ -65,9 +65,12 @@ services:
     volumes:
       - ./cryptotrace-ocr/app:/app/app
       - ./cryptotrace-ocr/.env:/app/.env
+    env_file:
+      - ./cryptotrace-ocr/.env
     environment:
       - PYTHONPATH=/app
       - TESSERACT_PATH=/usr/bin/tesseract
+      # OPENAI_API_KEY se carga desde .env
     depends_on:
       - backend
     networks:

@@ -3,6 +3,7 @@ Configuración centralizada de roles y sugerencias para el Agente IA
 """
 from typing import Dict, List
 
+
 class RoleConfig:
     """Configuración centralizada para roles del sistema HPS"""
     
@@ -78,7 +79,7 @@ class RoleConfig:
         Returns:
             Lista de sugerencias para el rol o sugerencias por defecto (member)
         """
-        role = user_role.lower()
+        role = user_role.lower() if user_role else "member"
         return cls.SUGGESTIONS_BY_ROLE.get(role, cls.SUGGESTIONS_BY_ROLE["member"])
     
     @classmethod
@@ -93,41 +94,7 @@ class RoleConfig:
         Returns:
             Mensaje de bienvenida personalizado
         """
-        role = user_role.lower()
+        role = user_role.lower() if user_role else "member"
         message_template = cls.WELCOME_MESSAGES.get(role, cls.WELCOME_MESSAGES["member"])
-        return message_template.format(user_name=user_name)
-    
-    @classmethod
-    def add_role_config(cls, role: str, suggestions: List[str], welcome_message: str):
-        """
-        Agregar configuración para un nuevo rol.
-        
-        Args:
-            role: Nombre del rol
-            suggestions: Lista de sugerencias para el rol
-            welcome_message: Mensaje de bienvenida para el rol
-        """
-        cls.SUGGESTIONS_BY_ROLE[role.lower()] = suggestions
-        cls.WELCOME_MESSAGES[role.lower()] = welcome_message
-    
-    @classmethod
-    def update_role_suggestions(cls, role: str, suggestions: List[str]):
-        """
-        Actualizar sugerencias para un rol existente.
-        
-        Args:
-            role: Nombre del rol
-            suggestions: Nueva lista de sugerencias
-        """
-        cls.SUGGESTIONS_BY_ROLE[role.lower()] = suggestions
-    
-    @classmethod
-    def update_role_welcome_message(cls, role: str, welcome_message: str):
-        """
-        Actualizar mensaje de bienvenida para un rol existente.
-        
-        Args:
-            role: Nombre del rol
-            welcome_message: Nuevo mensaje de bienvenida
-        """
-        cls.WELCOME_MESSAGES[role.lower()] = welcome_message
+        return message_template.format(user_name=user_name or "Usuario")
+

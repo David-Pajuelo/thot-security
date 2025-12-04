@@ -75,22 +75,31 @@ const Chat = () => {
     if (token && user) {
       const connectToWebSocket = async () => {
         try {
+          // Configurar listener ANTES de conectar para no perder mensajes iniciales
+          if (!listenerId.current) {
+            listenerId.current = `chat-${Date.now()}`;
+            websocketService.addListener(listenerId.current, handleIncomingMessage);
+            console.log('✅ Listener configurado:', listenerId.current);
+          }
+          
           // Solo conectar si no hay conexión activa
           if (!websocketService.isConnected()) {
+            console.log('🔌 Iniciando conexión WebSocket...');
+            setConnectionStatus('Conectando...');
             await websocketService.connect(token);
+            console.log('✅ WebSocket conectado, actualizando estado');
+            setIsConnected(true);
+            setConnectionStatus('Conectado');
+          } else {
+            console.log('✅ WebSocket ya está conectado');
             setIsConnected(true);
             setConnectionStatus('Conectado');
           }
           
-          // Configurar listener para mensajes (solo si no existe)
-          if (!listenerId.current) {
-            listenerId.current = `chat-${Date.now()}`;
-            websocketService.addListener(listenerId.current, handleIncomingMessage);
-          }
-          
         } catch (error) {
           const errorMsg = formatErrorForDisplay(error);
-          console.error('Error conectando WebSocket:', errorMsg);
+          console.error('❌ Error conectando WebSocket:', errorMsg);
+          setIsConnected(false);
           setConnectionStatus(`Error de conexión: ${errorMsg}`);
         }
       };
@@ -115,6 +124,30 @@ const Chat = () => {
       }
     };
   }, [typingTimeout]);
+  
+  // Verificar estado de conexión periódicamente
+  useEffect(() => {
+    const checkConnection = () => {
+      const wsConnected = websocketService.isConnected();
+      if (wsConnected && !isConnected) {
+        console.log('✅ WebSocket conectado detectado, actualizando estado');
+        setIsConnected(true);
+        setConnectionStatus('Conectado');
+      } else if (!wsConnected && isConnected) {
+        console.log('⚠️ WebSocket desconectado detectado, actualizando estado');
+        setIsConnected(false);
+        setConnectionStatus('Desconectado');
+      }
+    };
+    
+    // Verificar inmediatamente
+    checkConnection();
+    
+    // Verificar cada 2 segundos
+    const interval = setInterval(checkConnection, 2000);
+    
+    return () => clearInterval(interval);
+  }, [isConnected]);
 
   // El historial se carga automáticamente desde el WebSocket
   // No necesitamos cargar desde el frontend
@@ -125,10 +158,22 @@ const Chat = () => {
     console.log('Listener ID actual:', listenerId.current);
     console.log('Tipo de mensaje:', data.type);
     
+    // Asegurar que el estado de conexión esté actualizado cuando recibimos mensajes
+    if (!isConnected && websocketService.isConnected()) {
+      console.log('✅ Actualizando estado de conexión desde mensaje recibido');
+      setIsConnected(true);
+      setConnectionStatus('Conectado');
+    }
+    
     // Manejar conversation_id
     if (data.type === 'conversation_id') {
       console.log('Recibido conversation_id:', data.conversation_id);
       setConversationId(data.conversation_id);
+      // Asegurar que estamos conectados cuando recibimos conversation_id
+      if (!isConnected) {
+        setIsConnected(true);
+        setConnectionStatus('Conectado');
+      }
       return;
     }
     
@@ -206,12 +251,65 @@ const Chat = () => {
   };
 
   const sendMessage = () => {
-    if (!inputMessage.trim() || !isConnected) {
-      console.log('No se puede enviar mensaje:', { 
-        hasMessage: !!inputMessage.trim(), 
-        isConnected 
-      });
+    // Verificar conexión real del WebSocket, no solo el estado local
+    const wsConnected = websocketService.isConnected();
+    
+    if (!inputMessage.trim()) {
+      console.log('No se puede enviar mensaje: mensaje vacío');
       return;
+    }
+    
+    if (!wsConnected) {
+      console.log('No se puede enviar mensaje: WebSocket no conectado', {
+        isConnected,
+        wsConnected: websocketService.isConnected()
+      });
+      setConnectionStatus('Desconectado - Reconectando...');
+      // Intentar reconectar si no está conectado
+      if (token) {
+        console.log('Intentando reconectar WebSocket...');
+        websocketService.connect(token).then(() => {
+          console.log('✅ Reconectado');
+          setIsConnected(true);
+          setConnectionStatus('Conectado');
+          // Reintentar envío después de reconectar (sin recursión)
+          const messageToSend = inputMessage.trim();
+          if (messageToSend && websocketService.isConnected()) {
+            const messageData = {
+              message: messageToSend,
+              timestamp: new Date().toISOString(),
+              context: {
+                user_id: user?.id || 'unknown',
+                email: user?.email || 'unknown',
+                role: user?.role || 'member',
+                team_id: user?.team_id || null,
+                team_name: user?.team_name || null
+              }
+            };
+            websocketService.sendMessage(messageData);
+            // Agregar mensaje del usuario
+            addMessage({
+              id: Date.now(),
+              type: 'user',
+              content: messageToSend,
+              timestamp: new Date(),
+              conversationId: conversationId
+            });
+            setInputMessage('');
+            setIsTyping(true);
+          }
+        }).catch(err => {
+          console.error('Error reconectando:', err);
+          setConnectionStatus('Error de conexión');
+        });
+      }
+      return;
+    }
+    
+    // Actualizar estado local si el WebSocket está conectado pero el estado no
+    if (!isConnected && wsConnected) {
+      setIsConnected(true);
+      setConnectionStatus('Conectado');
     }
     
     const userMessage = {

@@ -51,6 +51,8 @@ INSTALLED_APPS = [
     'django_extensions',  # Agregar esta línea
     "corsheaders",
     "hps_core",
+    'channels',  # Django Channels para WebSocket
+    'hps_agent',  # Agente IA integrado en Django
 
 ]
 
@@ -119,6 +121,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'cryptotrace_backend.wsgi.application'
+ASGI_APPLICATION = 'cryptotrace_backend.asgi.application'
 
 
 # Database
@@ -280,6 +283,17 @@ REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/0")
 # Celery Configuration (compatible con hps-system)
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
+
+# === Django Channels Configuration ===
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [(REDIS_HOST, REDIS_PORT)],
+        },
+    },
+}
+
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"

@@ -34,7 +34,7 @@ class WebSocketService {
       this.isConnecting = true;
       
       try {
-        const wsHost = process.env.REACT_APP_AGENTE_IA_WS_URL || 'ws://localhost:8000';
+        const wsHost = process.env.REACT_APP_AGENTE_IA_WS_URL || 'ws://localhost:8080';
         const wsUrl = `${wsHost}/ws/chat?token=${token}`;
         
         console.log('Conectando a WebSocket:', wsUrl);

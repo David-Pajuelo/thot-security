@@ -66,32 +66,33 @@ export default function GestionLineaTemporal() {
   const todosTipificados = productos.every((prod) => prod.tipo);
 
   const handleProcesarAlbaran = async () => {
-    // Filtrar productos válidos
-    const productosValidos = productos.filter((prod) => prod.tipo && prod.tipo !== 'NINGUNO');
-    if (productosValidos.length === 0) {
-      setMensaje('❌ No hay productos válidos para procesar.');
+    // Verificar que hay productos para procesar
+    if (productos.length === 0) {
+      setMensaje('❌ No hay productos para procesar.');
       setTimeout(() => setMensaje(null), 3000);
       return;
     }
+
+    // El backend procesa todos los productos temporales no procesados del usuario,
+    // no necesita que se envíen en el payload. Solo verificamos que existan productos.
+    // Mostrar advertencia si hay productos sin tipo, pero permitir procesar
+    const productosSinTipo = productos.filter((prod) => !prod.tipo || prod.tipo === 'NINGUNO');
+    if (productosSinTipo.length > 0) {
+      console.warn(`⚠️ ${productosSinTipo.length} producto(s) sin tipo asignado. Se procesarán sin tipo.`);
+    }
+
     try {
-      const fechaActual = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-      await procesarAlbaran({
-        tipo_albaran: 'Inventario',
-        numero_registro_entrada: '',
-        fecha_informe: fechaActual,
-        fecha_transaccion: fechaActual,
-        odmc_numero: '',
-        emad_numero: '',
-        productos: productosValidos
-      });
+      // El backend no requiere payload, procesa todos los productos temporales del usuario
+      await procesarAlbaran();
       setMensaje('✅ Albarán procesado correctamente');
       setTimeout(() => {
         router.push('/albaranes');
       }, 1000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error procesando el albarán:', error);
-      setMensaje('❌ Error al procesar el albarán');
-      setTimeout(() => setMensaje(null), 3000);
+      const errorMessage = error?.message || error?.detail || 'Error desconocido';
+      setMensaje(`❌ Error al procesar el albarán: ${errorMessage}`);
+      setTimeout(() => setMensaje(null), 5000);
     }
   };
 
