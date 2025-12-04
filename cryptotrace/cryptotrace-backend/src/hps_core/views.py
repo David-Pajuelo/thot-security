@@ -1500,6 +1500,41 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
             return Response({'conversation_id': str(conversation.id), **serializer.data})
         return Response({'conversation_id': None})
     
+    @action(detail=False, methods=['post'], url_path='archive-active')
+    def archive_active(self, request):
+        """Archivar conversación activa del usuario actual"""
+        try:
+            conversation = models.ChatConversation.objects.filter(
+                user=request.user,
+                status='active'
+            ).order_by('-created_at').first()
+            
+            if not conversation:
+                return Response({
+                    'success': True,
+                    'message': 'No hay conversación activa para archivar',
+                    'archived_conversation_id': None
+                }, status=status.HTTP_200_OK)
+            
+            conversation.status = 'archived'
+            conversation.closed_at = datetime.now()
+            conversation.save()
+            
+            logger.info(f"Conversación {conversation.id} archivada para usuario {request.user.id}")
+            
+            return Response({
+                'success': True,
+                'message': 'Conversación archivada exitosamente',
+                'archived_conversation_id': str(conversation.id)
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error archivando conversación: {e}")
+            return Response(
+                {'detail': 'Error interno del servidor'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
     @action(detail=True, methods=['post'], url_path='complete')
     def complete(self, request, pk=None):
         """Completar una conversación"""

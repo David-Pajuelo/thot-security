@@ -76,11 +76,20 @@ class WebSocketService {
         };
         
         this.ws.onerror = (error) => {
-          console.error('Error de WebSocket:', error);
+          console.error('❌ Error de WebSocket:', error);
+          console.error('❌ URL intentada:', wsUrl);
+          console.error('❌ Estado del WebSocket:', this.ws?.readyState);
+          console.error('❌ Error completo:', {
+            type: error?.type,
+            target: error?.target,
+            currentTarget: error?.currentTarget,
+            readyState: this.ws?.readyState,
+            url: this.ws?.url
+          });
           this.isConnecting = false;
           // Convertir Event a Error con mensaje legible
           const errorMessage = error instanceof Event 
-            ? 'Error de conexión WebSocket. Por favor, intenta de nuevo.'
+            ? `Error de conexión WebSocket a ${wsUrl}. Por favor, verifica que el servidor esté ejecutándose.`
             : (error?.message || String(error) || 'Error de conexión WebSocket');
           const wsError = new Error(errorMessage);
           wsError.originalError = error;
@@ -163,8 +172,11 @@ class WebSocketService {
         return;
       }
 
-      // Llamar al endpoint de archivado
-      const response = await fetch('/api/v1/chat/conversations/archive-active', {
+      // Usar la URL base de la API de Django
+      const apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+      
+      // Llamar al endpoint de archivado de Django
+      const response = await fetch(`${apiBaseUrl}/api/hps/chat/conversations/archive-active/`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

@@ -37,20 +37,28 @@ class ChatConsumer(AsyncWebsocketConsumer):
     
     async def connect(self):
         """Manejar conexión WebSocket"""
+        logger.info(f"🔌 Intento de conexión WebSocket recibido")
+        logger.info(f"📋 Scope path: {self.scope.get('path')}")
+        logger.info(f"📋 Scope query_string: {self.scope.get('query_string')}")
+        
         # Obtener token de query params o headers
         token = None
         
         # Intentar obtener de query params
         query_string = self.scope.get('query_string', b'').decode()
+        logger.info(f"📋 Query string decodificado: {query_string}")
         if 'token=' in query_string:
             token = query_string.split('token=')[1].split('&')[0]
+            logger.info(f"✅ Token encontrado en query params")
         
         # Si no está en query, intentar de headers
         if not token:
             headers = dict(self.scope.get('headers', []))
+            logger.info(f"📋 Headers disponibles: {list(headers.keys())}")
             auth_header = headers.get(b'authorization', b'').decode()
             if auth_header.startswith('Bearer '):
                 token = auth_header[7:]
+                logger.info(f"✅ Token encontrado en headers")
         
         if not token:
             logger.warning("❌ Token no proporcionado")
