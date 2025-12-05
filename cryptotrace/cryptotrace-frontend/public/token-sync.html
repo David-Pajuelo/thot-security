@@ -10,7 +10,8 @@
         // Escuchar mensajes desde HPS System
         window.addEventListener('message', function(event) {
             // Verificar origen para seguridad
-            const hpsSystemUrl = 'http://localhost:3001';
+            // Placeholder que será reemplazado en tiempo de build
+            const hpsSystemUrl = '__HPS_SYSTEM_URL__';
             const allowedOrigin = new URL(hpsSystemUrl).origin;
             
             if (event.origin !== allowedOrigin) {

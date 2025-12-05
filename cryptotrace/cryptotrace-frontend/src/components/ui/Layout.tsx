@@ -103,7 +103,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       });
       
       // Verificar origen para seguridad (solo aceptar desde HPS System)
-      const hpsSystemUrl = process.env.NEXT_PUBLIC_HPS_SYSTEM_URL || 'http://localhost:3001';
+      const hpsSystemUrlEnv = process.env.NEXT_PUBLIC_HPS_SYSTEM_URL;
+      if (!hpsSystemUrlEnv) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('⚠️ NEXT_PUBLIC_HPS_SYSTEM_URL no definida, usando localhost (solo en desarrollo)');
+        } else {
+          console.error('❌ NEXT_PUBLIC_HPS_SYSTEM_URL debe estar definida en producción');
+        }
+      }
+      const hpsSystemUrl = hpsSystemUrlEnv || 'http://localhost:3001';  // Fallback solo en desarrollo
       const allowedOrigin = new URL(hpsSystemUrl).origin;
       
       console.log('[Layout] Origen permitido:', allowedOrigin);

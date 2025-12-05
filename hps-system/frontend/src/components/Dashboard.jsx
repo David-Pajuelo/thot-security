@@ -333,7 +333,16 @@ const Dashboard = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {menuItems.map((item) => {
             const Icon = item.icon;
-            const cryptoTraceUrl = process.env.REACT_APP_CRYPTOTRACE_URL || 'http://localhost:3000';
+            // Validar variable de entorno (sin fallback en producción)
+            const cryptoTraceUrl = process.env.REACT_APP_CRYPTOTRACE_URL;
+            if (!cryptoTraceUrl) {
+              if (process.env.NODE_ENV === 'development') {
+                console.warn('⚠️ REACT_APP_CRYPTOTRACE_URL no definida, usando localhost (solo en desarrollo)');
+              } else {
+                console.error('❌ REACT_APP_CRYPTOTRACE_URL debe estar definida en producción');
+              }
+            }
+            const cryptoTraceUrlFinal = cryptoTraceUrl || 'http://localhost:3000';  // Fallback solo en desarrollo
             
             return (
               <button
@@ -341,9 +350,9 @@ const Dashboard = () => {
                 onClick={() => {
                   console.log(`Dashboard - Haciendo clic en: ${item.name}`);
                   if (item.external) {
-                    console.log(`Dashboard - Redirigiendo a CryptoTrace: ${cryptoTraceUrl}`);
+                    console.log(`Dashboard - Redirigiendo a CryptoTrace: ${cryptoTraceUrlFinal}`);
                     // Abrir CryptoTrace y compartir el token mediante postMessage
-                    const newWindow = window.open(cryptoTraceUrl, '_blank');
+                    const newWindow = window.open(cryptoTraceUrlFinal, '_blank');
                     
                     // Obtener tokens del localStorage
                     const accessToken = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
@@ -352,7 +361,7 @@ const Dashboard = () => {
                     if (accessToken) {
                       console.log('Dashboard - Token encontrado, preparando para enviar...');
                       console.log('Dashboard - accessToken (primeros 50 chars):', accessToken.substring(0, 50) + '...');
-                      console.log('Dashboard - cryptoTraceUrl:', cryptoTraceUrl);
+                      console.log('Dashboard - cryptoTraceUrl:', cryptoTraceUrlFinal);
                       
                       // Esperar a que la ventana esté lista y enviar el token
                       const sendToken = () => {

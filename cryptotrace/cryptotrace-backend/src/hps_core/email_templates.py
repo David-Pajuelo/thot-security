@@ -24,8 +24,13 @@ class UserCredentialsTemplate:
         user_email = data.get("user_email", "")
         temp_password = data.get("temp_password", "")
         # Para emails HPS, usar HPS_SYSTEM_URL si está disponible, sino FRONTEND_URL
+        # Sin fallbacks - deben estar definidas en settings
         hps_system_url = getattr(settings, 'HPS_SYSTEM_URL', None)
-        default_url = hps_system_url if hps_system_url else getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
+        frontend_url = getattr(settings, 'FRONTEND_URL', None)
+        default_url = hps_system_url if hps_system_url else frontend_url
+        if not default_url:
+            logger.warning("Ni HPS_SYSTEM_URL ni FRONTEND_URL están definidas en settings")
+            default_url = "#"  # Fallback seguro si no hay URL
         login_url = data.get("login_url", f"{default_url}/login")
         
         subject = f"Bienvenido al Sistema HPS - Tus credenciales de acceso"

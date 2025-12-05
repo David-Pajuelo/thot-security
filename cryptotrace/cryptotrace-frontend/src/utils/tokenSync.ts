@@ -3,7 +3,16 @@
  * Usa iframe + postMessage para comunicación entre diferentes orígenes
  */
 
-const HPS_SYSTEM_URL = process.env.NEXT_PUBLIC_HPS_SYSTEM_URL || 'http://localhost:3001';
+// Validar variable de entorno (sin fallback en producción)
+const HPS_SYSTEM_URL_ENV = process.env.NEXT_PUBLIC_HPS_SYSTEM_URL;
+if (!HPS_SYSTEM_URL_ENV) {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn('⚠️ NEXT_PUBLIC_HPS_SYSTEM_URL no definida, usando localhost (solo en desarrollo)');
+  } else {
+    console.error('❌ NEXT_PUBLIC_HPS_SYSTEM_URL debe estar definida en producción');
+  }
+}
+const HPS_SYSTEM_URL = HPS_SYSTEM_URL_ENV || 'http://localhost:3001';  // Fallback solo en desarrollo
 
 /**
  * Obtener token desde HPS System usando iframe

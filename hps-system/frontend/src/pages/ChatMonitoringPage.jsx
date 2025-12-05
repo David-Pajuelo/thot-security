@@ -116,12 +116,20 @@ const ChatMonitoringPage = () => {
 
   const loadAllConversations = async () => {
     try {
-      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+      const API_BASE_URL = process.env.REACT_APP_API_URL;
+      if (!API_BASE_URL) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('⚠️ REACT_APP_API_URL no definida, usando localhost (solo en desarrollo)');
+        } else {
+          throw new Error('REACT_APP_API_URL debe estar definida en producción');
+        }
+      }
+      const API_BASE_URL_FINAL = API_BASE_URL || 'http://localhost:8080';
       const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
       
       // Cargar todas las conversaciones usando el nuevo endpoint
       // TODO: Implementar endpoint en Django si es necesario
-      const response = await fetch(`${API_BASE_URL}/api/hps/chat/conversations/all/?limit=100`, {
+      const response = await fetch(`${API_BASE_URL_FINAL}/api/hps/chat/conversations/all/?limit=100`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -147,12 +155,20 @@ const ChatMonitoringPage = () => {
 
   const loadUsers = async () => {
     try {
-      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+      const API_BASE_URL = process.env.REACT_APP_API_URL;
+      if (!API_BASE_URL) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('⚠️ REACT_APP_API_URL no definida, usando localhost (solo en desarrollo)');
+        } else {
+          throw new Error('REACT_APP_API_URL debe estar definida en producción');
+        }
+      }
+      const API_BASE_URL_FINAL = API_BASE_URL || 'http://localhost:8080';
       const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
       
       // Cargar usuarios desde el endpoint de perfiles HPS
       // TODO: Implementar endpoint de usuarios en Django si es necesario
-      const response = await fetch(`${API_BASE_URL}/api/hps/user/profiles/`, {
+      const response = await fetch(`${API_BASE_URL_FINAL}/api/hps/user/profiles/`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -174,14 +190,21 @@ const ChatMonitoringPage = () => {
 
   const viewConversationDetails = async (conversationId) => {
     try {
-      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+      const API_BASE_URL = process.env.REACT_APP_API_URL;
+      if (!API_BASE_URL) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('⚠️ REACT_APP_API_URL no definida, usando localhost (solo en desarrollo)');
+        } else {
+          throw new Error('REACT_APP_API_URL debe estar definida en producción');
+        }
+      }
+      const API_BASE_URL_FINAL = API_BASE_URL || 'http://localhost:8080';
       const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
       
       console.log('🔍 Token:', token ? `${token.substring(0, 20)}...` : 'No token');
-      console.log('🔍 URL:', `${API_BASE_URL}/api/hps/chat/conversations/${conversationId}/full/`);
+      console.log('🔍 URL:', `${API_BASE_URL_FINAL}/api/hps/chat/conversations/${conversationId}/full/`);
       
-      // TODO: Implementar endpoint en Django si es necesario
-      const response = await fetch(`${API_BASE_URL}/api/hps/chat/conversations/${conversationId}/full/`, {
+      const response = await fetch(`${API_BASE_URL_FINAL}/api/hps/chat/conversations/${conversationId}/full/`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -192,7 +215,51 @@ const ChatMonitoringPage = () => {
       
       if (response.ok) {
         const data = await response.json();
-        setSelectedConversation(data.conversation);
+        // El endpoint devuelve {conversation: {...}, messages: [...]}
+        let conversation = {
+          ...data.conversation,
+          messages: data.messages || []  // Agregar mensajes directamente
+        };
+        
+        // Si esta conversación está agrupada, cargar mensajes de todas las conversaciones del usuario
+        // Buscar si esta conversación pertenece a un grupo (por user_id)
+        const currentConv = allConversations.find(c => c.id === conversationId);
+        if (currentConv) {
+          const userId = currentConv.user_id || currentConv.user;
+          const groupedConv = getModalFilteredConversations().find(c => {
+            const cUserId = c.user_id || c.user;
+            return cUserId === userId && c.conversation_ids && c.conversation_ids.length > 1;
+          });
+          
+          if (groupedConv && groupedConv.conversation_ids && groupedConv.conversation_ids.length > 1) {
+          // Cargar mensajes de todas las conversaciones del usuario
+          const allMessages = [];
+          for (const convId of groupedConv.conversation_ids) {
+            try {
+              const convResponse = await fetch(`${API_BASE_URL_FINAL}/api/hps/chat/conversations/${convId}/full/`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+              if (convResponse.ok) {
+                const convData = await convResponse.json();
+                if (convData.messages) {
+                  allMessages.push(...convData.messages);
+                }
+              }
+            } catch (e) {
+              console.error(`Error cargando conversación ${convId}:`, e);
+            }
+          }
+            // Ordenar mensajes por fecha (más antiguo primero)
+            allMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            conversation.messages = allMessages;
+            conversation.total_messages = allMessages.length;
+          }
+        }
+        
+        setSelectedConversation(conversation);
         setShowConversationModal(true);
         
         // Scroll automático al final después de un pequeño delay para que se renderice
@@ -248,7 +315,35 @@ const ChatMonitoringPage = () => {
       filtered = filtered.filter(conversation => conversation.user_id === selectedUser);
     }
     
-    return filtered;
+    // Agrupar conversaciones por usuario
+    const groupedByUser = {};
+    filtered.forEach(conv => {
+      const userId = conv.user_id || conv.user;
+      if (!groupedByUser[userId]) {
+        groupedByUser[userId] = {
+          ...conv,
+          // Mantener la conversación más reciente como base
+          id: conv.id,
+          created_at: conv.created_at,
+          total_messages: 0,
+          conversation_ids: [] // Guardar IDs de todas las conversaciones del usuario
+        };
+      }
+      // Agregar ID de esta conversación al grupo
+      groupedByUser[userId].conversation_ids.push(conv.id);
+      // Sumar mensajes
+      groupedByUser[userId].total_messages += conv.total_messages || 0;
+      // Actualizar fecha si es más reciente
+      if (new Date(conv.created_at) > new Date(groupedByUser[userId].created_at)) {
+        groupedByUser[userId].created_at = conv.created_at;
+        groupedByUser[userId].id = conv.id; // ID de la más reciente
+      }
+    });
+    
+    // Convertir a array y ordenar por fecha más reciente
+    return Object.values(groupedByUser).sort((a, b) => 
+      new Date(b.created_at) - new Date(a.created_at)
+    );
   };
 
   const getUserName = (userId) => {
@@ -453,18 +548,15 @@ const ChatMonitoringPage = () => {
                             <div className="flex-shrink-0">
                               <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center">
                                 <span className="text-sm font-medium text-blue-600">
-                                  {conversation.user?.first_name ? conversation.user.first_name.charAt(0).toUpperCase() : 'U'}
+                                  {conversation.user_first_name ? conversation.user_first_name.charAt(0).toUpperCase() : (conversation.user_email ? conversation.user_email.charAt(0).toUpperCase() : 'U')}
                                 </span>
                               </div>
                             </div>
                             <div>
                               <p className="text-sm font-semibold text-gray-900">
-                                {showAllConversations 
-                                  ? getUserName(conversation.user_id)
-                                  : (conversation.user?.first_name && conversation.user?.last_name 
-                                    ? `${conversation.user.first_name} ${conversation.user.last_name}`
-                                    : conversation.user?.email || 'Usuario')
-                                }
+                                {conversation.user_first_name && conversation.user_last_name
+                                  ? `${conversation.user_first_name} ${conversation.user_last_name}`
+                                  : conversation.user_email || 'Usuario'}
                               </p>
                               <p className="text-xs text-gray-500">
                                 {formatTime(conversation.created_at)}
@@ -668,7 +760,11 @@ const ChatMonitoringPage = () => {
               
               <div className="mt-3 space-y-1">
                 <p className="text-sm text-gray-600">
-                  <strong>Usuario:</strong> {selectedConversation.user?.first_name} {selectedConversation.user?.last_name} ({selectedConversation.user?.email})
+                  <strong>Usuario:</strong> {
+                    selectedConversation.user_first_name && selectedConversation.user_last_name
+                      ? `${selectedConversation.user_first_name} ${selectedConversation.user_last_name}`
+                      : selectedConversation.user_email || 'Usuario'
+                  } ({selectedConversation.user_email})
                 </p>
                 <p className="text-sm text-gray-600">
                   <strong>Mensajes:</strong> {selectedConversation.total_messages}
@@ -680,36 +776,59 @@ const ChatMonitoringPage = () => {
             </div>
 
             <div id="messages-container" className="flex-1 overflow-y-auto p-4">
-              {selectedConversation.conversation_data?.messages?.map((message, index) => (
-                <div key={index} className={`mb-3 p-3 rounded-lg ${
-                  message.type === 'user' ? 'bg-blue-50 ml-8' : 
-                  message.type === 'assistant' ? 'bg-gray-50 mr-8' : 'bg-yellow-50'
-                }`}>
-                  <div className="flex items-center mb-1">
-                    <span className={`text-xs font-medium ${
-                      message.type === 'user' ? 'text-blue-600' : 
-                      message.type === 'assistant' ? 'text-gray-600' : 'text-yellow-600'
-                    }`}>
-                      {message.type === 'user' ? '👤 Usuario' : 
-                     message.type === 'assistant' ? '🤖 Asistente' : '⚙️ Sistema'}
-                    </span>
+              {selectedConversation.messages && selectedConversation.messages.length > 0 ? (
+                selectedConversation.messages
+                  .filter(message => {
+                    // Filtrar mensajes de bienvenida (tipo system o que contengan "bienvenida")
+                    const messageType = message.message_type || message.type || 'system';
+                    const content = (message.content || '').toLowerCase();
+                    // Excluir mensajes de sistema
+                    if (messageType === 'system') return false;
+                    // Excluir mensajes de bienvenida (que contengan palabras clave de bienvenida)
+                    if (content.includes('bienvenida') || 
+                        (content.includes('hola') && content.includes('asistente')) ||
+                        (content.includes('en qué puedo ayudarte'))) {
+                      return false;
+                    }
+                    return true;
+                  })
+                  .map((message, index) => {
+                  // El serializer devuelve 'message_type', no 'type'
+                  const messageType = message.message_type || message.type || 'system';
+                  return (
+                  <div key={index} className={`mb-3 p-3 rounded-lg ${
+                    messageType === 'user' ? 'bg-blue-50 ml-8' : 
+                    messageType === 'assistant' ? 'bg-gray-50 mr-8' : 'bg-yellow-50'
+                  }`}>
+                    <div className="flex items-center mb-1">
+                      <span className={`text-xs font-medium ${
+                        messageType === 'user' ? 'text-blue-600' : 
+                        messageType === 'assistant' ? 'text-gray-600' : 'text-yellow-600'
+                      }`}>
+                        {messageType === 'user' ? '👤 Usuario' : 
+                       messageType === 'assistant' ? '🤖 Asistente' : '⚙️ Sistema'}
+                      </span>
                     <span className="text-xs text-gray-500 ml-2">
-                      {new Date(message.created_at).toLocaleTimeString()}
+                      {message.created_at ? new Date(message.created_at).toLocaleTimeString() : ''}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{message.content}</p>
-                  {message.metadata && (
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{message.content || ''}</p>
+                  {message.message_metadata && (
                     <div className="mt-2 text-xs text-gray-500">
                       <details>
                         <summary>Metadatos</summary>
                         <pre className="mt-1 text-xs bg-gray-100 p-2 rounded">
-                          {JSON.stringify(message.metadata, null, 2)}
+                          {typeof message.message_metadata === 'string' 
+                            ? message.message_metadata 
+                            : JSON.stringify(message.message_metadata, null, 2)}
                         </pre>
                       </details>
                     </div>
                   )}
                 </div>
-              )) || (
+                );
+                })
+              ) : (
                 <p className="text-gray-500 text-sm">No hay mensajes disponibles</p>
               )}
               {/* Espacio inferior mínimo */}
@@ -778,15 +897,15 @@ const ChatMonitoringPage = () => {
                                       <div className="flex-shrink-0">
                                         <div className="h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
                                           <span className="text-sm font-medium text-blue-600">
-                                            {conversation.user?.first_name ? conversation.user.first_name.charAt(0).toUpperCase() : 'U'}
+                                            {conversation.user_first_name ? conversation.user_first_name.charAt(0).toUpperCase() : (conversation.user_email ? conversation.user_email.charAt(0).toUpperCase() : 'U')}
                                           </span>
                                         </div>
                                       </div>
                                       <div>
                                         <p className="text-sm font-semibold text-gray-900">
-                                          {conversation.user?.first_name && conversation.user?.last_name 
-                                            ? `${conversation.user.first_name} ${conversation.user.last_name}`
-                                            : conversation.user?.email || 'Usuario'
+                                          {conversation.user_first_name && conversation.user_last_name 
+                                            ? `${conversation.user_first_name} ${conversation.user_last_name}`
+                                            : conversation.user_email || 'Usuario'
                                           }
                                         </p>
                                         <p className="text-xs text-gray-500">

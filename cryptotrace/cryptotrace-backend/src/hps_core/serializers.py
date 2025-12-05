@@ -629,7 +629,9 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
 class ChatConversationSerializer(serializers.ModelSerializer):
     """Serializer para conversaciones de chat"""
     user_email = serializers.CharField(source='user.email', read_only=True)
-    user_id = serializers.IntegerField(write_only=True, required=False)  # Para compatibilidad con agente IA
+    user_id = serializers.IntegerField(source='user.id', read_only=True)
+    user_first_name = serializers.CharField(source='user.first_name', read_only=True)
+    user_last_name = serializers.CharField(source='user.last_name', read_only=True)
     
     class Meta:
         model = models.ChatConversation
@@ -638,6 +640,8 @@ class ChatConversationSerializer(serializers.ModelSerializer):
             "user",
             "user_id",
             "user_email",
+            "user_first_name",
+            "user_last_name",
             "session_id",
             "title",
             "status",

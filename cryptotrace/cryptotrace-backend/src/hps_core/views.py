@@ -1531,8 +1531,12 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        """Filtrar conversaciones por usuario autenticado"""
+        """Filtrar conversaciones por usuario autenticado, o todas si es admin/staff"""
         qs = super().get_queryset()
+        # Si es admin o staff, puede ver todas las conversaciones
+        if self.request.user.is_staff or self.request.user.is_superuser:
+            return qs
+        # Si no, solo sus propias conversaciones
         return qs.filter(user=self.request.user)
     
     def perform_create(self, serializer):
@@ -1646,7 +1650,8 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
     def full(self, request, pk=None):
         """Obtener conversación completa con todos los mensajes"""
         conversation = self.get_object()
-        if conversation.user != request.user and not request.user.is_staff:
+        # Permitir acceso si es el dueño, admin o staff
+        if conversation.user != request.user and not (request.user.is_staff or request.user.is_superuser):
             return Response(
                 {'detail': 'No tienes permiso para ver esta conversación'},
                 status=status.HTTP_403_FORBIDDEN
@@ -1660,6 +1665,20 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
             'conversation': conversation_serializer.data,
             'messages': message_serializer.data
         })
+    
+    @action(detail=False, methods=['get'], url_path='all')
+    def all_conversations(self, request):
+        """Obtener todas las conversaciones (solo para administradores)"""
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response(
+                {'detail': 'No tienes permiso para ver todas las conversaciones'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        limit = int(request.query_params.get('limit', 100))
+        conversations = models.ChatConversation.objects.select_related('user').order_by('-created_at')[:limit]
+        serializer = self.get_serializer(conversations, many=True)
+        return Response(serializer.data)
     
     @action(detail=False, methods=['post'], url_path='reset')
     def reset(self, request):

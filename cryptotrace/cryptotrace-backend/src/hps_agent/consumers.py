@@ -144,6 +144,16 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # Inicializar start_time para calcular tiempo de respuesta
             start_time = datetime.now()
             
+            # Guardar mensaje del usuario SIEMPRE (antes de procesar)
+            if self.conversation_id:
+                await self.chat_service.log_user_message(
+                    self.conversation_id,
+                    message
+                )
+                logger.info(f"✅ Mensaje del usuario guardado en conversación {self.conversation_id}")
+            else:
+                logger.warning("⚠️ No hay conversation_id, mensaje del usuario no guardado")
+            
             # PRIMERO: Verificar si hay un flujo activo (esto tiene prioridad sobre OpenAI)
             user_id = self.user_context.get("id")
             flow_key = f"{user_id}_flow"
@@ -166,13 +176,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     "requiere_api": True
                 }
             else:
-                # Guardar mensaje del usuario
-                if self.conversation_id:
-                    await self.chat_service.log_user_message(
-                        self.conversation_id,
-                        message
-                    )
-                
                 # Procesar mensaje con OpenAI
                 logger.info(f"🤖 Enviando mensaje a OpenAI para procesamiento")
                 ai_response = await self.openai_service.process_message(
@@ -350,12 +353,27 @@ class ChatConsumer(AsyncWebsocketConsumer):
             welcome_text = RoleConfig.get_welcome_message(user_role, user_name)
             suggestions = RoleConfig.get_suggestions_by_role(user_role)
             
+            welcome_message = f"{welcome_text}\n\n**¿En qué puedo ayudarte hoy?** 😊"
+            
             await self.send(text_data=json.dumps({
                 'type': 'assistant',
-                'message': f"{welcome_text}\n\n**¿En qué puedo ayudarte hoy?** 😊",
+                'message': welcome_message,
                 'timestamp': datetime.now().isoformat(),
                 'suggestions': suggestions
             }))
+            
+            # Guardar mensaje de bienvenida en la base de datos
+            if self.conversation_id:
+                await self.chat_service.log_assistant_message(
+                    self.conversation_id,
+                    welcome_message,
+                    tokens_used=0,
+                    response_time_ms=0,
+                    metadata={'type': 'welcome', 'suggestions': suggestions}
+                )
+                logger.info(f"✅ Mensaje de bienvenida guardado en conversación {self.conversation_id}")
+            else:
+                logger.warning("⚠️ No hay conversation_id, mensaje de bienvenida no guardado")
             
         except Exception as e:
             logger.error(f"❌ Error enviando mensaje de bienvenida: {e}")

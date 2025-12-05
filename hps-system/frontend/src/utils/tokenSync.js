@@ -3,7 +3,16 @@
  * Usa iframe + postMessage para comunicación entre diferentes orígenes
  */
 
-const CRYPTOTRACE_URL = process.env.REACT_APP_CRYPTOTRACE_URL || 'http://localhost:3000';
+// Validar variable de entorno (sin fallback en producción)
+const CRYPTOTRACE_URL = process.env.REACT_APP_CRYPTOTRACE_URL;
+if (!CRYPTOTRACE_URL) {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn('⚠️ REACT_APP_CRYPTOTRACE_URL no definida, usando localhost (solo en desarrollo)');
+  } else {
+    console.error('❌ REACT_APP_CRYPTOTRACE_URL debe estar definida en producción');
+  }
+}
+const CRYPTOTRACE_URL_FINAL = CRYPTOTRACE_URL || 'http://localhost:3000';  // Fallback solo en desarrollo
 
 /**
  * Obtener token desde CryptoTrace usando iframe
@@ -19,7 +28,7 @@ export const getTokenFromCryptoTrace = () => {
     iframe.style.width = '1px';
     iframe.style.height = '1px';
     iframe.style.border = 'none';
-    iframe.src = `${CRYPTOTRACE_URL}/token-sync.html`;
+    iframe.src = `${CRYPTOTRACE_URL_FINAL}/token-sync.html`;
     
     const timeout = setTimeout(() => {
       if (iframe.parentNode) {
@@ -29,7 +38,7 @@ export const getTokenFromCryptoTrace = () => {
     }, 5000);
     
     const messageHandler = (event) => {
-      if (event.origin === new URL(CRYPTOTRACE_URL).origin && event.data.type === 'TOKEN_SYNC_RESPONSE') {
+      if (event.origin === new URL(CRYPTOTRACE_URL_FINAL).origin && event.data.type === 'TOKEN_SYNC_RESPONSE') {
         clearTimeout(timeout);
         window.removeEventListener('message', messageHandler);
         if (iframe.parentNode) {
@@ -49,7 +58,7 @@ export const getTokenFromCryptoTrace = () => {
     iframe.onload = () => {
       setTimeout(() => {
         try {
-          iframe.contentWindow?.postMessage({ type: 'REQUEST_TOKEN_SYNC' }, CRYPTOTRACE_URL);
+          iframe.contentWindow?.postMessage({ type: 'REQUEST_TOKEN_SYNC' }, CRYPTOTRACE_URL_FINAL);
         } catch (e) {
           console.log('[tokenSync] Error comunicándose con iframe:', e);
           clearTimeout(timeout);
@@ -88,7 +97,7 @@ export const syncLogoutWithCryptoTrace = () => {
     iframe.style.width = '1px';
     iframe.style.height = '1px';
     iframe.style.border = 'none';
-    iframe.src = `${CRYPTOTRACE_URL}/token-sync.html`;
+    iframe.src = `${CRYPTOTRACE_URL_FINAL}/token-sync.html`;
     
     const timeout = setTimeout(() => {
       if (iframe.parentNode) {
@@ -98,7 +107,7 @@ export const syncLogoutWithCryptoTrace = () => {
     }, 3000);
     
     const messageHandler = (event) => {
-      if (event.origin === new URL(CRYPTOTRACE_URL).origin && event.data.type === 'LOGOUT_SYNC_RESPONSE') {
+      if (event.origin === new URL(CRYPTOTRACE_URL_FINAL).origin && event.data.type === 'LOGOUT_SYNC_RESPONSE') {
         clearTimeout(timeout);
         window.removeEventListener('message', messageHandler);
         if (iframe.parentNode) {
@@ -114,7 +123,7 @@ export const syncLogoutWithCryptoTrace = () => {
     iframe.onload = () => {
       setTimeout(() => {
         try {
-          iframe.contentWindow?.postMessage({ type: 'LOGOUT_SYNC' }, CRYPTOTRACE_URL);
+          iframe.contentWindow?.postMessage({ type: 'LOGOUT_SYNC' }, CRYPTOTRACE_URL_FINAL);
         } catch (e) {
           console.log('[tokenSync] Error sincronizando logout:', e);
           clearTimeout(timeout);

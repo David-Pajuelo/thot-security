@@ -27,12 +27,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-2yu@-citrr3*%l4vtv3llug(g_&&miyo^@!jeuh#b4teh78(v_'
+# SECRET_KEY debe venir de variable de entorno
+# settings_dev.py y settings_prod.py manejarán los fallbacks/validación según corresponda
+SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# DEBUG debe venir de variable de entorno
+# settings_dev.py y settings_prod.py lo configurarán según corresponda
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = ["*"]
+# ALLOWED_HOSTS debe venir de variable de entorno
+# settings_dev.py y settings_prod.py manejarán los fallbacks/validación según corresponda
+ALLOWED_HOSTS_STR = os.getenv('ALLOWED_HOSTS', '')
+ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STR.split(',') if host.strip()] if ALLOWED_HOSTS_STR else []
 
 
 
@@ -88,15 +95,13 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://cryptotrace-backend:8080",  # 🔹 Django dentro de Docker
-    "http://cryptotrace-processing:5001",  # 🔹 FastAPI dentro de Docker
-]
+# CORS_ALLOWED_ORIGINS debe venir de variable de entorno
+# settings_dev.py y settings_prod.py manejarán los fallbacks/validación según corresponda
+CORS_ORIGINS_STR = os.getenv('CORS_ALLOWED_ORIGINS', '')
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in CORS_ORIGINS_STR.split(',') if origin.strip()] if CORS_ORIGINS_STR else []
 
-
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOW_ALL_ORIGINS debe venir de variable de entorno
+CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'False').lower() == 'true'
 CORS_ALLOW_CREDENTIALS = True
 
 
@@ -270,15 +275,22 @@ IMAP_PASSWORD = os.getenv('IMAP_PASSWORD', EMAIL_HOST_PASSWORD)
 IMAP_MAILBOX = os.getenv('IMAP_MAILBOX', 'INBOX')
 
 # URL base del frontend para incluir en emails
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+# settings_dev.py y settings_prod.py manejarán los fallbacks/validación según corresponda
+FRONTEND_URL = os.getenv('FRONTEND_URL')
 # URL del sistema HPS (para emails de credenciales HPS)
-HPS_SYSTEM_URL = os.getenv('HPS_SYSTEM_URL', 'http://localhost:3001')
+# settings_dev.py y settings_prod.py manejarán los fallbacks/validación según corresponda
+HPS_SYSTEM_URL = os.getenv('HPS_SYSTEM_URL')
+# URL del sistema HPS para Next.js (CryptoTrace frontend)
+NEXT_PUBLIC_HPS_SYSTEM_URL = os.getenv('NEXT_PUBLIC_HPS_SYSTEM_URL')
 
 # === Celery / Redis (configuración unificada desde hps-system) ===
 # Redis Configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/0")
+# settings_dev.py y settings_prod.py manejarán los fallbacks/validación según corresponda
+REDIS_HOST = os.getenv("REDIS_HOST")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379")) if os.getenv("REDIS_PORT") else 6379
+REDIS_URL = os.getenv("REDIS_URL")
+if not REDIS_URL and REDIS_HOST:
+    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
 
 # Celery Configuration (compatible con hps-system)
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)

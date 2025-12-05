@@ -34,12 +34,21 @@ class WebSocketService {
       this.isConnecting = true;
       
       try {
-        const wsHost = process.env.REACT_APP_AGENTE_IA_WS_URL || 'ws://localhost:8080';
-        const wsUrl = `${wsHost}/ws/chat?token=${token}`;
-        
-        console.log('Conectando a WebSocket:', wsUrl);
-        
-        this.ws = new WebSocket(wsUrl);
+        const wsHost = process.env.REACT_APP_AGENTE_IA_WS_URL;
+        if (!wsHost) {
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('⚠️ REACT_APP_AGENTE_IA_WS_URL no definida, usando localhost (solo en desarrollo)');
+            const fallbackHost = 'ws://localhost:8080';
+            const wsUrl = `${fallbackHost}/ws/chat?token=${token}`;
+            this.ws = new WebSocket(wsUrl);
+          } else {
+            throw new Error('REACT_APP_AGENTE_IA_WS_URL debe estar definida en producción');
+          }
+        } else {
+          const wsUrl = `${wsHost}/ws/chat?token=${token}`;
+          console.log('Conectando a WebSocket:', wsUrl);
+          this.ws = new WebSocket(wsUrl);
+        }
         
         this.ws.onopen = () => {
           console.log('WebSocket conectado globalmente - ID:', this.ws?.url);

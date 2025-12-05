@@ -183,7 +183,10 @@ class HpsEmailService:
         try:
             # Usar template de credenciales
             # Para credenciales HPS, usar HPS_SYSTEM_URL en lugar de FRONTEND_URL
-            hps_system_url = getattr(settings, 'HPS_SYSTEM_URL', 'http://localhost:3001')
+            # Sin fallback - debe estar definida en settings
+            hps_system_url = getattr(settings, 'HPS_SYSTEM_URL', None)
+            if not hps_system_url:
+                logger.warning("HPS_SYSTEM_URL no está definida en settings")
             template_data = {
                 'user_name': user_name,
                 'user_email': email,

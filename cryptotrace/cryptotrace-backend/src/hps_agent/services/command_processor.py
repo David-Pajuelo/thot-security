@@ -29,8 +29,9 @@ class CommandProcessor:
     
     def __init__(self):
         """Inicializar procesador de comandos"""
-        self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3001")
-        self.backend_url = os.getenv("BACKEND_URL", "http://cryptotrace-backend:8080")
+        # Sin fallbacks - deben venir de variables de entorno
+        self.frontend_url = os.getenv("FRONTEND_URL")
+        self.backend_url = os.getenv("BACKEND_URL", "http://cryptotrace-backend:8080")  # URL interna Docker OK
         logger.info(f"CommandProcessor inicializado - Backend: {self.backend_url}")
         
         # Flujos conversacionales activos por usuario

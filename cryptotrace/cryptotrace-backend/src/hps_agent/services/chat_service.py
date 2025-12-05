@@ -77,7 +77,10 @@ class ChatService:
                 tokens_used=tokens_used,
                 message_metadata=metadata or {}
             )
-            logger.info(f"✅ Mensaje del usuario registrado en conversación {conversation_id}")
+            # Actualizar contador de mensajes
+            conversation.total_messages = conversation.messages.count()
+            conversation.save(update_fields=['total_messages'])
+            logger.info(f"✅ Mensaje del usuario registrado en conversación {conversation_id} (total: {conversation.total_messages})")
             return True
         except Exception as e:
             logger.error(f"Error registrando mensaje del usuario: {e}")
@@ -97,20 +100,29 @@ class ChatService:
         """Registrar mensaje del asistente"""
         try:
             conversation = ChatConversation.objects.get(id=conversation_id)
-            ChatMessage.objects.create(
-                conversation=conversation,
-                message_type='assistant',
-                content=message,
-                tokens_used=tokens_used,
-                response_time_ms=response_time_ms,
-                is_error=is_error,
-                error_message=error_message,
-                message_metadata=metadata or {}
-            )
-            logger.info(f"✅ Mensaje del asistente registrado en conversación {conversation_id}")
+            # Preparar datos para crear el mensaje
+            # error_message debe ser cadena vacía si es None (el modelo no acepta null)
+            message_data = {
+                'conversation': conversation,
+                'message_type': 'assistant',
+                'content': message,
+                'tokens_used': tokens_used,
+                'response_time_ms': response_time_ms,
+                'is_error': is_error,
+                'error_message': error_message or '',  # Cadena vacía si es None
+                'message_metadata': metadata or {}
+            }
+            
+            ChatMessage.objects.create(**message_data)
+            # Actualizar contador de mensajes
+            conversation.total_messages = conversation.messages.count()
+            conversation.save(update_fields=['total_messages'])
+            logger.info(f"✅ Mensaje del asistente registrado en conversación {conversation_id} (total: {conversation.total_messages})")
             return True
         except Exception as e:
             logger.error(f"Error registrando mensaje del asistente: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     @staticmethod

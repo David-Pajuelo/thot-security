@@ -1,8 +1,18 @@
 // Configuración de la API para el frontend HPS
 // NOTA: Actualizado para usar el backend Django de cryptotrace
+// Validar variables de entorno (sin fallbacks en producción)
+const API_BASE_URL = process.env.REACT_APP_API_URL;
+if (!API_BASE_URL) {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn('⚠️ REACT_APP_API_URL no definida, usando localhost (solo en desarrollo)');
+  } else {
+    throw new Error('REACT_APP_API_URL debe estar definida en producción');
+  }
+}
+
 const config = {
   // URL base del backend API (Django en puerto 8080)
-  API_BASE_URL: process.env.REACT_APP_API_URL || 'http://localhost:8080',
+  API_BASE_URL: API_BASE_URL || 'http://localhost:8080',  // Fallback solo en desarrollo
   
   // Endpoints de la API (adaptados a Django REST Framework)
   endpoints: {
@@ -79,7 +89,18 @@ const config = {
     
     // Chat/Agente IA (WebSocket)
     chat: {
-      websocket: process.env.REACT_APP_AGENTE_IA_WS_URL || 'ws://localhost:8080',
+      websocket: (() => {
+        const wsUrl = process.env.REACT_APP_AGENTE_IA_WS_URL;
+        if (!wsUrl) {
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('⚠️ REACT_APP_AGENTE_IA_WS_URL no definida, usando localhost (solo en desarrollo)');
+            return 'ws://localhost:8080';
+          } else {
+            throw new Error('REACT_APP_AGENTE_IA_WS_URL debe estar definida en producción');
+          }
+        }
+        return wsUrl;
+      })(),
       conversations: '/api/hps/chat/conversations/',
       metrics: '/api/hps/chat/metrics/',
       reset: '/api/hps/chat/conversations/reset/'

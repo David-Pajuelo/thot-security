@@ -10,7 +10,8 @@
         // Escuchar mensajes desde CryptoTrace
         window.addEventListener('message', function(event) {
             // Verificar origen para seguridad
-            const cryptoTraceUrl = 'http://localhost:3000';
+            // Placeholder que será reemplazado en tiempo de build
+            const cryptoTraceUrl = '__CRYPTOTRACE_URL__';
             const allowedOrigin = new URL(cryptoTraceUrl).origin;
             
             if (event.origin !== allowedOrigin) {
