@@ -10,7 +10,7 @@
   ],
   "host_permissions": [
     "https://automation.idiaicox.com/form/*",
-    "http://localhost:8001/*"
+    "http://localhost:8080/*"
   ],
   "background": {
     "service_worker": "background.js",

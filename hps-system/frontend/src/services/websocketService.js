@@ -76,24 +76,29 @@ class WebSocketService {
         };
         
         this.ws.onerror = (error) => {
-          console.error('❌ Error de WebSocket:', error);
-          console.error('❌ URL intentada:', wsUrl);
-          console.error('❌ Estado del WebSocket:', this.ws?.readyState);
-          console.error('❌ Error completo:', {
-            type: error?.type,
-            target: error?.target,
-            currentTarget: error?.currentTarget,
-            readyState: this.ws?.readyState,
-            url: this.ws?.url
-          });
-          this.isConnecting = false;
-          // Convertir Event a Error con mensaje legible
-          const errorMessage = error instanceof Event 
-            ? `Error de conexión WebSocket a ${wsUrl}. Por favor, verifica que el servidor esté ejecutándose.`
-            : (error?.message || String(error) || 'Error de conexión WebSocket');
-          const wsError = new Error(errorMessage);
-          wsError.originalError = error;
-          reject(wsError);
+          // Verificar que el error sea de nuestra conexión específica
+          const currentUrl = this.ws?.url || wsUrl;
+          const isOurConnection = currentUrl.includes('/ws/chat');
+          
+          if (isOurConnection) {
+            // Es nuestra conexión, tratar como error crítico
+            console.error('❌ Error de WebSocket:', error);
+            console.error('❌ URL intentada:', wsUrl);
+            console.error('❌ Estado del WebSocket:', this.ws?.readyState);
+            
+            this.isConnecting = false;
+            // Convertir Event a Error con mensaje legible
+            const errorMessage = error instanceof Event 
+              ? `Error de conexión WebSocket a ${wsUrl}. Por favor, verifica que el servidor esté ejecutándose.`
+              : (error?.message || String(error) || 'Error de conexión WebSocket');
+            const wsError = new Error(errorMessage);
+            wsError.originalError = error;
+            reject(wsError);
+          } else {
+            // No es nuestra conexión (probablemente caché o HMR), ignorar silenciosamente
+            // No rechazar la promesa ni loguear como error
+            return;
+          }
         };
         
       } catch (error) {

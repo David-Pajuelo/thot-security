@@ -75,6 +75,23 @@ const Chat = () => {
     if (token && user) {
       const connectToWebSocket = async () => {
         try {
+          // Verificar si es una recarga de página (navegación)
+          // Si es una recarga, limpiar mensajes del store para evitar duplicados
+          // y permitir que el backend envíe el mensaje de bienvenida si corresponde
+          const navEntries = performance.getEntriesByType('navigation');
+          const isPageReload = navEntries.length > 0 && 
+                               navEntries[0]?.type === 'reload';
+          
+          if (isPageReload) {
+            console.log('🔄 Recarga de página detectada, limpiando mensajes del store');
+            // Limpiar mensajes pero mantener conversationId si existe
+            const currentConversationId = useChatStore.getState().conversationId;
+            setMessages([]);
+            if (currentConversationId) {
+              setConversationId(currentConversationId);
+            }
+          }
+          
           // Configurar listener ANTES de conectar para no perder mensajes iniciales
           if (!listenerId.current) {
             listenerId.current = `chat-${Date.now()}`;
@@ -86,6 +103,10 @@ const Chat = () => {
           if (!websocketService.isConnected()) {
             console.log('🔌 Iniciando conexión WebSocket...');
             setConnectionStatus('Conectando...');
+            
+            // Pequeño delay para asegurar que el listener esté completamente configurado
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
             await websocketService.connect(token);
             console.log('✅ WebSocket conectado, actualizando estado');
             setIsConnected(true);
@@ -94,6 +115,15 @@ const Chat = () => {
             console.log('✅ WebSocket ya está conectado');
             setIsConnected(true);
             setConnectionStatus('Conectado');
+            
+            // Si ya está conectado pero no hay mensajes, puede que se perdió el mensaje
+            // Esperar un momento y verificar
+            setTimeout(() => {
+              const currentMessages = useChatStore.getState().messages;
+              if (!currentMessages || currentMessages.length === 0) {
+                console.log('⚠️ WebSocket conectado pero sin mensajes, el backend debería enviar bienvenida');
+              }
+            }, 1000);
           }
           
         } catch (error) {

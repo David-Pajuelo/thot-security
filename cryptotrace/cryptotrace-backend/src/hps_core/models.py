@@ -170,6 +170,7 @@ class HpsRequest(models.Model):
 
     class RequestStatus(models.TextChoices):
         PENDING = "pending", "Pendiente"
+        WAITING_DPS = "waiting_dps", "Esperando DPS"
         SUBMITTED = "submitted", "Enviada"
         APPROVED = "approved", "Aprobada"
         REJECTED = "rejected", "Rechazada"

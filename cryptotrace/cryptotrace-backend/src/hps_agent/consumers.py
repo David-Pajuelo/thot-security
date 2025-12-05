@@ -99,6 +99,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.accept()
             logger.info(f"✅ WebSocket aceptado para usuario {self.user.email}")
             
+            # Pequeño delay para asegurar que el cliente esté listo para recibir mensajes
+            import asyncio
+            await asyncio.sleep(0.2)  # 200ms de delay
+            
             # Buscar o crear conversación (no bloquear si falla)
             try:
                 await self._initialize_conversation()
@@ -111,7 +115,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 try:
                     await self._send_welcome_message()
                 except Exception as welcome_error:
-                    logger.error(f"❌ Error enviando mensaje de bienvenida: {welcome_error}")
+                    logger.error(f"❌ Error enviando mensaje de bienvenida de emergencia: {welcome_error}")
             
         except Exception as e:
             logger.error(f"❌ Error en connect: {e}")
@@ -137,29 +141,66 @@ class ChatConsumer(AsyncWebsocketConsumer):
             
             logger.info(f"📨 Mensaje recibido de {self.user.email}: {message[:100]}")
             
-            # Guardar mensaje del usuario
-            if self.conversation_id:
-                await self.chat_service.log_user_message(
-                    self.conversation_id,
-                    message
-                )
-            
-            # Procesar mensaje con OpenAI
+            # Inicializar start_time para calcular tiempo de respuesta
             start_time = datetime.now()
-            ai_response = await self.openai_service.process_message(
-                message,
-                self.user_context
-            )
+            
+            # PRIMERO: Verificar si hay un flujo activo (esto tiene prioridad sobre OpenAI)
+            user_id = self.user_context.get("id")
+            flow_key = f"{user_id}_flow"
+            has_active_flow = flow_key in self.command_processor.conversation_flows
+            
+            logger.info(f"🔍 Verificando flujo activo para usuario {user_id}: {has_active_flow}")
+            if has_active_flow:
+                flow_info = self.command_processor.conversation_flows.get(flow_key, {})
+                logger.info(f"🔄 Flujo activo detectado: tipo={flow_info.get('type')}, email={flow_info.get('email', 'N/A')}")
+            
+            if has_active_flow:
+                # Si hay flujo activo, procesar directamente sin OpenAI
+                logger.info(f"🔄 Flujo activo detectado para usuario {user_id}, procesando directamente")
+                # Crear una respuesta simulada para que execute_command la procese
+                ai_response = {
+                    "tipo": "comando",
+                    "accion": "continuar_flujo",  # Acción especial para flujos
+                    "parametros": {},
+                    "user_message": message,
+                    "requiere_api": True
+                }
+            else:
+                # Guardar mensaje del usuario
+                if self.conversation_id:
+                    await self.chat_service.log_user_message(
+                        self.conversation_id,
+                        message
+                    )
+                
+                # Procesar mensaje con OpenAI
+                logger.info(f"🤖 Enviando mensaje a OpenAI para procesamiento")
+                ai_response = await self.openai_service.process_message(
+                    message,
+                    self.user_context
+                )
+                logger.info(f"🤖 Respuesta de OpenAI: tipo={ai_response.get('tipo')}, accion={ai_response.get('accion')}")
             
             # Agregar user_message al contexto para el command processor
             ai_response['user_message'] = message
             
             # Si es un comando, ejecutarlo
-            if ai_response.get('tipo') == 'comando' and ai_response.get('requiere_api', False):
-                final_response = await self.command_processor.execute_command(
-                    ai_response,
-                    self.user_context
-                )
+            if ai_response.get('tipo') == 'comando':
+                accion = ai_response.get('accion', '')
+                # CRÍTICO: Algunos comandos siempre deben ejecutarse para iniciar flujos conversacionales
+                # incluso si requiere_api es false (como crear_usuario o modificar_rol sin parámetros)
+                comandos_que_siempre_ejecutar = ['crear_usuario', 'modificar_rol']
+                
+                if ai_response.get('requiere_api', False) or accion in comandos_que_siempre_ejecutar:
+                    logger.info(f"🔧 Ejecutando comando: {accion} (requiere_api={ai_response.get('requiere_api', False)})")
+                    final_response = await self.command_processor.execute_command(
+                        ai_response,
+                        self.user_context
+                    )
+                else:
+                    # Si no requiere API pero es un comando, puede ser que falte información
+                    # En este caso, usar la respuesta del AI directamente
+                    final_response = ai_response
             else:
                 final_response = ai_response
             
@@ -323,6 +364,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
         """Cargar historial de conversación"""
         try:
             if not self.conversation_id:
+                # Si no hay conversation_id, enviar bienvenida
+                await self._send_welcome_message()
                 return
             
             messages = await self.chat_service.get_conversation_messages(
@@ -330,7 +373,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 limit=50
             )
             
-            if messages:
+            if messages and len(messages) > 0:
                 logger.info(f"📜 Cargando {len(messages)} mensajes del historial")
                 for msg in messages:
                     await self.send(text_data=json.dumps({
@@ -339,8 +382,27 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         'timestamp': msg.get('timestamp', datetime.now().isoformat()),
                         'conversation_id': self.conversation_id
                     }))
+                # Después de cargar historial, verificar si el último mensaje es reciente
+                # Si el último mensaje es muy antiguo (más de 5 minutos), enviar bienvenida
+                if messages:
+                    last_message = messages[-1]
+                    last_timestamp = last_message.get('timestamp')
+                    if last_timestamp:
+                        try:
+                            from datetime import datetime, timezone
+                            last_msg_time = datetime.fromisoformat(last_timestamp.replace('Z', '+00:00'))
+                            time_diff = (datetime.now(timezone.utc) - last_msg_time.replace(tzinfo=timezone.utc)).total_seconds()
+                            # Si el último mensaje es de hace más de 5 minutos, enviar bienvenida
+                            if time_diff > 300:  # 5 minutos
+                                logger.info(f"📜 Último mensaje es antiguo ({int(time_diff)}s), enviando bienvenida")
+                                await self._send_welcome_message()
+                        except Exception as time_error:
+                            logger.warning(f"⚠️ Error calculando tiempo del último mensaje: {time_error}")
+                            # Si hay error, enviar bienvenida por seguridad
+                            await self._send_welcome_message()
             else:
                 # Si no hay historial, enviar bienvenida
+                logger.info("📜 No hay mensajes en el historial, enviando bienvenida")
                 await self._send_welcome_message()
                 
         except Exception as e:

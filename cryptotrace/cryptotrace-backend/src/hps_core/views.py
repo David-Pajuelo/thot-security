@@ -210,15 +210,12 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
         data = qs.aggregate(
             total_requests=Count("id"),
             pending_requests=Count("id", filter=Q(status=models.HpsRequest.RequestStatus.PENDING)),
-            waiting_dps_requests=Count("id", filter=Q(status="waiting_dps")),  # Estado que no existe en el modelo, siempre será 0
+            waiting_dps_requests=Count("id", filter=Q(status=models.HpsRequest.RequestStatus.WAITING_DPS)),
             submitted_requests=Count("id", filter=Q(status=models.HpsRequest.RequestStatus.SUBMITTED)),
             approved_requests=Count("id", filter=Q(status=models.HpsRequest.RequestStatus.APPROVED)),
             rejected_requests=Count("id", filter=Q(status=models.HpsRequest.RequestStatus.REJECTED)),
             expired_requests=Count("id", filter=Q(status=models.HpsRequest.RequestStatus.EXPIRED)),
         )
-        # Asegurar que waiting_dps_requests sea 0 si no existe
-        if data.get("waiting_dps_requests") is None:
-            data["waiting_dps_requests"] = 0
         return Response(data)
 
     @action(detail=True, methods=["post"])
@@ -1164,14 +1161,75 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
         """
         Solo admins pueden crear, actualizar, desactivar y eliminar usuarios
         """
-        if self.action in ['create', 'update', 'partial_update', 'destroy', 'activate', 'permanent_delete']:
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'activate', 'deactivate', 'permanent_delete']:
             return [permissions.IsAuthenticated(), IsHpsAdmin()]
         return [permissions.IsAuthenticated(), HasHpsProfile()]
+    
+    def get_object(self):
+        """
+        Sobrescribir get_object para permitir buscar por ID de perfil o ID de usuario
+        """
+        lookup_value = self.kwargs.get(self.lookup_field)
+        
+        # Intentar buscar por ID de perfil primero
+        try:
+            return super().get_object()
+        except Http404:
+            # Si no se encuentra, intentar buscar por user_id
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            try:
+                user = User.objects.get(id=lookup_value)
+                if hasattr(user, 'hps_profile'):
+                    return user.hps_profile
+                raise Http404("No HpsUserProfile matches the given query.")
+            except (User.DoesNotExist, ValueError):
+                raise Http404("No HpsUserProfile matches the given query.")
     
     def destroy(self, request, *args, **kwargs):
         """
         Sobrescribir destroy para marcar usuario como inactivo en lugar de eliminarlo
         DELETE /api/hps/user/profiles/{id}/ -> Marca como inactivo
+        Acepta tanto ID de perfil como ID de usuario
+        """
+        try:
+            profile = self.get_object()
+            user = profile.user
+            
+            # No permitir desactivar a uno mismo
+            if user.id == request.user.id:
+                return Response(
+                    {'detail': 'No puedes desactivarte a ti mismo'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Marcar usuario como inactivo
+            user.is_active = False
+            user.save()
+            
+            logger.info(f"Usuario {user.email} (ID: {user.id}) marcado como inactivo por {request.user.email}")
+            
+            serializer = self.get_serializer(profile)
+            return Response({
+                'message': f'Usuario {user.email} marcado como inactivo',
+                **serializer.data
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error desactivando usuario: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {'detail': f'Error desactivando usuario: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['post'], url_path='deactivate')
+    def deactivate(self, request, pk=None):
+        """
+        Desactivar un usuario (marcar como inactivo)
+        POST /api/hps/user/profiles/{id}/deactivate/
+        Acepta tanto ID de perfil como ID de usuario
         """
         try:
             profile = self.get_object()
@@ -1210,6 +1268,7 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
         """
         Activar un usuario (marcar como activo)
         POST /api/hps/user/profiles/{id}/activate/
+        Acepta tanto ID de perfil como ID de usuario
         """
         try:
             profile = self.get_object()
