@@ -32,7 +32,7 @@ DEFAULT_JSON_TEMPLATE = {
     "empresa_destino": {
         "nombre": None, "direccion": None, "codigo_postal": None, "ciudad": None, "provincia": None, "pais": None, "codigo_odmc": None, "codigo_emad": None, "nif": None, "telefono": None, "email": None
     },
-    "articulos": [],
+    "articulos": [],  # Cada artículo tiene: codigo_producto (TÍTULO CORTO/EDICIÓN), descripcion (OBSERVACIONES), cantidad, numero_serie_inicio, numero_serie_fin, cc
     "accesorios": [],
     "equipos_prueba": [],
     "firmas": {
@@ -263,14 +263,45 @@ class AC21Processor:
             if not isinstance(article, dict):
                 continue
             
+            # Extraer código de producto: viene de "TÍTULO CORTO / EDICIÓN" del AC21
+            # Puede venir como codigo_producto, titulo_corto, codigo, o descripcion (legacy)
+            codigo_producto = (
+                article.get("codigo_producto") or 
+                article.get("titulo_corto") or 
+                article.get("codigo") or 
+                article.get("descripcion") or  # Legacy: si viene como descripcion, usarlo como código
+                ""
+            )
+            
+            # Extraer descripción: viene de "OBSERVACIONES" del AC21
+            # Puede venir como descripcion u observaciones
+            descripcion = (
+                article.get("descripcion") or 
+                article.get("observaciones") or 
+                ""
+            )
+            
+            # Si descripcion está vacía pero hay código, usar código como descripción (fallback)
+            if not descripcion and codigo_producto:
+                descripcion = codigo_producto
+            
             sanitized_article = {
-                "descripcion": str(article.get("descripcion") or "").strip(),
+                "codigo_producto": str(codigo_producto).strip(),
+                "descripcion": str(descripcion).strip(),
                 "numero_serie_inicio": str(article.get("numero_serie_inicio") or "").strip(),
                 "numero_serie_fin": str(article.get("numero_serie_fin") or "").strip(),
-                "observaciones": str(article.get("observaciones") or "").strip(),
+                "observaciones": str(article.get("observaciones") or "").strip(),  # Mantener observaciones por compatibilidad
             }
+            
+            # Extraer cantidad: debe ser un número entero válido
             try:
-                sanitized_article["cantidad"] = int(article.get("cantidad") or 1)
+                cantidad_raw = article.get("cantidad")
+                if cantidad_raw is None or cantidad_raw == "":
+                    sanitized_article["cantidad"] = 1
+                else:
+                    # Intentar convertir a entero (permite "1.0" -> 1)
+                    cantidad_int = int(float(str(cantidad_raw)))
+                    sanitized_article["cantidad"] = max(1, cantidad_int)  # Mínimo 1
             except (ValueError, TypeError):
                 sanitized_article["cantidad"] = 1
             
@@ -401,8 +432,15 @@ class AC21Processor:
                         2.  **Empresas (DE/PARA)**: Identifica claramente la empresa de origen (DE) y la de destino (PARA). Extrae nombre, dirección completa y códigos.
                         3.  **Tabla de Artículos**:
                             - Extrae CADA fila de la tabla en una lista de objetos `articulos`.
-                            - Para CADA artículo, DEBES extraer: `descripcion` (el título corto o edición), `cantidad`, `numero_serie_inicio`, `numero_serie_fin`, `cc` y `observaciones`.
+                            - Para CADA artículo, DEBES extraer los siguientes campos de la tabla:
+                              * `codigo_producto` o `titulo_corto`: El valor de la columna "TÍTULO CORTO / EDICIÓN" (este es el código del producto)
+                              * `descripcion`: El valor de la columna "OBSERVACIONES" (esta es la descripción del producto)
+                              * `cantidad`: El número de la columna "CANTIDAD" (debe ser un número entero)
+                              * `numero_serie_inicio`: El valor de la columna "NÚMERO DE SERIE - INICIO"
+                              * `numero_serie_fin`: El valor de la columna "NÚMERO DE SERIE - FIN"
+                              * `cc`: El valor de la columna "CC" (código de contabilidad)
                             - Es CRÍTICO que no omitas ningún artículo.
+                            - IMPORTANTE: "TÍTULO CORTO / EDICIÓN" va a `codigo_producto`, y "OBSERVACIONES" va a `descripcion`.
                         4.  **Accesorios y Equipos de Prueba**: Extrae las listas de "ACCESORIOS ENTREGADOS" y "EQUIPOS PRUEBAS". A veces el título puede variar ligeramente (p.ej. "EQUIPOS DE PRUEBA AICOX"); debes poder manejar estas variaciones.
                         5.  **Firmas (CRÍTICO)**:
                             - El documento tiene dos bloques de firma: uno a la **izquierda (recuadro 15)** y otro a la **derecha (recuadro 16)**.
@@ -427,7 +465,7 @@ class AC21Processor:
                           "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_odmc": "String", "codigo_emad": "String" },
                           "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_odmc": "String" },
                           "articulos": [
-                            { "descripcion": "String", "cantidad": "Int", "numero_serie_inicio": "String", "numero_serie_fin": "String", "cc": "String", "observaciones": "String" }
+                            { "codigo_producto": "String (TÍTULO CORTO / EDICIÓN)", "descripcion": "String (OBSERVACIONES)", "cantidad": "Int", "numero_serie_inicio": "String", "numero_serie_fin": "String", "cc": "String" }
                           ],
                           "accesorios": [
                             { "descripcion": "String", "cantidad": "Int" }

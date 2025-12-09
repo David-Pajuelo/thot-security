@@ -11,6 +11,9 @@ interface Producto {
   descripcion: string;
   tipo: string;
   cantidad: number;
+  numero_serie_inicio?: string;
+  numero_serie_fin?: string;
+  rango_serie?: string;
 }
 
 export default function GestionLineaTemporal() {

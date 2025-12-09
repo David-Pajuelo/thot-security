@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Upload, Building, ZoomIn, ZoomOut, MoveHorizontal, Pencil, Plus } from "lucide-react";
 import ProtectedRoute from "@/components/protectedRoute";
-import { processAC21Image, saveAC21Data, processAC21Companies, createEmpresa, guardarTipoProducto, apiFetch, ProductoCatalogo, fetchEmpresas, obtenerProductosDeAlbaran, verificarDocumentoExistente, crearPaginaAdicional } from "@/lib/api";
+import { processAC21Image, saveAC21Data, processAC21Companies, createEmpresa, guardarTipoProducto, apiFetch, ProductoCatalogo, fetchEmpresas, obtenerProductosDeAlbaran, verificarDocumentoExistente, crearPaginaAdicional, guardarEnLineaTemporal } from "@/lib/api";
 import { toast } from "sonner";
 import DocumentoExistenteModal from "@/components/albaranes/DocumentoExistenteModal";
+import AC21EntradaModal from "@/components/albaranes/AC21EntradaModal";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -178,8 +179,9 @@ function UploadAC21PageContent() {
   };
 
   // Modifica getCodigoProducto para normalizar el código
+  // Prioriza codigo_producto (TÍTULO CORTO / EDICIÓN) sobre descripcion
   const getCodigoProducto = (articulo: any) => {
-    return normalizaCodigo(articulo.codigo_producto || articulo.descripcion || '-');
+    return normalizaCodigo(articulo.codigo_producto || articulo.titulo || articulo.descripcion || '-');
   };
 
   // Modifica isProductoTipificado para usar el código normalizado
@@ -519,6 +521,7 @@ function UploadAC21PageContent() {
   const [showDocumentoExistenteModal, setShowDocumentoExistenteModal] = useState(false);
   const [documentoExistente, setDocumentoExistente] = useState<any>(null);
   const [numeroRegistroDetectado, setNumeroRegistroDetectado] = useState<string>('');
+  const [showAC21EntradaModal, setShowAC21EntradaModal] = useState(false);
 
   // Función para crear una nueva página del documento existente
   const handleCrearNuevaPagina = async () => {
@@ -564,6 +567,76 @@ function UploadAC21PageContent() {
     setShowDocumentoExistenteModal(false);
     // Continuar con el flujo normal de handleConfirm
     handleConfirmContinuado();
+  };
+
+  // Función para guardar en línea temporal y redirigir
+  const handleIrALineaTemporal = async () => {
+    try {
+      setShowAC21EntradaModal(false);
+      setIsUploading(true);
+
+      // Filtrar productos seleccionados
+      const indicesDuplicados = new Set(productosYaEnAlbaran.map((p: any) => p.index));
+      const articulosAInsertar = processedData.articulos
+        .filter((_: any, index: number) => selectedArticulos.has(index) && !indicesDuplicados.has(index))
+        .map((art: any) => {
+          // Mapeo correcto: codigo_producto viene del OCR (TÍTULO CORTO / EDICIÓN)
+          // descripcion viene del OCR (OBSERVACIONES)
+          const codigo = art.codigo_producto || art.titulo_corto || art.codigo || art.descripcion || '';
+          const descripcion = art.descripcion || art.observaciones || codigo || '';
+          
+          // Asegurar que cantidad sea un número válido
+          let cantidad = art.cantidad;
+          if (cantidad === null || cantidad === undefined || cantidad === '') {
+            cantidad = 1;
+          } else {
+            cantidad = parseInt(String(cantidad), 10) || 1;
+            cantidad = Math.max(1, cantidad); // Mínimo 1
+          }
+          
+          return {
+            ...art,
+            codigo: codigo, // Para compatibilidad
+            codigo_producto: codigo, // TÍTULO CORTO / EDICIÓN
+            descripcion: descripcion, // OBSERVACIONES
+            cantidad: cantidad, // Asegurar que cantidad sea un número válido
+            numero_serie_inicio: art.numero_serie_inicio || art.numero_serie || '', // Preservar números de serie
+            numero_serie_fin: art.numero_serie_fin || art.numero_serie || '',
+            tipo: articulosTipos[processedData.articulos.findIndex((originalArt: any) => originalArt === art)] || art.tipo,
+          };
+        });
+
+      if (articulosAInsertar.length === 0) {
+        toast.info("No hay productos nuevos para guardar.");
+        setIsUploading(false);
+        return;
+      }
+
+      // Construir el payload para guardar en línea temporal
+      const payload = {
+        ...processedData,
+        articulos: articulosAInsertar,
+        // Incluir accesorios y equipos de prueba
+        accesorios: processedData.accesorios || [],
+        equipos_prueba: processedData.equipos_prueba || [],
+      };
+
+      console.log("[AC21] Guardando en línea temporal:", JSON.stringify(payload, null, 2));
+
+      const result = await guardarEnLineaTemporal(payload, imagenParaGuardar || undefined);
+
+      if (result && result.message) {
+        toast.success(result.message || "Productos guardados en línea temporal");
+        router.push('/albaranes/gestion-linea-temporal');
+      } else {
+        toast.error("Error al guardar en línea temporal");
+      }
+    } catch (error: any) {
+      console.error("Error guardando en línea temporal:", error);
+      toast.error(error.message || "Error al guardar en línea temporal", { duration: 5000 });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   // Función con la lógica original de confirmación (sin verificación de documento existente)
@@ -723,7 +796,20 @@ function UploadAC21PageContent() {
         }
       }
 
-      // Si no existe documento, continuar con el flujo normal
+      // 2. Verificar si es un AC21 de ENTRADA que requiere tipificación
+      const tipoDocumento = processedData.cabecera?.tipo_transaccion || '';
+      const tipoDocumentoUpper = tipoDocumento.toUpperCase();
+      const esAC21Entrada = tipoDocumentoUpper && 
+        ['TRANSFERENCIA', 'RECIBO_MANO', 'DESTRUCCION', 'OTRO'].includes(tipoDocumentoUpper);
+      
+      if (esAC21Entrada) {
+        console.log('📋 [AC21] AC21 de ENTRADA detectado, requiere tipificación');
+        setShowAC21EntradaModal(true);
+        setIsUploading(false);
+        return; // Detener el proceso para mostrar el modal
+      }
+
+      // Si no es AC21 de ENTRADA, continuar con el flujo normal
       await handleConfirmContinuado();
       
     } catch (error: any) {
@@ -1891,15 +1977,16 @@ function UploadAC21PageContent() {
                           <tr key={index} className={yaExiste ? 'bg-gray-100 opacity-70' : (index % 2 === 0 ? 'bg-white' : 'bg-gray-50')}>
                             {/* Numeración */}
                             <td className="border border-gray-400 px-2 py-1 text-center align-middle font-semibold">{index + 1}</td>
-                            {/* Título corto/edición */}
+                            {/* Título corto/edición (codigo_producto) */}
                             <td className="border border-gray-400 px-2 py-1">
                               <input
                                 type="text"
                                 className="w-full border-none bg-transparent focus:ring-0 text-xs"
-                                value={articulo.titulo || getCodigoProducto(articulo) || ''}
+                                value={articulo.codigo_producto || articulo.titulo || getCodigoProducto(articulo) || ''}
                                 onChange={e => {
                                   const nuevos = [...processedData.articulos];
-                                  nuevos[index].titulo = e.target.value;
+                                  nuevos[index].codigo_producto = e.target.value;
+                                  nuevos[index].titulo = e.target.value; // Mantener compatibilidad
                                   setProcessedData((prev: any) => ({ ...prev, articulos: nuevos }));
                                 }}
                                 disabled={yaExiste}
@@ -1962,15 +2049,16 @@ function UploadAC21PageContent() {
                                 disabled={yaExiste}
                               />
                             </td>
-                            {/* Observaciones */}
+                            {/* Observaciones (descripcion) */}
                             <td className="border border-gray-400 px-2 py-1">
                               <input
                                 type="text"
                                 className="w-full border-none bg-transparent focus:ring-0 text-xs"
-                                value={articulo.observaciones || ''}
+                                value={articulo.descripcion || articulo.observaciones || ''}
                                 onChange={e => {
                                   const nuevos = [...processedData.articulos];
-                                  nuevos[index].observaciones = e.target.value;
+                                  nuevos[index].descripcion = e.target.value;
+                                  nuevos[index].observaciones = e.target.value; // Mantener compatibilidad
                                   setProcessedData((prev: any) => ({ ...prev, articulos: nuevos }));
                                 }}
                                 disabled={yaExiste}
@@ -2486,6 +2574,13 @@ function UploadAC21PageContent() {
             onCrearDocumentoIndependiente={handleCrearDocumentoIndependiente}
           />
         )}
+
+        {/* Modal para AC21 de ENTRADA que requiere tipificación */}
+        <AC21EntradaModal
+          isOpen={showAC21EntradaModal}
+          onClose={() => setShowAC21EntradaModal(false)}
+          onIrALineaTemporal={handleIrALineaTemporal}
+        />
       </div>
     </ProtectedRoute>
   );

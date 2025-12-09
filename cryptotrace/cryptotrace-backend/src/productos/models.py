@@ -353,17 +353,29 @@ class Albaran(models.Model):
         todas_las_paginas.update(total_paginas=total)
     
     @classmethod
-    def encontrar_documento_existente(cls, numero_registro):
+    def encontrar_documento_existente(cls, numero_registro, solo_principal=True):
         """
         Busca un documento existente con el mismo número de registro (entrada o salida)
-        Retorna la página principal si existe
+        
+        Args:
+            numero_registro: Número de registro a buscar (puede ser entrada o salida)
+            solo_principal: Si True, solo busca páginas principales. Si False, busca cualquier documento.
+        
+        Returns:
+            Documento encontrado (página principal si solo_principal=True, o cualquier documento si False)
         """
-        # Buscar por número de registro de entrada o salida
-        documento = cls.objects.filter(
+        # Buscar por número de registro de entrada o salida, o por el campo numero
+        query = cls.objects.filter(
             models.Q(numero_registro_entrada=numero_registro) | 
-            models.Q(numero_registro_salida=numero_registro),
-            documento_principal__isnull=True  # Solo páginas principales
-        ).first()
+            models.Q(numero_registro_salida=numero_registro) |
+            models.Q(numero=numero_registro)
+        )
+        
+        # Si solo queremos páginas principales, filtrar
+        if solo_principal:
+            query = query.filter(documento_principal__isnull=True)
+        
+        documento = query.first()
         
         return documento
     

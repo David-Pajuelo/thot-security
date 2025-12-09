@@ -75,13 +75,48 @@ async def upload_excel(
 
         # 🔹 Transformar datos para que coincidan con la API del backend
         numero_albaran = lineas_temporales[0].get('numero_albaran')
+        if not numero_albaran or (isinstance(numero_albaran, float) and pd.isna(numero_albaran)):
+            raise HTTPException(status_code=400, detail="No se encontró número de albarán (Packing List) en el archivo Excel.")
+        
         articulos_transformados = []
         for linea in lineas_temporales:
+            codigo = linea.get("codigo_producto")
+            descripcion = linea.get("descripcion")
+            numero_serie = linea.get("numero_serie")
+            
+            # Limpiar valores NaN/None
+            if codigo and isinstance(codigo, float) and pd.isna(codigo):
+                codigo = None
+            if descripcion and isinstance(descripcion, float) and pd.isna(descripcion):
+                descripcion = None
+            if numero_serie and isinstance(numero_serie, float) and pd.isna(numero_serie):
+                numero_serie = None
+            
+            # Convertir a string y limpiar
+            codigo = str(codigo).strip() if codigo else ""
+            descripcion = str(descripcion).strip() if descripcion else ""
+            numero_serie = str(numero_serie).strip() if numero_serie else ""
+            
+            # Asegurar que al menos haya código o descripción
+            if not codigo and not descripcion:
+                print(f"⚠️ Saltando línea sin código ni descripción: {linea}")
+                continue
+            
+            # Si no hay código, usar descripción como código
+            if not codigo:
+                codigo = descripcion
+            
+            observaciones = linea.get("observaciones")
+            if observaciones and isinstance(observaciones, float) and pd.isna(observaciones):
+                observaciones = None
+            observaciones = str(observaciones).strip() if observaciones else ""
+            
             articulos_transformados.append({
-                "codigo": linea.get("codigo_producto"),
-                "descripcion": linea.get("descripcion"),
-                "numero_serie": linea.get("numero_serie"),
-                "observaciones": linea.get("observaciones"),
+                "codigo": codigo,
+                "codigo_producto": codigo,  # Incluir ambos campos para compatibilidad
+                "descripcion": descripcion if descripcion else codigo,  # Si no hay descripción, usar código
+                "numero_serie": numero_serie,
+                "observaciones": observaciones,
                 "cantidad": 1,
                 "cc": 1
             })

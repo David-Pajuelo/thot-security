@@ -1,7 +1,7 @@
 import logging
 import requests
 from rest_framework import viewsets, status
-from django.db.models import OuterRef, Exists, Count, Subquery, Value
+from django.db.models import OuterRef, Exists, Count, Subquery, Value, Sum
 from django.db.models.functions import Coalesce
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
@@ -272,6 +272,22 @@ class AlbaranViewSet(viewsets.ModelViewSet):
     serializer_class = AlbaranSerializer
     search_fields = ['numero', 'empresa_origen__nombre', 'empresa_destino__nombre', 'productos__producto__codigo_producto', 'productos__numero_serie']
     ordering_fields = ['fecha', 'numero', 'empresa_origen__nombre', 'empresa_destino__nombre']
+    
+    def get_queryset(self):
+        """
+        Personalizar queryset para soportar búsqueda por numero_registro
+        """
+        queryset = super().get_queryset()
+        numero_registro = self.request.query_params.get('numero_registro', None)
+        
+        if numero_registro:
+            # Buscar por numero_registro_entrada o numero_registro_salida
+            queryset = queryset.filter(
+                models.Q(numero_registro_entrada=numero_registro) | 
+                models.Q(numero_registro_salida=numero_registro)
+            )
+        
+        return queryset
 
     def create(self, request, *args, **kwargs):
         print(f"DEBUG AC21: request.data={request.data}")
@@ -336,9 +352,8 @@ class AlbaranViewSet(viewsets.ModelViewSet):
             return Response({'error': 'No se encontró número de registro en el AC21. El payload debe incluir un campo "numero_registro_salida" o equivalente.'}, status=status.HTTP_400_BAD_REQUEST)
         # Si el frontend pide agregar productos a un albarán existente
         if data_source.get('modo') == 'agregar_a_existente':
-            albaran = Albaran.objects.filter(
-                models.Q(numero=numero) | models.Q(numero_registro_salida=numero)
-            ).first()
+            # Usar el mismo método que en encontrar_documento_existente para consistencia
+            albaran = Albaran.encontrar_documento_existente(numero)
             if not albaran:
                 return Response({'error': 'No existe un albarán con ese número'}, status=status.HTTP_404_NOT_FOUND)
             articulos = data_source.get('articulos', [])
@@ -392,18 +407,18 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                 'error': 'El alta de AC21 debe realizarse a través de la gestión temporal (línea temporal) para tipificación de productos. Sube el AC21, valida los artículos y continúa el flujo en la gestión temporal.'
             }, status=status.HTTP_400_BAD_REQUEST)
         # --- Fin bloqueo ---
-            albaran_existente = Albaran.objects.filter(
-                models.Q(numero=numero) | models.Q(numero_registro_salida=numero)
-            ).first()
-            if albaran_existente:
-                movimientos = MovimientoProducto.objects.filter(albaran=albaran_existente)
-                productos_existentes = MovimientoProductoBasicoSerializer(movimientos, many=True).data
-                return Response({
-                    "success": False,
-                    "message": "Ya existe un albarán con este número.",
-                    "productos_existentes": productos_existentes,
-                    "albaran_id": albaran_existente.id
-                }, status=status.HTTP_409_CONFLICT)
+        # Verificar si existe un albarán con el mismo número de registro (entrada o salida)
+        # Usar el mismo método que en encontrar_documento_existente para consistencia
+        albaran_existente = Albaran.encontrar_documento_existente(numero)
+        if albaran_existente:
+            movimientos = MovimientoProducto.objects.filter(albaran=albaran_existente)
+            productos_existentes = MovimientoProductoBasicoSerializer(movimientos, many=True).data
+            return Response({
+                "success": False,
+                "message": "Ya existe un albarán con este número.",
+                "productos_existentes": productos_existentes,
+                "albaran_id": albaran_existente.id
+            }, status=status.HTTP_409_CONFLICT)
         # Usar parsed_data si es dict, sino usar request.data
         serializer = self.get_serializer(data=parsed_data if isinstance(parsed_data, dict) else request.data)
         serializer.is_valid(raise_exception=True)
@@ -851,10 +866,8 @@ class AlbaranViewSet(viewsets.ModelViewSet):
         if not numero:
             return Response({"error": "Falta el número de albarán."}, status=status.HTTP_400_BAD_REQUEST)
             
-        # Buscar albarán por numero o numero_registro_salida
-        albaran = Albaran.objects.filter(
-            models.Q(numero=numero) | models.Q(numero_registro_salida=numero)
-        ).first()
+        # Buscar albarán usando el método unificado (puede ser página principal o adicional)
+        albaran = Albaran.encontrar_documento_existente(numero, solo_principal=False)
         
         if not albaran:
             return Response({"productos": [], "albaran_id": None}, status=status.HTTP_200_OK)
@@ -1349,7 +1362,7 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
 
         if not numero_albaran:
             print("❌ [BACKEND] ERROR: No se encontró número de registro")
-            return Response({"error": "No se encontró número de registro en el AC21"}, status=400)
+            return Response({"error": "No se encontró número de registro en la cabecera del documento"}, status=400)
 
         if not articulos:
             print("❌ [BACKEND] ERROR: No hay artículos")
@@ -1362,7 +1375,37 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
         for i, articulo in enumerate(articulos):
             print(f"📦 [BACKEND] Procesando artículo {i+1}/{len(articulos)}: {articulo}")
             
-            # Preparar datos adicionales para el campo JSON
+            # Extraer números de serie del OCR
+            numero_serie_inicio = str(articulo.get('numero_serie_inicio') or articulo.get('numero_serie') or '').strip()
+            numero_serie_fin = str(articulo.get('numero_serie_fin') or articulo.get('numero_serie') or '').strip()
+            
+            # Para el campo numero_serie del modelo, usar inicio si está disponible, sino fin, sino vacío
+            numero_serie = numero_serie_inicio or numero_serie_fin or ''
+            
+            # Extraer y validar cantidad del OCR
+            cantidad_raw = articulo.get('cantidad')
+            try:
+                if cantidad_raw is None or cantidad_raw == '':
+                    cantidad = 1
+                else:
+                    # Convertir a entero (permite "3.0" -> 3)
+                    cantidad = int(float(str(cantidad_raw)))
+                    cantidad = max(1, cantidad)  # Mínimo 1
+            except (ValueError, TypeError):
+                cantidad = 1
+            
+            # Extraer y validar CC del OCR
+            cc_raw = articulo.get('cc')
+            try:
+                if cc_raw is None or cc_raw == '':
+                    cc = 1
+                else:
+                    cc = int(float(str(cc_raw)))
+                    cc = max(1, cc)  # Mínimo 1
+            except (ValueError, TypeError):
+                cc = 1
+            
+            # Preparar datos adicionales para el campo JSON (incluyendo números de serie completos y cantidad)
             datos_adicionales = {
                 'cabecera': cabecera,
                 'empresa_origen': empresa_origen,
@@ -1371,26 +1414,58 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 'equipos_prueba': equipos_prueba,
                 'firmas': firmas,
                 'observaciones_generales': observaciones,
-                'tiene_imagen_documento': imagen_documento is not None
+                'tiene_imagen_documento': imagen_documento is not None,
+                'numero_serie_inicio': numero_serie_inicio,
+                'numero_serie_fin': numero_serie_fin,
+                'cantidad': cantidad,  # Guardar cantidad validada del OCR
+                'cc': cc  # Guardar CC validado del OCR
             }
             
-            # Extraer número de serie: puede venir como 'numero_serie', 'numero_serie_inicio' o 'numero_serie_fin'
-            numero_serie = (
-                articulo.get('numero_serie') or 
-                articulo.get('numero_serie_inicio') or 
-                articulo.get('numero_serie_fin') or 
+            # Extraer código de producto: viene de "TÍTULO CORTO / EDICIÓN" del AC21
+            # Puede venir como codigo_producto, titulo_corto, codigo, o descripcion (legacy)
+            codigo_producto = (
+                articulo.get('codigo_producto') or 
+                articulo.get('titulo_corto') or 
+                articulo.get('codigo') or 
+                articulo.get('titulo') or  # Campo editable del frontend
                 ''
             )
+            
+            # Extraer descripción: viene de "OBSERVACIONES" del AC21
+            # Puede venir como descripcion u observaciones
+            descripcion = (
+                articulo.get('descripcion') or 
+                articulo.get('observaciones') or 
+                ''
+            )
+            
+            # Si no hay código pero hay descripción (legacy), usar descripción como código
+            if not codigo_producto and descripcion:
+                codigo_producto = descripcion
+            # Si no hay descripción pero hay código, usar código como descripción (fallback)
+            elif codigo_producto and not descripcion:
+                descripcion = codigo_producto
+            
+            # Asegurar que al menos haya código o descripción
+            if not codigo_producto and not descripcion:
+                print(f"⚠️ [BACKEND] Saltando artículo sin código ni descripción: {articulo}")
+                continue
+            
+            # Si aún no hay código, usar descripción como último recurso
+            if not codigo_producto:
+                codigo_producto = descripcion if descripcion else 'SIN_CODIGO'
+            
+            print(f"📦 [BACKEND] Artículo procesado - código: '{codigo_producto}', descripción: '{descripcion}', cantidad: {cantidad}, número_serie: '{numero_serie}'")
             
             registro = LineaTemporalProducto.objects.create(
                 usuario=request.user,
                 numero_albaran=numero_albaran,
-                codigo_producto=articulo.get('codigo', ''),
-                descripcion=articulo.get('descripcion', ''),
+                codigo_producto=codigo_producto,
+                descripcion=descripcion,
                 numero_serie=numero_serie,
-                cantidad=articulo.get('cantidad', 1),
+                cantidad=cantidad,  # Usar cantidad validada
                 observaciones=articulo.get('observaciones', ''),
-                cc=articulo.get('cc', 1),
+                cc=cc,  # Usar CC validado
                 datos_adicionales=datos_adicionales
             )
             registros_creados.append(registro)
@@ -1447,9 +1522,15 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
         si están tipificados y la descripción de uno de los productos en el grupo.
         También incluye el tipo de producto si ya está asociado.
         """
+        
+        # Filtrar solo productos no procesados del usuario actual
+        queryset_filtrado = self.get_queryset().filter(
+            usuario=request.user,
+            procesado=False
+        )
 
         # 🔹 Obtener la descripción de un producto dentro del grupo
-        descripcion_subquery = self.get_queryset().filter(
+        descripcion_subquery = queryset_filtrado.filter(
             codigo_producto=OuterRef("codigo_producto")
         ).values("descripcion")[:1]
 
@@ -1459,11 +1540,17 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             tipo__isnull=False
         ).values("tipo__nombre")[:1]
 
+        # Filtrar solo productos no procesados del usuario actual
+        queryset_filtrado = self.get_queryset().filter(
+            usuario=request.user,
+            procesado=False
+        )
+        
         productos_agrupados = (
-            self.get_queryset()
+            queryset_filtrado
             .values("codigo_producto")
             .annotate(
-                cantidad=Count("codigo_producto"),
+                cantidad=Count("id"),  # Contar registros, no sumar cantidades (cada registro = 1 unidad)
                 tipificado=Exists(CatalogoProducto.objects.filter(
                     codigo_producto=OuterRef("codigo_producto"), tipo__isnull=False
                 )),
@@ -1472,18 +1559,68 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             )
             .order_by("codigo_producto")
         )
+        
+        # Enriquecer con información de números de serie desde datos_adicionales
+        productos_enriquecidos = []
+        for producto in productos_agrupados:
+            # Obtener todos los registros de este código de producto para extraer números de serie
+            registros = queryset_filtrado.filter(codigo_producto=producto['codigo_producto'])
+            
+            # Recopilar todos los rangos de números de serie (inicio-fin)
+            rangos_serie = []
+            for registro in registros:
+                datos_adic = registro.datos_adicionales or {}
+                numero_serie_inicio = datos_adic.get('numero_serie_inicio', '').strip() if datos_adic.get('numero_serie_inicio') else ''
+                numero_serie_fin = datos_adic.get('numero_serie_fin', '').strip() if datos_adic.get('numero_serie_fin') else ''
+                
+                # Si hay inicio Y fin, crear rango "inicio - fin"
+                if numero_serie_inicio and numero_serie_fin:
+                    rangos_serie.append(f"{numero_serie_inicio} - {numero_serie_fin}")
+                elif numero_serie_inicio:
+                    rangos_serie.append(numero_serie_inicio)
+                elif numero_serie_fin:
+                    rangos_serie.append(numero_serie_fin)
+            
+            # Concatenar todos los rangos con comas
+            rango_serie = ', '.join(rangos_serie) if rangos_serie else None
+            
+            # Para compatibilidad, también guardar el primer inicio y último fin
+            numero_serie_inicio = None
+            numero_serie_fin = None
+            if rangos_serie:
+                # Extraer el primer inicio y último fin de todos los rangos
+                primeros_inicios = []
+                ultimos_fins = []
+                for registro in registros:
+                    datos_adic = registro.datos_adicionales or {}
+                    if datos_adic.get('numero_serie_inicio'):
+                        primeros_inicios.append(datos_adic['numero_serie_inicio'].strip())
+                    if datos_adic.get('numero_serie_fin'):
+                        ultimos_fins.append(datos_adic['numero_serie_fin'].strip())
+                
+                if primeros_inicios:
+                    numero_serie_inicio = min(primeros_inicios)  # Primer número de serie (mínimo)
+                if ultimos_fins:
+                    numero_serie_fin = max(ultimos_fins)  # Último número de serie (máximo)
+            
+            productos_enriquecidos.append({
+                **producto,
+                'numero_serie_inicio': numero_serie_inicio,
+                'numero_serie_fin': numero_serie_fin,
+                'rango_serie': rango_serie  # Todos los rangos concatenados
+            })
 
         # 🔹 Obtener todos los tipos de producto disponibles
         tipos_disponibles = TipoProducto.objects.values_list("nombre", flat=True)
 
         return Response({
-            "productos": list(productos_agrupados),
+            "productos": productos_enriquecidos,
             "tipos_disponibles": list(tipos_disponibles)
         }, status=status.HTTP_200_OK)
     
 
 
-    @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
+    @action(detail=False, methods=["post"], url_path="asignar-tipo", permission_classes=[IsAuthenticated])
     def asignar_tipo(self, request):
         """
         Asigna un tipo de producto a un `codigo_producto` en Producto.
