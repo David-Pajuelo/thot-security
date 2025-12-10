@@ -21,14 +21,26 @@ urlpatterns = [
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),  # Refresh Token
 ]
 
-# Servir archivos media en producción usando serve directamente
-urlpatterns += [
-    # Servir archivos media generales
-    re_path(r'^media/(?P<path>.*)$', serve, {
-        'document_root': settings.MEDIA_ROOT,
-    }),
-    # Servir documentos de albaranes desde su ubicación específica  
-    re_path(r'^albaranes/documentos/(?P<path>.*)$', serve, {
-        'document_root': '/app/albaranes/documentos',
-    }),
-]
+# Servir archivos media y estáticos en desarrollo
+if settings.DEBUG:
+    from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+    urlpatterns += staticfiles_urlpatterns()
+    
+    # Servir archivos media en desarrollo
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+else:
+    # Servir archivos media en producción usando serve directamente
+    urlpatterns += [
+        # Servir archivos media generales
+        re_path(r'^media/(?P<path>.*)$', serve, {
+            'document_root': settings.MEDIA_ROOT,
+        }),
+        # Servir documentos de albaranes desde su ubicación específica  
+        re_path(r'^albaranes/documentos/(?P<path>.*)$', serve, {
+            'document_root': '/app/albaranes/documentos',
+        }),
+        # Servir archivos estáticos en producción
+        re_path(r'^static/(?P<path>.*)$', serve, {
+            'document_root': settings.STATIC_ROOT,
+        }),
+    ]
