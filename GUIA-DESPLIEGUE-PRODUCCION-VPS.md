@@ -290,7 +290,7 @@ cd /opt/thot-security/cryptotrace/cryptotrace-ocr
 
 # Crear archivo .env.prod
 cat > .env.prod << EOF
-OPENAI_API_KEY=sk-proj-TU_OPENAI_API_KEY_AQUI
+OPENAI_API_KEY=TU_OPENAI_API_KEY_AQUI
 BACKEND_URL=http://backend:8080
 EOF
 ```
@@ -323,7 +323,7 @@ POSTGRES_PORT=5432
 # =============================================================================
 # OPENAI API
 # =============================================================================
-OPENAI_API_KEY=sk-proj-TU_OPENAI_API_KEY_AQUI
+OPENAI_API_KEY=TU_OPENAI_API_KEY_AQUI
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_MAX_TOKENS=2000
 OPENAI_TEMPERATURE=0.7
