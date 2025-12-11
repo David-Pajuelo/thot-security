@@ -51,7 +51,7 @@ services:
       - ./cryptotrace-backend/src/albaranes/documentos:/app/albaranes/documentos
       - ./cryptotrace-backend/src/temp_documentos:/app/temp_documentos
       - ./datos_desarrollo.json:/app/datos_desarrollo.json:ro
-      - backend_static:/app/static
+      - backend_static:/app/staticfiles
       - backend_media:/app/media
     env_file:
       - ./cryptotrace-backend/.env.prod
@@ -131,10 +131,12 @@ services:
     restart: unless-stopped
     expose:
       - "5432"
+    env_file:
+      - ./cryptotrace-backend/.env.prod
     environment:
-      - POSTGRES_DB=${DB_NAME:-cryptotrace_prod}
+      - POSTGRES_DB=${DB_NAME:-cryptotrace_db}
       - POSTGRES_USER=${DB_USER:-cryptotrace_user}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-M79Ltg480ROQR6fSP4j3SCosPuu3BpMl4cuKHX6rYD4}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-cryptotrace_pass}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres-backup:/backup

@@ -230,6 +230,15 @@ fi
 echo "Recolectando archivos estáticos..."
 if docker compose -f docker-compose.prod.yml exec -T backend python manage.py collectstatic --noinput; then
     echo -e "${GREEN}✓ Archivos estáticos recolectados${NC}"
+    
+    # Copiar archivos estáticos del contenedor al sistema
+    echo "Copiando archivos estáticos al directorio de Nginx..."
+    mkdir -p /var/www/cryptotrace-static
+    docker cp cryptotrace-backend:/app/staticfiles/. /var/www/cryptotrace-static/ 2>/dev/null || \
+    docker cp cryptotrace-backend:/app/static/. /var/www/cryptotrace-static/ 2>/dev/null || \
+    echo -e "${YELLOW}⚠️  No se pudieron copiar los archivos estáticos, el volumen Docker debería estar montado${NC}"
+    chown -R www-data:www-data /var/www/cryptotrace-static
+    echo -e "${GREEN}✓ Archivos estáticos copiados${NC}"
 else
     echo -e "${YELLOW}⚠️  Error al recolectar archivos estáticos${NC}"
 fi
@@ -238,7 +247,7 @@ echo ""
 # =============================================================================
 # PASO 10: Configurar Nginx para servir archivos estáticos
 # =============================================================================
-echo -e "${GREEN}📁 Paso 10: Configurando directorio de archivos estáticos...${NC}"
+echo -e "${GREEN}📁 Paso 10: Verificando directorio de archivos estáticos...${NC}"
 mkdir -p /var/www/cryptotrace-static
 chown -R www-data:www-data /var/www/cryptotrace-static
 echo -e "${GREEN}✓ Directorio configurado${NC}"
