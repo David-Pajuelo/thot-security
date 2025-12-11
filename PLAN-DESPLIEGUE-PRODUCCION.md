@@ -6,10 +6,9 @@ Desplegar el sistema completo (HPS System + CryptoTrace) en el VPS de producció
 
 ## 📌 Información del VPS
 
-- **IP:** `46.183.119.90`
-- **DNS:** `071fb23c-d520-4dbd-9664-ca358dd46e9e.clouding.host`
+- **IP:** `187.33.154.156`
 - **Usuario:** `root`
-- **Contraseña:** `XJrdNfXBm2k-7HG`
+- **Contraseña:** `41c0x1d1!`
 - **Dominio:** `seguridad.idiaicox.com` (para ambas aplicaciones)
 
 ## 🚀 Estrategia de Despliegue
@@ -80,7 +79,7 @@ Desplegar el sistema completo (HPS System + CryptoTrace) en el VPS de producció
 
 ## 📞 Notas Importantes
 
-- El dominio `seguridad.idiaicox.com` debe apuntar a `46.183.119.90` antes de obtener el certificado SSL
+- El dominio `seguridad.idiaicox.com` debe apuntar a `187.33.154.156` antes de obtener el certificado SSL
 - Ambas aplicaciones compartirán el mismo dominio, por lo que Nginx deberá enrutar según la ruta o subdominio
 - Se recomienda usar subdominios o rutas diferentes para cada aplicación:
   - HPS System: `seguridad.idiaicox.com` o `hps.seguridad.idiaicox.com`

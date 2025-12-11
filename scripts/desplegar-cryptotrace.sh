@@ -43,19 +43,19 @@ echo ""
 
 # Paso 1: Construir imágenes
 echo "📦 Construyendo imágenes Docker..."
-docker-compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml build
 echo -e "${GREEN}✓ Imágenes construidas${NC}"
 echo ""
 
 # Paso 2: Detener contenedores existentes (si hay)
 echo "🛑 Deteniendo contenedores existentes..."
-docker-compose -f docker-compose.prod.yml down || true
+docker compose -f docker-compose.prod.yml down || true
 echo -e "${GREEN}✓ Contenedores detenidos${NC}"
 echo ""
 
 # Paso 3: Levantar contenedores
 echo "🚀 Levantando contenedores..."
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 echo -e "${GREEN}✓ Contenedores levantados${NC}"
 echo ""
 
@@ -65,18 +65,18 @@ sleep 15
 
 # Verificar estado de contenedores
 echo "📊 Estado de los contenedores:"
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 echo ""
 
 # Paso 5: Ejecutar migraciones
 echo "🗄️  Ejecutando migraciones de base de datos..."
-docker-compose -f docker-compose.prod.yml exec -T backend python manage.py migrate
+docker compose -f docker-compose.prod.yml exec -T backend python manage.py migrate
 echo -e "${GREEN}✓ Migraciones ejecutadas${NC}"
 echo ""
 
 # Paso 6: Recolectar archivos estáticos
 echo "📁 Recolectando archivos estáticos..."
-docker-compose -f docker-compose.prod.yml exec -T backend python manage.py collectstatic --noinput
+docker compose -f docker-compose.prod.yml exec -T backend python manage.py collectstatic --noinput
 echo -e "${GREEN}✓ Archivos estáticos recolectados${NC}"
 echo ""
 
@@ -102,8 +102,8 @@ echo ""
 echo -e "${GREEN}✅ Despliegue de CryptoTrace completado${NC}"
 echo ""
 echo "📝 Próximos pasos:"
-echo "1. Verifica los logs: docker-compose -f docker-compose.prod.yml logs -f"
-echo "2. Crea superusuario (si es necesario): docker-compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser"
+echo "1. Verifica los logs: docker compose -f docker-compose.prod.yml logs -f"
+echo "2. Crea superusuario (si es necesario): docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser"
 echo "3. Configura Nginx para el dominio seguridad.idiaicox.com"
 echo "4. Obtén el certificado SSL: certbot --nginx -d seguridad.idiaicox.com"
 echo "5. Verifica el acceso: https://seguridad.idiaicox.com"

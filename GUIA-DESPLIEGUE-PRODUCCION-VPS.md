@@ -5,7 +5,7 @@ Esta guía te llevará paso a paso para desplegar el sistema completo (CryptoTra
 ## 📌 Información del VPS
 
 **Datos del servidor:**
-- **IP del VPS:** `46.183.119.90`
+- **IP del VPS:** `187.33.154.156`
 - **DNS:** `071fb23c-d520-4dbd-9664-ca358dd46e9e.clouding.host`
 - **Usuario Linux:** `root`
 - **Contraseña:** `XJrdNfXBm2k-7HG`
@@ -62,7 +62,7 @@ git log --oneline -5
 ### 2.1 Información del VPS
 
 **Datos del servidor:**
-- **IP del VPS:** `46.183.119.90`
+- **IP del VPS:** `187.33.154.156`
 - **DNS:** `071fb23c-d520-4dbd-9664-ca358dd46e9e.clouding.host`
 - **Usuario Linux:** `root`
 - **Contraseña:** `XJrdNfXBm2k-7HG`
@@ -200,7 +200,7 @@ DB_PORT=5432
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=aicoxidi@gmail.com
-SMTP_PASSWORD=wxnopfgcliyexyqf
+SMTP_PASSWORD=TU_CONTRASEÑA_APLICACION_GMAIL_AQUI
 SMTP_USE_TLS=true
 SMTP_FROM_EMAIL=noreply@hps-system.com
 SMTP_FROM_NAME=Sistema HPS
@@ -209,7 +209,7 @@ SMTP_REPLY_TO=aicoxidi@gmail.com
 IMAP_HOST=imap.gmail.com
 IMAP_PORT=993
 IMAP_USER=aicoxidi@gmail.com
-IMAP_PASSWORD=wxnopfgcliyexyqf
+IMAP_PASSWORD=TU_CONTRASEÑA_APLICACION_GMAIL_AQUI
 IMAP_MAILBOX=INBOX
 
 # =============================================================================
@@ -258,7 +258,7 @@ JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 DEBUG=False
 ENVIRONMENT=production
 DJANGO_SETTINGS_MODULE=cryptotrace_backend.settings_prod
-ALLOWED_HOSTS=seguridad.idiaicox.com,www.seguridad.idiaicox.com,46.183.119.90
+ALLOWED_HOSTS=seguridad.idiaicox.com,www.seguridad.idiaicox.com,187.33.154.156
 ```
 
 **Nota:** Las SECRET_KEY ya están generadas y configuradas arriba. Si necesitas generar nuevas:
@@ -290,7 +290,7 @@ cd /opt/thot-security/cryptotrace/cryptotrace-ocr
 
 # Crear archivo .env.prod
 cat > .env.prod << EOF
-OPENAI_API_KEY=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
+OPENAI_API_KEY=sk-proj-TU_OPENAI_API_KEY_AQUI
 BACKEND_URL=http://backend:8080
 EOF
 ```
@@ -323,7 +323,7 @@ POSTGRES_PORT=5432
 # =============================================================================
 # OPENAI API
 # =============================================================================
-OPENAI_API_KEY=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
+OPENAI_API_KEY=sk-proj-TU_OPENAI_API_KEY_AQUI
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_MAX_TOKENS=2000
 OPENAI_TEMPERATURE=0.7
@@ -334,14 +334,14 @@ OPENAI_TEMPERATURE=0.7
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=aicoxidi@gmail.com
-SMTP_PASSWORD=wxnopfgcliyexyqf
+SMTP_PASSWORD=TU_CONTRASEÑA_APLICACION_GMAIL_AQUI
 SMTP_FROM_NAME=HPS System
 SMTP_REPLY_TO=aicoxidi@gmail.com
 
 IMAP_HOST=imap.gmail.com
 IMAP_PORT=993
 IMAP_USER=aicoxidi@gmail.com
-IMAP_PASSWORD=wxnopfgcliyexyqf
+IMAP_PASSWORD=TU_CONTRASEÑA_APLICACION_GMAIL_AQUI
 IMAP_MAILBOX=INBOX
 
 # =============================================================================
@@ -926,8 +926,8 @@ tail -f /var/log/nginx/error.log
 
 ### Conectar al VPS
 ```bash
-ssh root@46.183.119.90
-# Contraseña: XJrdNfXBm2k-7HG
+ssh root@187.33.154.156
+# Contraseña: 41c0x1d1!
 ```
 
 ### Comandos Esenciales CryptoTrace

@@ -59,7 +59,7 @@ Plan de acción estructurado con:
 ## 🌐 Configuración del Dominio
 
 - **Dominio:** `seguridad.idiaicox.com`
-- **IP del VPS:** `46.183.119.90`
+- **IP del VPS:** `187.33.154.156`
 - **Uso:** Ambas aplicaciones (HPS System + CryptoTrace)
 
 **Nota:** El dominio debe apuntar a la IP del VPS antes de obtener el certificado SSL.
@@ -117,7 +117,7 @@ chmod +x desplegar-cryptotrace.sh
 - [ ] Credenciales documentadas
 - [ ] VPS accesible (SSH funcionando)
 - [ ] Docker instalado en VPS
-- [ ] Dominio `seguridad.idiaicox.com` apuntando a `46.183.119.90`
+- [ ] Dominio `seguridad.idiaicox.com` apuntando a `187.33.154.156`
 - [ ] Variables de entorno preparadas
 
 ---

@@ -87,7 +87,7 @@ cd /opt/thot-security/cryptotrace
 
 4. **Configurar variables de entorno en el VPS:**
    ```bash
-   ssh root@46.183.119.90
+   ssh root@187.33.154.156
    cd /opt/thot-security/hps-system
    nano .env.prod  # Editar con las credenciales
    ```
@@ -102,7 +102,7 @@ cd /opt/thot-security/cryptotrace
 
 1. **Conectar al VPS:**
    ```bash
-   ssh root@46.183.119.90
+   ssh root@187.33.154.156
    ```
 
 2. **Clonar repositorio:**
@@ -157,7 +157,7 @@ Antes de ejecutar los scripts, asegúrate de configurar las variables de entorno
 - Verifica que los puertos no están en uso
 
 ### Error de conexión SSH
-- Verifica que el VPS está accesible: `ping 46.183.119.90`
+- Verifica que el VPS está accesible: `ping 187.33.154.156`
 - Verifica las credenciales SSH
 - Verifica que el firewall permite conexiones SSH
 

@@ -43,19 +43,19 @@ echo ""
 
 # Paso 1: Construir imágenes
 echo "📦 Construyendo imágenes Docker..."
-docker-compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml build
 echo -e "${GREEN}✓ Imágenes construidas${NC}"
 echo ""
 
 # Paso 2: Detener contenedores existentes (si hay)
 echo "🛑 Deteniendo contenedores existentes..."
-docker-compose -f docker-compose.prod.yml down || true
+docker compose -f docker-compose.prod.yml down || true
 echo -e "${GREEN}✓ Contenedores detenidos${NC}"
 echo ""
 
 # Paso 3: Levantar contenedores
 echo "🚀 Levantando contenedores..."
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 echo -e "${GREEN}✓ Contenedores levantados${NC}"
 echo ""
 
@@ -65,16 +65,16 @@ sleep 10
 
 # Verificar estado de contenedores
 echo "📊 Estado de los contenedores:"
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 echo ""
 
 # Paso 5: Ejecutar migraciones (si es necesario)
 echo "🗄️  Ejecutando migraciones de base de datos..."
-if docker-compose -f docker-compose.prod.yml exec -T backend alembic upgrade head 2>/dev/null; then
+if docker compose -f docker-compose.prod.yml exec -T backend alembic upgrade head 2>/dev/null; then
     echo -e "${GREEN}✓ Migraciones ejecutadas${NC}"
 else
     echo -e "${YELLOW}⚠️  No se pudieron ejecutar migraciones automáticamente${NC}"
-    echo "Ejecuta manualmente: docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head"
+    echo "Ejecuta manualmente: docker compose -f docker-compose.prod.yml exec backend alembic upgrade head"
 fi
 echo ""
 
@@ -100,7 +100,7 @@ echo ""
 echo -e "${GREEN}✅ Despliegue de HPS System completado${NC}"
 echo ""
 echo "📝 Próximos pasos:"
-echo "1. Verifica los logs: docker-compose -f docker-compose.prod.yml logs -f"
+echo "1. Verifica los logs: docker compose -f docker-compose.prod.yml logs -f"
 echo "2. Configura Nginx para el dominio seguridad.idiaicox.com"
 echo "3. Obtén el certificado SSL: certbot --nginx -d seguridad.idiaicox.com"
 echo "4. Verifica el acceso: https://seguridad.idiaicox.com"

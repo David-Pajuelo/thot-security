@@ -4,10 +4,9 @@ Este documento contiene todas las credenciales y configuraciones necesarias para
 
 ## 📌 Información del VPS
 
-- **IP:** `46.183.119.90`
-- **DNS:** `071fb23c-d520-4dbd-9664-ca358dd46e9e.clouding.host`
+- **IP:** `187.33.154.156`
 - **Usuario:** `root`
-- **Contraseña:** `XJrdNfXBm2k-7HG`
+- **Contraseña:** `41c0x1d1!`
 - **Dominio:** `seguridad.idiaicox.com` (para ambas aplicaciones)
 
 ---
@@ -63,7 +62,7 @@ CORS_ALLOW_ALL_ORIGINS=False
 DEBUG=False
 ENVIRONMENT=production
 DJANGO_SETTINGS_MODULE=cryptotrace_backend.settings_prod
-ALLOWED_HOSTS=seguridad.idiaicox.com,www.seguridad.idiaicox.com,46.183.119.90
+ALLOWED_HOSTS=seguridad.idiaicox.com,www.seguridad.idiaicox.com,187.33.154.156
 
 # REDIS
 REDIS_HOST=redis
@@ -74,7 +73,7 @@ CELERY_RESULT_BACKEND=redis://redis:6379/0
 CELERY_TIMEZONE=UTC
 
 # OPENAI
-OPENAI_API_KEY=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
+OPENAI_API_KEY=sk-proj-TU_OPENAI_API_KEY_AQUI
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_MAX_TOKENS=2000
 OPENAI_TEMPERATURE=0.7
@@ -83,7 +82,7 @@ OPENAI_TEMPERATURE=0.7
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=aicoxidi@gmail.com
-SMTP_PASSWORD=wxnopfgcliyexyqf
+SMTP_PASSWORD=TU_CONTRASEÑA_APLICACION_GMAIL_AQUI
 SMTP_USE_TLS=true
 SMTP_FROM_EMAIL=noreply@seguridad.idiaicox.com
 SMTP_FROM_NAME=Sistema HPS
@@ -92,7 +91,7 @@ SMTP_REPLY_TO=aicoxidi@gmail.com
 IMAP_HOST=imap.gmail.com
 IMAP_PORT=993
 IMAP_USER=aicoxidi@gmail.com
-IMAP_PASSWORD=wxnopfgcliyexyqf
+IMAP_PASSWORD=TU_CONTRASEÑA_APLICACION_GMAIL_AQUI
 IMAP_MAILBOX=INBOX
 ```
 
@@ -138,7 +137,7 @@ REDIS_DB=0
 REDIS_PASSWORD=
 
 # OPENAI
-OPENAI_API_KEY=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
+OPENAI_API_KEY=sk-proj-TU_OPENAI_API_KEY_AQUI
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_MAX_TOKENS=2000
 OPENAI_TEMPERATURE=0.7
@@ -147,14 +146,14 @@ OPENAI_TEMPERATURE=0.7
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=aicoxidi@gmail.com
-SMTP_PASSWORD=wxnopfgcliyexyqf
+SMTP_PASSWORD=TU_CONTRASEÑA_APLICACION_GMAIL_AQUI
 SMTP_FROM_NAME=HPS System
 SMTP_REPLY_TO=aicoxidi@gmail.com
 
 IMAP_HOST=imap.gmail.com
 IMAP_PORT=993
 IMAP_USER=aicoxidi@gmail.com
-IMAP_PASSWORD=wxnopfgcliyexyqf
+IMAP_PASSWORD=TU_CONTRASEÑA_APLICACION_GMAIL_AQUI
 IMAP_MAILBOX=INBOX
 
 # SEGURIDAD

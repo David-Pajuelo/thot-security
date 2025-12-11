@@ -2,10 +2,9 @@
 
 ## 📋 Información del VPS - Verificada
 
-- ✅ **IP del VPS:** `46.183.119.90`
-- ✅ **DNS:** `071fb23c-d520-4dbd-9664-ca358dd46e9e.clouding.host`
+- ✅ **IP del VPS:** `187.33.154.156`
 - ✅ **Usuario Linux:** `root`
-- ✅ **Contraseña:** `XJrdNfXBm2k-7HG`
+- ✅ **Contraseña:** `41c0x1d1!`
 - ✅ **Usuario Windows:** `administrador`
 - ✅ **Dominio:** `seguridad.idiaicox.com` (para ambas aplicaciones)
 
@@ -32,7 +31,7 @@
 ### Servicios Externos
 - ✅ **Email:** `aicoxidi@gmail.com`
 - ✅ **Contraseña Email:** `wxnopfgcliyexyqf`
-- ✅ **OpenAI API Key:** `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`
+- ✅ **OpenAI API Key:** Configurada (ver CONFIGURACION-PRODUCCION-RESUMEN.md)
 
 ---
 
@@ -40,7 +39,7 @@
 
 - ✅ **Dominio:** `seguridad.idiaicox.com`
 - ✅ **Uso:** Ambas aplicaciones (HPS System + CryptoTrace)
-- ✅ **IP de destino:** `46.183.119.90`
+- ✅ **IP de destino:** `187.33.154.156`
 
 **Nota:** El dominio debe apuntar a la IP del VPS antes de obtener el certificado SSL.
 
@@ -87,9 +86,9 @@
 - ✅ `scripts/README.md` - Documentación de scripts
 
 **Configuración en scripts:**
-- ✅ VPS_IP: `46.183.119.90`
+- ✅ VPS_IP: `187.33.154.156`
 - ✅ VPS_USER: `root`
-- ✅ VPS_PASSWORD: `XJrdNfXBm2k-7HG`
+- ✅ VPS_PASSWORD: `41c0x1d1!`
 - ✅ DOMAIN: `seguridad.idiaicox.com`
 - ✅ PROJECT_DIR: `/opt/thot-security`
 

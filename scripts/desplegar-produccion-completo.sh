@@ -16,9 +16,9 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuración
-VPS_IP="46.183.119.90"
+VPS_IP="187.33.154.156"
 VPS_USER="root"
-VPS_PASSWORD="XJrdNfXBm2k-7HG"
+VPS_PASSWORD="41c0x1d1!"
 DOMAIN="seguridad.idiaicox.com"
 PROJECT_DIR="/opt/thot-security"
 REPO_URL="https://github.com/David-Pajuelo/thot-security.git"
@@ -76,14 +76,14 @@ echo -e "${BLUE}═════════════════════�
 echo -e "${BLUE}Paso 2: Verificar Docker y Docker Compose${NC}"
 echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 
-if execute_on_vps "docker --version && docker-compose --version" > /dev/null 2>&1; then
+if execute_on_vps "docker --version && docker compose --version" > /dev/null 2>&1; then
     echo -e "${GREEN}✓ Docker y Docker Compose instalados${NC}"
     execute_on_vps "docker --version"
-    execute_on_vps "docker-compose --version"
+    execute_on_vps "docker compose --version"
 else
     echo -e "${YELLOW}⚠️  Docker no está instalado. Instalando...${NC}"
     execute_on_vps "curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh"
-    execute_on_vps "curl -L 'https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)' -o /usr/local/bin/docker-compose && chmod +x /usr/local/bin/docker-compose"
+    execute_on_vps "curl -L 'https://github.com/docker/compose/releases/latest/download/docker compose-$(uname -s)-$(uname -m)' -o /usr/local/bin/docker compose && chmod +x /usr/local/bin/docker compose"
     echo -e "${GREEN}✓ Docker instalado${NC}"
 fi
 
@@ -155,6 +155,6 @@ echo "4. Verificar acceso: https://$DOMAIN"
 echo ""
 echo "Para ver los logs:"
 echo "  ssh $VPS_USER@$VPS_IP"
-echo "  cd $PROJECT_DIR/hps-system && docker-compose -f docker-compose.prod.yml logs -f"
+echo "  cd $PROJECT_DIR/hps-system && docker compose -f docker compose.prod.yml logs -f"
 echo ""
 
