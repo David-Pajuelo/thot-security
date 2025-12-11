@@ -99,3 +99,6 @@ transferring
 writing
 =
 
+# Documentación de producción (contiene información sensible)
+documentacion-produccion/
+
