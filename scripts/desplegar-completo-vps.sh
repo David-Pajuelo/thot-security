@@ -27,9 +27,22 @@ echo -e "${GREEN}✓ Código actualizado${NC}"
 echo ""
 
 # =============================================================================
-# PASO 2: Instalar Nginx (si no está instalado)
+# PASO 2: Instalar Certbot (si no está instalado)
 # =============================================================================
-echo -e "${GREEN}📦 Paso 2: Verificando Nginx...${NC}"
+echo -e "${GREEN}🔐 Paso 2: Verificando Certbot...${NC}"
+if ! command -v certbot &> /dev/null; then
+    echo "Instalando Certbot..."
+    apt install certbot python3-certbot-nginx -y
+    echo -e "${GREEN}✓ Certbot instalado${NC}"
+else
+    echo -e "${GREEN}✓ Certbot ya está instalado${NC}"
+fi
+echo ""
+
+# =============================================================================
+# PASO 3: Instalar Nginx (si no está instalado)
+# =============================================================================
+echo -e "${GREEN}📦 Paso 3: Verificando Nginx...${NC}"
 if ! command -v nginx &> /dev/null; then
     echo "Instalando Nginx..."
     apt update
@@ -37,54 +50,6 @@ if ! command -v nginx &> /dev/null; then
     echo -e "${GREEN}✓ Nginx instalado${NC}"
 else
     echo -e "${GREEN}✓ Nginx ya está instalado${NC}"
-fi
-echo ""
-
-# =============================================================================
-# PASO 3: Configurar Nginx
-# =============================================================================
-echo -e "${GREEN}⚙️  Paso 3: Configurando Nginx...${NC}"
-
-# Copiar configuración de Nginx
-if [ -f "/opt/thot-security/nginx-seguridad.conf" ]; then
-    cp /opt/thot-security/nginx-seguridad.conf /etc/nginx/sites-available/seguridad.idiaicox.com
-    echo -e "${GREEN}✓ Configuración copiada${NC}"
-else
-    echo -e "${RED}❌ Error: No se encontró nginx-seguridad.conf${NC}"
-    exit 1
-fi
-
-# Habilitar sitio
-if [ ! -L "/etc/nginx/sites-enabled/seguridad.idiaicox.com" ]; then
-    ln -s /etc/nginx/sites-available/seguridad.idiaicox.com /etc/nginx/sites-enabled/
-    echo -e "${GREEN}✓ Sitio habilitado${NC}"
-fi
-
-# Eliminar configuración por defecto
-if [ -L "/etc/nginx/sites-enabled/default" ]; then
-    rm /etc/nginx/sites-enabled/default
-    echo -e "${GREEN}✓ Configuración por defecto eliminada${NC}"
-fi
-
-# Verificar configuración
-if nginx -t; then
-    echo -e "${GREEN}✓ Configuración de Nginx válida${NC}"
-else
-    echo -e "${RED}❌ Error en la configuración de Nginx${NC}"
-    exit 1
-fi
-echo ""
-
-# =============================================================================
-# PASO 4: Instalar Certbot (si no está instalado)
-# =============================================================================
-echo -e "${GREEN}🔐 Paso 4: Verificando Certbot...${NC}"
-if ! command -v certbot &> /dev/null; then
-    echo "Instalando Certbot..."
-    apt install certbot python3-certbot-nginx -y
-    echo -e "${GREEN}✓ Certbot instalado${NC}"
-else
-    echo -e "${GREEN}✓ Certbot ya está instalado${NC}"
 fi
 echo ""
 
@@ -196,6 +161,46 @@ echo -e "${GREEN}✓ CryptoTrace levantado${NC}"
 echo ""
 
 # =============================================================================
+# PASO 7.5: Configurar Nginx (después de levantar contenedores)
+# =============================================================================
+echo -e "${GREEN}⚙️  Paso 7.5: Configurando Nginx...${NC}"
+
+# Copiar configuración de Nginx
+if [ -f "/opt/thot-security/nginx-seguridad.conf" ]; then
+    cp /opt/thot-security/nginx-seguridad.conf /etc/nginx/sites-available/seguridad.idiaicox.com
+    echo -e "${GREEN}✓ Configuración copiada${NC}"
+else
+    echo -e "${RED}❌ Error: No se encontró nginx-seguridad.conf${NC}"
+    exit 1
+fi
+
+# Habilitar sitio
+if [ ! -L "/etc/nginx/sites-enabled/seguridad.idiaicox.com" ]; then
+    ln -s /etc/nginx/sites-available/seguridad.idiaicox.com /etc/nginx/sites-enabled/
+    echo -e "${GREEN}✓ Sitio habilitado${NC}"
+fi
+
+# Eliminar configuración por defecto
+if [ -L "/etc/nginx/sites-enabled/default" ]; then
+    rm /etc/nginx/sites-enabled/default
+    echo -e "${GREEN}✓ Configuración por defecto eliminada${NC}"
+fi
+
+# Esperar un poco para que los contenedores estén completamente listos
+echo "Esperando a que los contenedores estén listos..."
+sleep 10
+
+# Verificar configuración
+if nginx -t; then
+    echo -e "${GREEN}✓ Configuración de Nginx válida${NC}"
+else
+    echo -e "${YELLOW}⚠️  Advertencia: Error en la configuración de Nginx${NC}"
+    echo -e "${YELLOW}⚠️  Esto puede ser porque los contenedores aún no están completamente listos${NC}"
+    echo -e "${YELLOW}⚠️  Continuando de todas formas...${NC}"
+fi
+echo ""
+
+# =============================================================================
 # PASO 8: Esperar a que los servicios estén listos
 # =============================================================================
 echo -e "${GREEN}⏳ Paso 8: Esperando a que los servicios estén listos...${NC}"
@@ -240,11 +245,21 @@ echo -e "${GREEN}✓ Directorio configurado${NC}"
 echo ""
 
 # =============================================================================
-# PASO 11: Reiniciar Nginx
+# PASO 11: Reiniciar Nginx (con reintentos si falla)
 # =============================================================================
 echo -e "${GREEN}🔄 Paso 11: Reiniciando Nginx...${NC}"
-systemctl restart nginx
-echo -e "${GREEN}✓ Nginx reiniciado${NC}"
+if systemctl restart nginx; then
+    echo -e "${GREEN}✓ Nginx reiniciado${NC}"
+else
+    echo -e "${YELLOW}⚠️  Error al reiniciar Nginx, esperando y reintentando...${NC}"
+    sleep 5
+    if systemctl restart nginx; then
+        echo -e "${GREEN}✓ Nginx reiniciado en segundo intento${NC}"
+    else
+        echo -e "${RED}❌ Error al reiniciar Nginx${NC}"
+        echo -e "${YELLOW}⚠️  Verifica los logs: journalctl -u nginx -n 50${NC}"
+    fi
+fi
 echo ""
 
 # =============================================================================
