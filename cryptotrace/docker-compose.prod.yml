@@ -62,7 +62,9 @@ services:
       - redis
     networks:
       - cryptotrace-network
-    command: ["gunicorn", "--workers", "3", "--bind", "0.0.0.0:8080", "--access-logfile", "-", "--error-logfile", "-", "cryptotrace_backend.wsgi:application"]
+    # Usar Daphne para soportar tanto HTTP como WebSocket
+    # Daphne puede manejar ambos protocolos, aunque Gunicorn es más eficiente para HTTP puro
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8080", "--access-log", "-", "--proxy-headers", "cryptotrace_backend.asgi:application"]
 
   # Servicio de procesamiento
   processing:
