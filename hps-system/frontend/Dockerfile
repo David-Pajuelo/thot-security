@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 
@@ -16,18 +16,31 @@ ENV REACT_APP_API_URL=$REACT_APP_API_URL
 ENV REACT_APP_WS_URL=$REACT_APP_WS_URL
 ENV REACT_APP_AGENTE_IA_WS_URL=$REACT_APP_AGENTE_IA_WS_URL
 ENV REACT_APP_CRYPTOTRACE_URL=$REACT_APP_CRYPTOTRACE_URL
+ENV NODE_ENV=production
 
 # Copiar package.json y package-lock.json
 COPY package*.json ./
 
-# Instalar dependencias (incluyendo devDependencies para Tailwind CSS)
+# Instalar dependencias
 RUN npm install
 
 # Copiar código fuente
 COPY . .
 
+# Construir la aplicación
+RUN npm run build
+
+# Etapa de producción con nginx
+FROM nginx:alpine
+
+# Copiar archivos construidos desde la etapa builder
+COPY --from=builder /app/build /usr/share/nginx/html
+
+# Copiar configuración de nginx personalizada (opcional)
+# Si no existe, nginx usará la configuración por defecto
+
 # Exponer puerto
-EXPOSE 3000
+EXPOSE 80
 
 # Comando de inicio
-CMD ["npm", "start"]
+CMD ["nginx", "-g", "daemon off;"]
