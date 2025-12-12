@@ -144,6 +144,46 @@ fi
 echo ""
 
 # =============================================================================
+# PASO 6.5: Crear .env.prod para HPS System Frontend
+# =============================================================================
+echo -e "${GREEN}📝 Paso 6.5: Creando .env.prod para HPS System Frontend...${NC}"
+HPS_ENV="/opt/thot-security/hps-system/.env.prod"
+
+if [ ! -f "$HPS_ENV" ]; then
+    cat > "$HPS_ENV" << 'HPSENVEOF'
+# =============================================================================
+# CONFIGURACIÓN HPS SYSTEM - PRODUCCIÓN
+# =============================================================================
+
+# URLs del backend Django (CryptoTrace)
+REACT_APP_API_URL=https://seguridad.idiaicox.com/api
+REACT_APP_WS_URL=wss://seguridad.idiaicox.com/ws
+REACT_APP_AGENTE_IA_WS_URL=wss://seguridad.idiaicox.com/ws
+
+# URL de CryptoTrace (para sincronización de tokens)
+REACT_APP_CRYPTOTRACE_URL=https://seguridad.idiaicox.com/cryptotrace
+HPSENVEOF
+    echo -e "${GREEN}✓ .env.prod creado para HPS System Frontend${NC}"
+else
+    echo -e "${YELLOW}⚠️  .env.prod ya existe, verificando variables...${NC}"
+    # Verificar y agregar variables faltantes
+    if ! grep -q "REACT_APP_API_URL" "$HPS_ENV"; then
+        echo "REACT_APP_API_URL=https://seguridad.idiaicox.com/api" >> "$HPS_ENV"
+    fi
+    if ! grep -q "REACT_APP_WS_URL" "$HPS_ENV"; then
+        echo "REACT_APP_WS_URL=wss://seguridad.idiaicox.com/ws" >> "$HPS_ENV"
+    fi
+    if ! grep -q "REACT_APP_AGENTE_IA_WS_URL" "$HPS_ENV"; then
+        echo "REACT_APP_AGENTE_IA_WS_URL=wss://seguridad.idiaicox.com/ws" >> "$HPS_ENV"
+    fi
+    if ! grep -q "REACT_APP_CRYPTOTRACE_URL" "$HPS_ENV"; then
+        echo "REACT_APP_CRYPTOTRACE_URL=https://seguridad.idiaicox.com/cryptotrace" >> "$HPS_ENV"
+    fi
+    echo -e "${GREEN}✓ Variables verificadas/actualizadas${NC}"
+fi
+echo ""
+
+# =============================================================================
 # PASO 7: Construir y levantar CryptoTrace
 # =============================================================================
 echo -e "${GREEN}🐳 Paso 7: Construyendo y levantando CryptoTrace...${NC}"

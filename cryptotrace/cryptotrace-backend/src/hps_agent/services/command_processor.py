@@ -573,9 +573,21 @@ class CommandProcessor:
         1. Solicitud de NUEVA HPS: "solicitar hps", "envío hps", "enviar hps"
         2. Solicitud de TRASPASO HPS: "trasladar hps", "traspasar hps", "envío traspaso hps", "enviar traspaso hps"
         """
+        logger.info(f"📧 _solicitar_hps llamado: parametros={parametros}, is_transfer={is_transfer}")
         user_role = user_context.get("role", "").lower()
         email = parametros.get("email")
         user_message = parametros.get("user_message", "").lower()
+        
+        # Si no hay email en parámetros, intentar extraerlo del mensaje
+        if not email and user_message:
+            import re
+            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            emails_found = re.findall(email_pattern, user_message)
+            if emails_found:
+                email = emails_found[0]
+                logger.info(f"📧 Email extraído del mensaje: {email}")
+        
+        logger.info(f"📧 Email final: {email}, user_role: {user_role}")
         
         # Detectar tipo de solicitud del mensaje si no se especifica explícitamente
         # Buscar palabras clave de traspaso
