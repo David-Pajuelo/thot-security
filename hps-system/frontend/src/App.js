@@ -185,7 +185,7 @@ function App() {
   console.log('App - Renderizando aplicación principal');
 
   return (
-    <Router>
+    <Router basename="/hps">
       <div className="App">
         {/* Componente de debug temporal */}
 

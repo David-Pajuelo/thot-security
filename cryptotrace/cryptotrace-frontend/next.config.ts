@@ -9,8 +9,10 @@ const nextConfig = {
   // Optimización para producción con archivos estáticos
   ...(process.env.NODE_ENV === 'production' ? { output: 'standalone' } : {}),
   trailingSlash: true,
+  // Base path para servir desde /cryptotrace
+  basePath: process.env.NODE_ENV === 'production' ? '/cryptotrace' : '',
   // Configuración para archivos estáticos
-  assetPrefix: process.env.NODE_ENV === 'production' ? '' : '',
+  assetPrefix: process.env.NODE_ENV === 'production' ? '/cryptotrace' : '',
   // Optimizaciones de build
   compress: true,
   poweredByHeader: false,
