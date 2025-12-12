@@ -193,11 +193,7 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8080}
-        - REACT_APP_WS_URL=${REACT_APP_WS_URL:-ws://localhost:8080}
-        - REACT_APP_AGENTE_IA_WS_URL=${REACT_APP_AGENTE_IA_WS_URL:-ws://localhost:8080}
+      dockerfile: Dockerfile.dev
     container_name: hps_frontend
     restart: unless-stopped
     env_file:
