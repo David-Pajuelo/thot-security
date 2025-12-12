@@ -185,7 +185,7 @@ function App() {
   console.log('App - Renderizando aplicación principal');
 
   return (
-    <Router basename="/hps">
+    <Router basename={process.env.NODE_ENV === 'production' ? '/hps' : ''}>
       <div className="App">
         {/* Componente de debug temporal */}
 
