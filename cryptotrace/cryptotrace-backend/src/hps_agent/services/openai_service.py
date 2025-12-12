@@ -18,6 +18,20 @@ class OpenAIService:
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY no está configurada en las variables de entorno")
         
+        # Limpiar espacios, saltos de línea y caracteres especiales
+        self.api_key = self.api_key.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+        
+        # Verificar que la API key tenga el formato correcto
+        if not self.api_key.startswith('sk-'):
+            logger.warning(f"⚠️ API key no comienza con 'sk-': {self.api_key[:10]}...")
+        
+        # Log parcial de la API key para debugging (solo primeros y últimos caracteres)
+        if len(self.api_key) > 20:
+            masked_key = f"{self.api_key[:10]}...{self.api_key[-10:]}"
+        else:
+            masked_key = "***"
+        logger.info(f"OpenAI API Key cargada: {masked_key} (longitud: {len(self.api_key)})")
+        
         self.client = OpenAI(api_key=self.api_key)
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "2000"))
