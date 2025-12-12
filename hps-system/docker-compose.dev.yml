@@ -201,6 +201,8 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
+      # PUBLIC_URL="" override el homepage="/hps" para desarrollo
+      - PUBLIC_URL=
       - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8080}
       - REACT_APP_WS_URL=${REACT_APP_WS_URL:-ws://localhost:8080}
       - REACT_APP_AGENTE_IA_WS_URL=${REACT_APP_AGENTE_IA_WS_URL:-ws://localhost:8080}
