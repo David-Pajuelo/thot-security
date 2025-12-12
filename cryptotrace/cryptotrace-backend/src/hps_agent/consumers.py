@@ -407,7 +407,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     last_timestamp = last_message.get('timestamp')
                     if last_timestamp:
                         try:
-                            from datetime import datetime, timezone
+                            from datetime import timezone
                             last_msg_time = datetime.fromisoformat(last_timestamp.replace('Z', '+00:00'))
                             time_diff = (datetime.now(timezone.utc) - last_msg_time.replace(tzinfo=timezone.utc)).total_seconds()
                             # Si el último mensaje es de hace más de 5 minutos, enviar bienvenida
