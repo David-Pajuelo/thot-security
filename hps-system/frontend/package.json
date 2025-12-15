@@ -27,7 +27,8 @@
     "zustand": "^4.3.6"
   },
   "scripts": {
-    "start": "react-scripts start",
+    "start": "sh scripts/start-dev.sh",
+    "start:direct": "react-scripts start",
     "prebuild": "node scripts/inject-env-html.js",
     "build": "react-scripts build",
     "test": "react-scripts test",

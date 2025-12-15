@@ -14,9 +14,14 @@ RUN npm install
 # Copiar código fuente
 COPY . .
 
+# Copiar script de inicio
+COPY scripts/start-dev.sh /app/scripts/start-dev.sh
+RUN chmod +x /app/scripts/start-dev.sh
+
 # Exponer puerto de desarrollo
 EXPOSE 3000
 
 # Comando para desarrollo (con hot-reload)
-CMD ["npm", "start"]
+# El script start-dev.sh maneja PUBLIC_URL para servir desde la raíz en desarrollo
+CMD ["/app/scripts/start-dev.sh"]
 

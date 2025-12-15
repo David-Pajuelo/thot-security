@@ -185,7 +185,13 @@ function App() {
   console.log('App - Renderizando aplicación principal');
 
   return (
-    <Router basename={process.env.PUBLIC_URL || (process.env.NODE_ENV === 'production' ? '/hps' : '')}>
+    <Router basename={
+      // En desarrollo, si PUBLIC_URL está definido (incluso vacío), usarlo
+      // En producción, usar /hps si PUBLIC_URL no está definido
+      process.env.PUBLIC_URL !== undefined 
+        ? process.env.PUBLIC_URL 
+        : (process.env.NODE_ENV === 'production' ? '/hps' : '')
+    }>
       <div className="App">
         {/* Componente de debug temporal */}
 
