@@ -9,5 +9,6 @@ export PUBLIC_URL="${PUBLIC_URL:-}"
 
 # Iniciar el servidor de desarrollo
 # El servidor de desarrollo de react-scripts usa PUBLIC_URL para determinar la base URL
-exec react-scripts start
+# Usar npx para ejecutar react-scripts desde node_modules
+exec npx react-scripts start
 
