@@ -1,7 +1,7 @@
 """
-Comando para crear usuarios basados en los roles existentes en la base de datos.
+Comando para crear roles y usuarios basados en el código del sistema.
 
-Lee los roles existentes y crea un usuario de cada tipo (excepto admin que ya existe).
+Crea todos los roles necesarios y un usuario de cada tipo (excepto admin que ya existe).
 Todas las contraseñas serán "Password123" y no serán temporales.
 """
 from django.core.management.base import BaseCommand
@@ -12,7 +12,7 @@ User = get_user_model()
 
 
 class Command(BaseCommand):
-    help = 'Crea usuarios basados en los roles existentes en la base de datos'
+    help = 'Crea roles y usuarios basados en el código del sistema (no consulta BD)'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -21,97 +21,194 @@ class Command(BaseCommand):
             default='Password123',
             help='Contraseña a usar para todos los usuarios (default: Password123)'
         )
-        parser.add_argument(
-            '--skip-existing',
-            action='store_true',
-            help='No actualizar usuarios que ya existen'
-        )
 
     def handle(self, *args, **options):
         password = options['password']
-        skip_existing = options['skip_existing']
 
-        self.stdout.write(self.style.SUCCESS('\n🔍 Consultando roles existentes en la base de datos...\n'))
+        self.stdout.write(self.style.SUCCESS('\n🚀 Creando roles y usuarios desde el código...\n'))
 
-        # Obtener todos los roles existentes
-        existing_roles = HpsRole.objects.all().order_by('name')
-        
-        if not existing_roles.exists():
-            self.stdout.write(self.style.ERROR('❌ No se encontraron roles en la base de datos.'))
-            self.stdout.write(self.style.WARNING('   Ejecuta primero: python manage.py setup_hps_initial_data'))
-            return
+        # ===== CREAR ROLES (basados en el código) =====
+        self.stdout.write('📋 Creando roles...')
+        roles_data = [
+            {
+                'name': 'admin',
+                'description': 'Administrador del sistema HPS',
+                'permissions': {
+                    'manage_users': True,
+                    'manage_teams': True,
+                    'approve_hps': True,
+                    'view_all_hps': True,
+                    'manage_templates': True,
+                }
+            },
+            {
+                'name': 'jefe_seguridad',
+                'description': 'Jefe de seguridad',
+                'permissions': {
+                    'approve_hps': True,
+                    'view_all_hps': True,
+                    'manage_templates': True,
+                }
+            },
+            {
+                'name': 'jefe_seguridad_suplente',
+                'description': 'Jefe de seguridad suplente',
+                'permissions': {
+                    'approve_hps': True,
+                    'view_all_hps': True,
+                }
+            },
+            {
+                'name': 'crypto',
+                'description': 'Perfil base para usuarios de CryptoTrace',
+                'permissions': {
+                    'view_own_hps': True,
+                    'submit_hps': True,
+                }
+            },
+            {
+                'name': 'team_lead',
+                'description': 'Líder de equipo',
+                'permissions': {
+                    'view_team_hps': True,
+                    'submit_hps': True,
+                }
+            },
+            {
+                'name': 'member',
+                'description': 'Miembro estándar',
+                'permissions': {
+                    'view_own_hps': True,
+                    'submit_hps': True,
+                }
+            },
+        ]
 
-        self.stdout.write(f'📋 Roles encontrados: {existing_roles.count()}\n')
-        for role in existing_roles:
-            self.stdout.write(f'  • {role.name}: {role.description or "Sin descripción"}')
+        created_roles = 0
+        roles_dict = {}
+        for role_data in roles_data:
+            role, created = HpsRole.objects.get_or_create(
+                name=role_data['name'],
+                defaults={
+                    'description': role_data['description'],
+                    'permissions': role_data['permissions']
+                }
+            )
+            roles_dict[role_data['name']] = role
+            if created:
+                created_roles += 1
+                self.stdout.write(self.style.SUCCESS(f'  ✓ Rol creado: {role.name}'))
+            else:
+                self.stdout.write(self.style.WARNING(f'  ⊙ Rol ya existe: {role.name}'))
 
-        # Obtener o crear un equipo por defecto
-        default_team, _ = HpsTeam.objects.get_or_create(
+        self.stdout.write(f'\nRoles: {created_roles} creados, {len(roles_data) - created_roles} ya existían\n')
+
+        # ===== CREAR EQUIPO AICOX =====
+        self.stdout.write('👥 Creando equipo AICOX...')
+        aicox_team, team_created = HpsTeam.objects.get_or_create(
             name='AICOX',
             defaults={
                 'description': 'Equipo genérico para usuarios sin equipo específico',
                 'is_active': True,
             }
         )
+        if team_created:
+            self.stdout.write(self.style.SUCCESS(f'  ✓ Equipo creado: {aicox_team.name}'))
+        else:
+            self.stdout.write(self.style.WARNING(f'  ⊙ Equipo ya existe: {aicox_team.name}'))
+        self.stdout.write('')
 
-        # Verificar si existe usuario admin
+        # ===== VERIFICAR SI EXISTE ADMIN =====
         admin_exists = False
-        admin_role = existing_roles.filter(name='admin').first()
-        if admin_role:
-            admin_profiles = HpsUserProfile.objects.filter(role=admin_role)
-            if admin_profiles.exists():
-                admin_exists = True
-                self.stdout.write(f'\n✓ Usuario admin ya existe, se omitirá la creación de usuario admin\n')
+        admin_user = User.objects.filter(email='admin@hps-system.com').first()
+        if admin_user:
+            admin_exists = True
+            self.stdout.write(self.style.WARNING('⚠ Usuario admin ya existe, se omitirá la creación\n'))
 
-        self.stdout.write(self.style.SUCCESS('\n👤 Creando usuarios...\n'))
+        # ===== CREAR USUARIOS =====
+        self.stdout.write('👤 Creando usuarios...\n')
+
+        # Definir usuarios a crear (todos excepto admin)
+        users_to_create = [
+            {
+                'email': 'jefeseguridad@hps-system.com',
+                'first_name': 'Jefe',
+                'last_name': 'Seguridad',
+                'role_name': 'jefe_seguridad',
+                'is_staff': True,
+                'is_superuser': False,
+            },
+            {
+                'email': 'jefeseguridadsuplente@hps-system.com',
+                'first_name': 'Jefe',
+                'last_name': 'Seguridad Suplente',
+                'role_name': 'jefe_seguridad_suplente',
+                'is_staff': False,
+                'is_superuser': False,
+            },
+            {
+                'email': 'crypto@hps-system.com',
+                'first_name': 'Crypto',
+                'last_name': 'Usuario',
+                'role_name': 'crypto',
+                'is_staff': False,
+                'is_superuser': False,
+            },
+            {
+                'email': 'teamlead@hps-system.com',
+                'first_name': 'Team',
+                'last_name': 'Lead',
+                'role_name': 'team_lead',
+                'is_staff': False,
+                'is_superuser': False,
+            },
+            {
+                'email': 'member@hps-system.com',
+                'first_name': 'Member',
+                'last_name': 'Usuario',
+                'role_name': 'member',
+                'is_staff': False,
+                'is_superuser': False,
+            },
+        ]
+
+        # Si admin no existe, agregarlo a la lista
+        if not admin_exists:
+            users_to_create.insert(0, {
+                'email': 'admin@hps-system.com',
+                'first_name': 'Admin',
+                'last_name': 'HPS',
+                'role_name': 'admin',
+                'is_staff': True,
+                'is_superuser': True,
+            })
 
         created_count = 0
         updated_count = 0
-        skipped_count = 0
 
-        for role in existing_roles:
-            # Saltar admin si ya existe
-            if role.name == 'admin' and admin_exists:
-                self.stdout.write(self.style.WARNING(f'  ⊙ Saltando {role.name} (usuario admin ya existe)'))
-                skipped_count += 1
-                continue
-
-            # Generar email basado en el nombre del rol
-            role_name_clean = role.name.lower().replace('_', '')
-            email = f'{role_name_clean}@hps-system.com'
+        for user_data in users_to_create:
+            role = roles_dict[user_data['role_name']]
             
-            # Si el email es muy largo o tiene caracteres especiales, usar formato más simple
-            if len(email) > 50 or '@' not in email:
-                email = f'user_{role.name.lower()}@hps-system.com'
-
-            # Verificar si el usuario ya existe
-            user_exists = User.objects.filter(email=email).exists()
-            
-            if user_exists and skip_existing:
-                self.stdout.write(self.style.WARNING(f'  ⊙ Usuario ya existe (saltado): {email} ({role.name})'))
-                skipped_count += 1
-                continue
-
             # Crear o actualizar usuario
             user, user_created = User.objects.get_or_create(
-                email=email,
+                email=user_data['email'],
                 defaults={
-                    'username': email,
-                    'first_name': role.name.replace('_', ' ').title(),
-                    'last_name': 'Usuario',
+                    'username': user_data['email'],
+                    'first_name': user_data['first_name'],
+                    'last_name': user_data['last_name'],
                     'is_active': True,
-                    'is_staff': role.name == 'admin',
-                    'is_superuser': role.name == 'admin',
+                    'is_staff': user_data['is_staff'],
+                    'is_superuser': user_data['is_superuser'],
                 }
             )
 
             if not user_created:
                 # Actualizar datos del usuario existente
-                user.first_name = role.name.replace('_', ' ').title()
-                user.last_name = 'Usuario'
+                user.first_name = user_data['first_name']
+                user.last_name = user_data['last_name']
                 user.is_active = True
-                user.is_staff = role.name == 'admin'
-                user.is_superuser = role.name == 'admin'
+                user.is_staff = user_data['is_staff']
+                user.is_superuser = user_data['is_superuser']
                 updated_count += 1
             else:
                 created_count += 1
@@ -125,7 +222,7 @@ class Command(BaseCommand):
                 user=user,
                 defaults={
                     'role': role,
-                    'team': default_team,
+                    'team': aicox_team,
                     'email_verified': True,
                     'is_temp_password': False,
                     'must_change_password': False,
@@ -135,38 +232,27 @@ class Command(BaseCommand):
             if not profile_created:
                 # Actualizar perfil existente
                 profile.role = role
-                profile.team = default_team
+                profile.team = aicox_team
                 profile.email_verified = True
                 profile.is_temp_password = False
                 profile.must_change_password = False
                 profile.save()
 
             if user_created:
-                self.stdout.write(self.style.SUCCESS(f'  ✓ Usuario creado: {email} ({role.name})'))
+                self.stdout.write(self.style.SUCCESS(f'  ✓ Usuario creado: {user.email} ({role.name})'))
             else:
-                self.stdout.write(self.style.WARNING(f'  ↻ Usuario actualizado: {email} ({role.name})'))
+                self.stdout.write(self.style.WARNING(f'  ↻ Usuario actualizado: {user.email} ({role.name})'))
 
         # ===== RESUMEN =====
         self.stdout.write(self.style.SUCCESS('\n' + '=' * 60))
         self.stdout.write(self.style.SUCCESS('✅ Proceso completado'))
         self.stdout.write(self.style.SUCCESS('=' * 60))
         self.stdout.write(f'\n📊 Resumen:')
+        self.stdout.write(f'  • Roles creados: {created_roles}')
         self.stdout.write(f'  • Usuarios creados: {created_count}')
         self.stdout.write(f'  • Usuarios actualizados: {updated_count}')
-        self.stdout.write(f'  • Usuarios saltados: {skipped_count}')
         self.stdout.write(f'\n🔑 Contraseña para todos los usuarios: {password}')
         self.stdout.write(f'\n📋 Usuarios creados/actualizados:\n')
         
-        # Mostrar lista de usuarios
-        for role in existing_roles:
-            if role.name == 'admin' and admin_exists:
-                continue
-            role_name_clean = role.name.lower().replace('_', '')
-            email = f'{role_name_clean}@hps-system.com'
-            if len(email) > 50 or '@' not in email:
-                email = f'user_{role.name.lower()}@hps-system.com'
-            
-            user = User.objects.filter(email=email).first()
-            if user:
-                self.stdout.write(f'  • {email} - {role.name}')
-
+        for user_data in users_to_create:
+            self.stdout.write(f'  • {user_data["email"]} - {user_data["role_name"]}')
