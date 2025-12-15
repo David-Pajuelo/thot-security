@@ -62,7 +62,9 @@ const sortUsersByRole = (users) => {
     
     // Si tienen el mismo rol, ordenar alfabéticamente por nombre
     if (roleA === roleB) {
-      return a.full_name.localeCompare(b.full_name);
+      const nameA = a.full_name || a.email || '';
+      const nameB = b.full_name || b.email || '';
+      return nameA.localeCompare(nameB);
     }
     
     return roleA - roleB;
