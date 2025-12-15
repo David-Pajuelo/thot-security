@@ -264,9 +264,9 @@ function App() {
           <Route 
             path="/templates" 
             element={
-              <AdminRoute>
+              <AdminSecurityRoute>
                 <TemplateManagement />
-              </AdminRoute>
+              </AdminSecurityRoute>
             } 
           />
           

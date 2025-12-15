@@ -134,10 +134,11 @@ export const AdminSecurityRoute = ({ children }) => {
   console.log('AdminSecurityRoute - user.role_name:', user?.role_name);
   console.log('AdminSecurityRoute - Rol del usuario:', userRole);
   
-  if (!user || (userRole !== 'admin' && userRole !== 'jefe_seguridad' && userRole !== 'security_chief')) {
+  const allowedRoles = ['admin', 'jefe_seguridad', 'jefe_seguridad_suplente', 'security_chief'];
+  if (!user || !allowedRoles.includes(userRole)) {
     console.log('AdminSecurityRoute - Acceso denegado, redirigiendo a /unauthorized');
     console.log('AdminSecurityRoute - Razón: usuario no válido o rol no permitido');
-    console.log('AdminSecurityRoute - Roles permitidos: admin, jefe_seguridad, security_chief');
+    console.log('AdminSecurityRoute - Roles permitidos:', allowedRoles);
     return <Navigate to="/unauthorized" replace />;
   }
   

@@ -743,7 +743,7 @@ class HpsTemplateViewSet(viewsets.ModelViewSet):
     """ViewSet para gestionar plantillas PDF de HPS"""
     queryset = models.HpsTemplate.objects.all()
     serializer_class = serializers.HpsTemplateSerializer
-    permission_classes = [permissions.IsAuthenticated, IsHpsAdmin]
+    permission_classes = [permissions.IsAuthenticated, IsHpsAdminOrSecurityChief]
     
     def get_serializer_context(self):
         """Añadir request al contexto para generar URLs absolutas"""

@@ -97,7 +97,7 @@ const Dashboard = () => {
       icon: DocumentTextIcon,
       path: '/templates',
       color: 'bg-purple-500',
-      visible: isAdmin()
+      visible: isAdmin() || isSecurityChief()
     },
     {
       name: 'Chat IA',

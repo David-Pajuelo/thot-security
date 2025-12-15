@@ -50,6 +50,7 @@ class Command(BaseCommand):
                 'permissions': {
                     'approve_hps': True,
                     'view_all_hps': True,
+                    'manage_templates': True,
                 }
             },
             {
