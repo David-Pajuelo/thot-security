@@ -32,14 +32,8 @@ class Command(BaseCommand):
         roles_data = [
             {
                 'name': 'admin',
-                'description': 'Administrador del sistema HPS',
-                'permissions': {
-                    'manage_users': True,
-                    'manage_teams': True,
-                    'approve_hps': True,
-                    'view_all_hps': True,
-                    'manage_templates': True,
-                }
+                'description': 'Rol admin del sistema HPS',
+                'permissions': {}
             },
             {
                 'name': 'jefe_seguridad',
@@ -61,25 +55,22 @@ class Command(BaseCommand):
             {
                 'name': 'crypto',
                 'description': 'Perfil base para usuarios de CryptoTrace',
-                'permissions': {
-                    'view_own_hps': True,
-                    'submit_hps': True,
-                }
+                'permissions': {}
             },
             {
                 'name': 'team_lead',
                 'description': 'Líder de equipo',
                 'permissions': {
-                    'view_team_hps': True,
                     'submit_hps': True,
+                    'view_team_hps': True,
                 }
             },
             {
                 'name': 'member',
-                'description': 'Miembro estándar',
+                'description': 'Usuario estándar',
                 'permissions': {
-                    'view_own_hps': True,
                     'submit_hps': True,
+                    'view_own_hps': True,
                 }
             },
         ]
@@ -108,7 +99,7 @@ class Command(BaseCommand):
         aicox_team, team_created = HpsTeam.objects.get_or_create(
             name='AICOX',
             defaults={
-                'description': 'Equipo genérico para usuarios sin equipo específico',
+                'description': 'Equipo genérico AICOX',
                 'is_active': True,
             }
         )
