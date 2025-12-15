@@ -184,14 +184,14 @@ function App() {
 
   console.log('App - Renderizando aplicación principal');
 
+  // Calcular basename basado en PUBLIC_URL
+  // En desarrollo: PUBLIC_URL="" -> basename=""
+  // En producción: PUBLIC_URL="/hps" -> basename="/hps"
+  const basename = process.env.PUBLIC_URL || '';
+  console.log('🔧 Router basename:', basename, '(PUBLIC_URL:', process.env.PUBLIC_URL, ')');
+
   return (
-    <Router basename={
-      // En desarrollo, si PUBLIC_URL está definido (incluso vacío), usarlo
-      // En producción, usar /hps si PUBLIC_URL no está definido
-      process.env.PUBLIC_URL !== undefined 
-        ? process.env.PUBLIC_URL 
-        : (process.env.NODE_ENV === 'production' ? '/hps' : '')
-    }>
+    <Router basename={basename}>
       <div className="App">
         {/* Componente de debug temporal */}
 
