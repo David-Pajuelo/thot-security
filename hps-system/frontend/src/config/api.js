@@ -6,13 +6,16 @@ if (!API_BASE_URL) {
   if (process.env.NODE_ENV === 'development') {
     console.warn('⚠️ REACT_APP_API_URL no definida, usando localhost (solo en desarrollo)');
   } else {
-    throw new Error('REACT_APP_API_URL debe estar definida en producción');
+    console.error('❌ REACT_APP_API_URL debe estar definida en producción');
+    // No lanzar error para evitar que la app se rompa completamente
+    // En su lugar, usar un valor por defecto y mostrar error en consola
   }
 }
 
 const config = {
   // URL base del backend API (Django en puerto 8080)
-  API_BASE_URL: API_BASE_URL || 'http://localhost:8080',  // Fallback solo en desarrollo
+  // En producción, si no está definida, usar la URL relativa (mismo dominio)
+  API_BASE_URL: API_BASE_URL || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8080'),
   
   // Endpoints de la API (adaptados a Django REST Framework)
   endpoints: {
@@ -96,7 +99,10 @@ const config = {
             console.warn('⚠️ REACT_APP_AGENTE_IA_WS_URL no definida, usando localhost (solo en desarrollo)');
             return 'ws://localhost:8080';
           } else {
-            throw new Error('REACT_APP_AGENTE_IA_WS_URL debe estar definida en producción');
+            console.error('❌ REACT_APP_AGENTE_IA_WS_URL debe estar definida en producción');
+            // No lanzar error, usar URL relativa basada en el protocolo actual
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return `${protocol}//${window.location.host}/ws`;
           }
         }
         return wsUrl;
