@@ -1,14 +1,30 @@
 #!/bin/sh
 # Script para iniciar el servidor de desarrollo
-# En desarrollo, PUBLIC_URL="" hace que el servidor sirva desde la raíz
-# En producción, PUBLIC_URL="/hps" o se usa homepage="/hps"
+# En desarrollo, necesitamos que el servidor sirva desde la raíz (sin /hps)
+# En producción, se usa homepage="/hps"
 
-# Si PUBLIC_URL no está definido, establecerlo como cadena vacía para desarrollo
-# Esto hace que react-scripts ignore el homepage="/hps" y sirva desde la raíz
+# Si PUBLIC_URL está vacío o no definido, modificar temporalmente package.json
+# para eliminar el homepage y que el servidor sirva desde la raíz
+if [ -z "$PUBLIC_URL" ] || [ "$PUBLIC_URL" = "" ]; then
+  # Crear backup del package.json
+  cp package.json package.json.bak
+  
+  # Modificar package.json para eliminar homepage temporalmente
+  # Usar node para modificar el JSON de forma segura
+  node -e "
+    const fs = require('fs');
+    const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+    delete pkg.homepage;
+    fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+  "
+  
+  # Función para restaurar package.json al salir
+  trap 'mv package.json.bak package.json' EXIT INT TERM
+fi
+
+# Establecer PUBLIC_URL si no está definido
 export PUBLIC_URL="${PUBLIC_URL:-}"
 
 # Iniciar el servidor de desarrollo
-# El servidor de desarrollo de react-scripts usa PUBLIC_URL para determinar la base URL
-# Usar npx para ejecutar react-scripts desde node_modules
 exec npx react-scripts start
 
