@@ -14,13 +14,15 @@ RUN npm install
 COPY . .
 
 # Variables de entorno para el build (Next.js las incluirá en el bundle)
-ARG NEXT_PUBLIC_API_URL=https://cryptotrace.idiaicox.com/api
-ARG NEXT_PUBLIC_PROCESSING_URL=https://cryptotrace.idiaicox.com/processing
-ARG NEXT_PUBLIC_OCR_URL=https://cryptotrace.idiaicox.com/ocr
+ARG NEXT_PUBLIC_API_URL=https://seguridad.idiaicox.com/api
+ARG NEXT_PUBLIC_PROCESSING_URL=https://seguridad.idiaicox.com/processing
+ARG NEXT_PUBLIC_OCR_URL=https://seguridad.idiaicox.com/ocr
+ARG NEXT_PUBLIC_HPS_SYSTEM_URL=https://seguridad.idiaicox.com/hps
 
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_PROCESSING_URL=${NEXT_PUBLIC_PROCESSING_URL}
 ENV NEXT_PUBLIC_OCR_URL=${NEXT_PUBLIC_OCR_URL}
+ENV NEXT_PUBLIC_HPS_SYSTEM_URL=${NEXT_PUBLIC_HPS_SYSTEM_URL}
 
 # Construir la aplicación
 RUN npm run build

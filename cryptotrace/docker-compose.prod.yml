@@ -25,16 +25,17 @@ services:
     build:
       context: ./cryptotrace-frontend
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=https://seguridad.idiaicox.com/api
+        - NEXT_PUBLIC_PROCESSING_URL=https://seguridad.idiaicox.com/processing
+        - NEXT_PUBLIC_OCR_URL=https://seguridad.idiaicox.com/ocr
+        - NEXT_PUBLIC_HPS_SYSTEM_URL=https://seguridad.idiaicox.com/hps
     container_name: cryptotrace-frontend
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=https://seguridad.idiaicox.com/api
-      - NEXT_PUBLIC_PROCESSING_URL=https://seguridad.idiaicox.com/processing
-      - NEXT_PUBLIC_OCR_URL=https://seguridad.idiaicox.com/ocr
-      - NEXT_PUBLIC_HPS_SYSTEM_URL=https://seguridad.idiaicox.com/hps
     networks:
       - cryptotrace-network
 
