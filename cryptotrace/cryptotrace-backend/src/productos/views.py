@@ -1368,6 +1368,18 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             print("❌ [BACKEND] ERROR: No hay artículos")
             return Response({"error": "No se proporcionaron artículos"}, status=400)
 
+        # 🔹 Eliminar registros temporales no procesados existentes para este albarán y usuario
+        # Esto evita duplicaciones si el usuario sale y vuelve a procesar el mismo albarán
+        registros_existentes = LineaTemporalProducto.objects.filter(
+            usuario=request.user,
+            numero_albaran=numero_albaran,
+            procesado=False
+        )
+        count_existentes = registros_existentes.count()
+        if count_existentes > 0:
+            print(f"🧹 [BACKEND] Eliminando {count_existentes} registros temporales no procesados existentes para este albarán")
+            registros_existentes.delete()
+
         # Crear registros temporales
         registros_creados = []
         print("🔄 [BACKEND] Creando registros temporales...")
@@ -1801,7 +1813,7 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                         fecha_transaccion=fecha_transaccion,
                         accesorios=accesorios,
                         equipos_prueba=equipos_prueba,
-                        observaciones_odmc=observaciones,
+                        observaciones_odmc=observaciones or '',
                         # Campos de firma A
                         firma_a_nombre_apellidos=firma_a_data.get('nombre', ''),
                         firma_a_cargo=firma_a_data.get('cargo', ''),
@@ -1829,7 +1841,7 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                         direccion_transferencia='ENTRADA',  # Los AC-21 procesados desde tabla temporal son siempre de ENTRADA
                         accesorios=accesorios,
                         equipos_prueba=equipos_prueba,
-                        observaciones_odmc=observaciones,
+                        observaciones_odmc=observaciones or '',
                         # Campos multipágina (por defecto página 1)
                         pagina_numero=1,
                         total_paginas=1,
