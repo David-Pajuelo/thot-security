@@ -8,6 +8,7 @@ import logging
 import httpx
 import re
 import demjson3
+import traceback
 from copy import deepcopy
 
 # Configurar logging
@@ -363,17 +364,18 @@ class AC21Processor:
         Procesa una imagen usando GPT-4 Vision, llamando a los métodos
         de creación de prompt y post-procesamiento.
         """
-        logger.info("🖼️ Iniciando procesamiento de imagen...")
+        print("🖼️ Iniciando procesamiento de imagen...")
         try:
             # 1. Codificar imagen
             base64_image = self.encode_image(image_bytes)
-            logger.info("✅ Imagen codificada en base64")
+            print("✅ Imagen codificada en base64")
         
             # 2. Crear el prompt dinámicamente llamando al método correcto
-            logger.info("🔄 Preparando llamada a OpenAI usando _create_openai_prompt...")
+            print("🔄 Preparando llamada a OpenAI usando _create_openai_prompt...")
             messages = self._create_openai_prompt(base64_image)
             
             # 3. Llamar a OpenAI
+            print("📞 Llamando a OpenAI API...")
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
@@ -381,20 +383,26 @@ class AC21Processor:
                 temperature=0,
                 response_format={"type": "json_object"}
             )
-            logger.info("✅ Respuesta recibida de OpenAI")
+            print("✅ Respuesta recibida de OpenAI")
             
             # 4. Procesar respuesta JSON
             content = response.choices[0].message.content
-            logger.info("================== RAW OPENAI RESPONSE ==================")
-            logger.info(content)
-            logger.info("=========================================================")
+            print("================== RAW OPENAI RESPONSE ==================")
+            print(content)
+            print("=========================================================")
             
-            raw_data = json.loads(content)
-            logger.info("================== PARSED JSON DATA =====================")
-            logger.info(json.dumps(raw_data, indent=2))
-            logger.info("=========================================================")
+            try:
+                raw_data = json.loads(content)
+                print("================== PARSED JSON DATA =====================")
+                print(json.dumps(raw_data, indent=2))
+                print("=========================================================")
+            except json.JSONDecodeError as e:
+                print(f"❌ Error al parsear JSON de OpenAI: {str(e)}")
+                print(f"Contenido recibido: {content[:500]}...")
+                raise
 
             # 5. Post-procesar los datos para corregir errores y mapear
+            print("🔄 Post-procesando datos...")
             processed_data = self._post_process_data(raw_data)
             
             # 6. Combinar con plantilla para asegurar estructura final
@@ -408,13 +416,16 @@ class AC21Processor:
             if "equipos_prueba" in result:
                 result["equipos_prueba"] = self.sanitize_equipos_prueba(result.get("equipos_prueba"))
 
-            logger.info("================== FINAL PROCESSED DATA =================")
-            logger.info(json.dumps(result, indent=2))
-            logger.info("=========================================================")
+            print("================== FINAL PROCESSED DATA =================")
+            print(json.dumps(result, indent=2))
+            print("=========================================================")
+            print(f"📊 Resumen: {len(result.get('articulos', []))} artículos, {len(result.get('accesorios', []))} accesorios")
             
             return result
             
         except Exception as e:
+            print(f"❌ Error en el procesamiento: {str(e)}")
+            print(f"📚 Stack trace: {traceback.format_exc()}")
             logger.error(f"Error en el procesamiento: {str(e)}", exc_info=True)
             return deepcopy(DEFAULT_JSON_TEMPLATE)
 
