@@ -438,8 +438,13 @@ function UploadAC21PageContent() {
           }
         }
         // NO copiar tipoTransaccion a numeroRegistroEntrada bajo ninguna circunstancia
-        // Función para limpiar campos con valor 'String'
-        const cleanString = (val: any) => (val === 'String' ? '' : val);
+        // Función para limpiar campos: convierte null, undefined, 'String' literal y cadenas vacías a ''
+        const cleanString = (val: any) => {
+          if (val === 'String' || val === null || val === undefined || val === '') {
+            return '';
+          }
+          return val;
+        };
         // Limpiar firmas
         const cleanFirmas = (firmas: any) => ({
           firma_a: {
@@ -456,14 +461,25 @@ function UploadAC21PageContent() {
           },
         });
         // Limpiar cabecera
-        const cleanCabecera = (cab: any) => ({
-          numero_registro_salida: cleanString(cab?.numero_registro_salida),
-          fecha_transaccion: cleanString(cab?.fecha_transaccion),
-          numero_registro_entrada: numeroRegistroEntrada || '',
-          fecha_informe: cleanString(cab?.fecha_informe),
-          odmc_numero: cleanString(cab?.odmc_numero),
-          tipo_transaccion: cleanString(tipoTransaccion),
-        });
+        // IMPORTANTE: No copiar valores de fecha_informe a fecha_transaccion ni de numero_registro_salida a numero_registro_entrada
+        // Si están vacíos, deben quedarse vacíos
+        const cleanCabecera = (cab: any) => {
+          // Limpiar numero_registro_entrada: si está vacío, null, undefined o 'String', dejarlo como ''
+          let numRegEntrada = cleanString(numeroRegistroEntrada);
+          
+          // Asegurar que fecha_transaccion no se copie desde fecha_informe
+          let fechaTransaccion = cleanString(cab?.fecha_transaccion);
+          // Si fecha_transaccion está vacía, debe quedarse vacía (no copiar desde fecha_informe)
+          
+          return {
+            numero_registro_salida: cleanString(cab?.numero_registro_salida),
+            fecha_transaccion: fechaTransaccion, // Mantener vacío si viene vacío del OCR
+            numero_registro_entrada: numRegEntrada, // Mantener vacío si viene vacío del OCR
+            fecha_informe: cleanString(cab?.fecha_informe),
+            odmc_numero: cleanString(cab?.odmc_numero),
+            tipo_transaccion: cleanString(tipoTransaccion),
+          };
+        };
         // Limpiar empresas
         const cleanEmpresa = (emp: any) => ({
           nombre: cleanString(emp?.nombre),
@@ -478,6 +494,8 @@ function UploadAC21PageContent() {
           email: cleanString(emp?.email),
           id: emp?.id || undefined
         });
+        // Construir nuevo objeto de datos, asegurando que sobrescriba completamente el estado anterior
+        // IMPORTANTE: Esto evita que valores previos persistan cuando el OCR devuelve campos vacíos
         const newFormData: any = {
           cabecera: cleanCabecera(responseData.cabecera || {}),
           empresa_origen: cleanEmpresa(responseData.empresa_origen || {}),
@@ -492,6 +510,8 @@ function UploadAC21PageContent() {
           }),
         };
 
+        // IMPORTANTE: Usar setProcessedData con el objeto completo para sobrescribir completamente el estado anterior
+        // Esto evita que valores previos persistan cuando el OCR devuelve campos vacíos (null/undefined)
         setProcessedData(newFormData);
         // Guardar la imagen rotada para su posterior uso
         setImagenParaGuardar(imageBlob);
@@ -567,6 +587,33 @@ function UploadAC21PageContent() {
     setShowDocumentoExistenteModal(false);
     // Continuar con el flujo normal de handleConfirm
     handleConfirmContinuado();
+  };
+
+  // Función para agregar una nueva línea manualmente
+  const handleAgregarLinea = () => {
+    const nuevaLinea = {
+      codigo_producto: '',
+      titulo: '',
+      descripcion: '',
+      observaciones: '',
+      cantidad: 1,
+      numero_serie: '',
+      numero_serie_inicio: '',
+      numero_serie_fin: '',
+      cc: '',
+      tipo: '',
+    };
+    
+    setProcessedData((prev: any) => ({
+      ...prev,
+      articulos: [...(prev.articulos || []), nuevaLinea]
+    }));
+    
+    // Seleccionar automáticamente la nueva línea
+    const nuevoIndex = processedData.articulos?.length || 0;
+    setSelectedArticulos((prev: Set<number>) => new Set([...prev, nuevoIndex]));
+    
+    toast.success('Nueva línea agregada');
   };
 
   // Función para guardar en línea temporal y redirigir
@@ -1952,8 +1999,6 @@ function UploadAC21PageContent() {
 
               {/* Tabla de artículos pegada al bloque superior */}
               <div>
-                <div className="flex justify-between items-center">
-                </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full border border-gray-400 text-xs">
                     <thead>
@@ -2069,6 +2114,18 @@ function UploadAC21PageContent() {
                       })}
                     </tbody>
                   </table>
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <Button
+                    type="button"
+                    onClick={handleAgregarLinea}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Añadir línea
+                  </Button>
                 </div>
               </div>
 
