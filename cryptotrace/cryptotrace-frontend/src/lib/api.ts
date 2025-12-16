@@ -2,7 +2,7 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
 const PROCESSING_URL = process.env.NEXT_PUBLIC_PROCESSING_URL || 'http://localhost:5001';
-const OCR_URL = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8002';
+const OCR_URL = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000';
 
 // Helper function to get auth token
 const getAuthToken = (): string | null => {
