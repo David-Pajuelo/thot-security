@@ -30,8 +30,36 @@ const usePdfJs = () => {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       import('pdfjs-dist').then((pdfjs) => {
-        pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+        // Detectar el entorno y basePath dinámicamente desde la URL actual
+        // Esto funciona tanto en desarrollo (localhost) como en producción (seguridad.idiaicox.com)
+        const pathname = window.location.pathname;
+        const origin = window.location.origin;
+        
+        // Detectar si estamos en /cryptotrace (producción) o en la raíz (desarrollo)
+        const isCryptotracePath = pathname.startsWith('/cryptotrace');
+        const basePath = isCryptotracePath ? '/cryptotrace' : '';
+        
+        // Construir la URL completa del worker
+        // En desarrollo: http://localhost:3000/pdf.worker.min.js
+        // En producción: https://seguridad.idiaicox.com/cryptotrace/pdf.worker.min.js
+        const workerPath = `${basePath}/pdf.worker.min.js`;
+        const fullWorkerUrl = `${origin}${workerPath}`;
+        
+        // Configurar el worker con URL absoluta
+        pdfjs.GlobalWorkerOptions.workerSrc = fullWorkerUrl;
+        
+        console.log('📄 PDF.js worker configurado:', {
+          pathname,
+          origin,
+          basePath,
+          workerPath,
+          fullWorkerUrl,
+          configured: pdfjs.GlobalWorkerOptions.workerSrc
+        });
+        
         setPdfjsLib(pdfjs);
+      }).catch((error) => {
+        console.error('❌ Error cargando pdfjs-dist:', error);
       });
     }
   }, []);
@@ -286,48 +314,78 @@ function UploadAC21PageContent() {
         return;
       }
       
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-      
-      const images: string[] = [];
-      const rotArr: number[] = [];
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
         
-        // CONFIGURACIÓN OPTIMIZADA: 1241px para la dimensión MÁS CORTA
-        // Primero obtenemos las dimensiones originales
-        const originalViewport = page.getViewport({ scale: 1 });
+        const images: string[] = [];
+        const rotArr: number[] = [];
         
-        // Determinamos cuál es la dimensión más corta
-        const shortestDimension = Math.min(originalViewport.width, originalViewport.height);
+        console.log(`📄 PDF cargado: ${pdf.numPages} página(s)`);
         
-        // Calculamos la escala para que la dimensión más corta sea 1241px
-        const targetShortestSize = 1241;
-        const scale = targetShortestSize / shortestDimension;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          try {
+            const page = await pdf.getPage(i);
+            
+            // CONFIGURACIÓN OPTIMIZADA: 1241px para la dimensión MÁS CORTA
+            // Primero obtenemos las dimensiones originales
+            const originalViewport = page.getViewport({ scale: 1 });
+            
+            // Determinamos cuál es la dimensión más corta
+            const shortestDimension = Math.min(originalViewport.width, originalViewport.height);
+            
+            // Calculamos la escala para que la dimensión más corta sea 1241px
+            const targetShortestSize = 1241;
+            const scale = targetShortestSize / shortestDimension;
+            
+            // Aplicamos la escala calculada
+            const viewport = page.getViewport({ scale: scale, rotation: -page.rotate });
+            
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            
+            if (!context) {
+              throw new Error(`No se pudo obtener contexto 2D del canvas para la página ${i}`);
+            }
+            
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            await page.render({ canvasContext: context, viewport }).promise;
+            
+            // Sin recorte - máxima preservación de contenido
+            const finalCanvas = canvas;
+            
+            const shortestFinal = Math.min(finalCanvas.width, finalCanvas.height);
+            console.log(`Página ${i}: ${finalCanvas.width}x${finalCanvas.height} px (dimensión más corta: ${shortestFinal}px, escala: ${scale.toFixed(2)}x)`);
+            
+            // Calidad JPEG máxima para OCR óptimo
+            const imageDataUrl = finalCanvas.toDataURL('image/jpeg', 1.0);
+            images.push(imageDataUrl);
+            rotArr.push(page.rotate || 0);
+          } catch (pageError) {
+            console.error(`❌ Error procesando página ${i} del PDF:`, pageError);
+            toast.error(`Error procesando página ${i} del PDF: ${pageError instanceof Error ? pageError.message : 'Error desconocido'}`);
+            // Continuar con las siguientes páginas
+          }
+        }
         
-        // Aplicamos la escala calculada
-        const viewport = page.getViewport({ scale: scale, rotation: -page.rotate });
+        if (images.length === 0) {
+          throw new Error('No se pudo convertir ninguna página del PDF a imagen');
+        }
         
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        await page.render({ canvasContext: context!, viewport }).promise;
-        
-        // Sin recorte - máxima preservación de contenido
-        const finalCanvas = canvas;
-        
-        const shortestFinal = Math.min(finalCanvas.width, finalCanvas.height);
-        console.log(`Página ${i}: ${finalCanvas.width}x${finalCanvas.height} px (dimensión más corta: ${shortestFinal}px, escala: ${scale.toFixed(2)}x)`);
-        
-        // Calidad JPEG máxima para OCR óptimo
-        const imageDataUrl = finalCanvas.toDataURL('image/jpeg', 1.0);
-        images.push(imageDataUrl);
-        rotArr.push(page.rotate || 0);
+        console.log(`✅ ${images.length} imágenes de alta calidad generadas para OCR`);
+        setPreviewImages(images);
+        setRotations(rotArr);
+        toast.success(`PDF convertido: ${images.length} página(s) lista(s) para procesar`);
+      } catch (error) {
+        console.error('❌ Error procesando PDF:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Error desconocido al procesar el PDF';
+        toast.error(`Error al procesar PDF: ${errorMessage}`);
+        // Limpiar estados en caso de error
+        setPreviewImages([]);
+        setRotations([]);
+        setSelectedFile(null);
       }
-      console.log(`✅ ${images.length} imágenes de alta calidad generadas para OCR`);
-      setPreviewImages(images);
-      setRotations(rotArr);
     } else if (file.type.startsWith('image/')) {
       // Imagen suelta
       const url = URL.createObjectURL(renamedFile);
