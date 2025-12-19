@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import tempfile
 import shutil
 from enum import Enum
+from typing import Optional  # <-- añadido para los parámetros de recorte
 from app.ocr.processors.ac21_processor import AC21Processor
 from app.ocr.processors.telefonica_processor import TelefonicaDeliveryProcessor
 from app.ocr.processors.elbit_processor import ElbitProcessor
@@ -49,7 +50,11 @@ async def root():
 @app.post("/process-image/")
 async def process_image(
     file: UploadFile = File(...),
-    document_type: str = Form(...)
+    document_type: str = Form(...),
+    crop_top: Optional[float] = Form(None),
+    crop_bottom: Optional[float] = Form(None),
+    crop_left: Optional[float] = Form(None),
+    crop_right: Optional[float] = Form(None),
 ):
     print("="*50)
     print("📥 NUEVA PETICIÓN DE PROCESAMIENTO DE IMAGEN")
@@ -81,7 +86,17 @@ async def process_image(
             print(f"🔍 Procesando documento tipo: {doc_type}")
             if doc_type == DocumentType.AC21:
                 processor = AC21Processor()
-                result = processor.process_image(file_content)
+                crop_params = None
+                # Solo construimos crop_params si llega al menos un valor
+                if any(v is not None for v in [crop_top, crop_bottom, crop_left, crop_right]):
+                    crop_params = {
+                        "top": crop_top if crop_top is not None else 0.25,
+                        "bottom": crop_bottom if crop_bottom is not None else 0.98,
+                        "left": crop_left if crop_left is not None else 0.03,
+                        "right": crop_right if crop_right is not None else 0.97,
+                    }
+                    print(f"📐 Parámetros de recorte recibidos: {crop_params}")
+                result = processor.process_image(file_content, crop_params=crop_params)
             elif doc_type == DocumentType.ALBARAN_TELEFONICA:
                 processor = TelefonicaDeliveryProcessor()
                 result = processor.process_image(file_content)

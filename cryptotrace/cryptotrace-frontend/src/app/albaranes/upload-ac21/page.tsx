@@ -132,6 +132,12 @@ function UploadAC21PageContent() {
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [rotations, setRotations] = useState<number[]>([]);
   const [currentPage, setCurrentPage] = useState(0); // Página actual del visor
+  const [usarRecorte, setUsarRecorte] = useState(false); // Recorte opcional para tabla de artículos
+  // Estado de recorte manual (porcentaje 0..1 relativo a la imagen)
+  const [cropTop, setCropTop] = useState(0.25);
+  const [cropBottom, setCropBottom] = useState(0.98);
+  const [cropLeft, setCropLeft] = useState(0.03);
+  const [cropRight, setCropRight] = useState(0.97);
 
   // Función para actualizar el tipo de un artículo
   const handleTipoChange = (index: number, tipo: string) => {
@@ -208,8 +214,17 @@ function UploadAC21PageContent() {
 
   // Modifica getCodigoProducto para normalizar el código
   // Prioriza codigo_producto (TÍTULO CORTO / EDICIÓN) sobre descripcion
+  // y tolera artículos nulos/indefinidos para evitar errores en mapas de selección
   const getCodigoProducto = (articulo: any) => {
-    return normalizaCodigo(articulo.codigo_producto || articulo.titulo || articulo.descripcion || '-');
+    if (!articulo) {
+      return '-';
+    }
+    return normalizaCodigo(
+      articulo.codigo_producto ||
+      articulo.titulo ||
+      articulo.descripcion ||
+      '-'
+    );
   };
 
   // Modifica isProductoTipificado para usar el código normalizado
@@ -327,16 +342,20 @@ function UploadAC21PageContent() {
           try {
             const page = await pdf.getPage(i);
             
-            // CONFIGURACIÓN OPTIMIZADA: 1241px para la dimensión MÁS CORTA
+            // CONFIGURACIÓN OPTIMIZADA: alta resolución para la dimensión MÁS CORTA
             // Primero obtenemos las dimensiones originales
             const originalViewport = page.getViewport({ scale: 1 });
             
             // Determinamos cuál es la dimensión más corta
             const shortestDimension = Math.min(originalViewport.width, originalViewport.height);
             
-            // Calculamos la escala para que la dimensión más corta sea 1241px
-            const targetShortestSize = 1241;
-            const scale = targetShortestSize / shortestDimension;
+            // Calculamos la escala SOLO si la página es pequeña.
+            // Si la dimensión corta ya es grande, no reducimos resolución para no perder nitidez.
+            // Objetivo: dimensión corta ~2200px cuando sea necesario (mejor legibilidad de texto y números de serie).
+            const targetShortestSize = 2200;
+            const scale = shortestDimension < targetShortestSize
+              ? targetShortestSize / shortestDimension
+              : 1;
             
             // Aplicamos la escala calculada
             const viewport = page.getViewport({ scale: scale, rotation: -page.rotate });
@@ -358,8 +377,8 @@ function UploadAC21PageContent() {
             const shortestFinal = Math.min(finalCanvas.width, finalCanvas.height);
             console.log(`Página ${i}: ${finalCanvas.width}x${finalCanvas.height} px (dimensión más corta: ${shortestFinal}px, escala: ${scale.toFixed(2)}x)`);
             
-            // Calidad JPEG máxima para OCR óptimo
-            const imageDataUrl = finalCanvas.toDataURL('image/jpeg', 1.0);
+            // Usar PNG (sin pérdidas) para maximizar la nitidez del texto y números de serie
+            const imageDataUrl = finalCanvas.toDataURL('image/png');
             images.push(imageDataUrl);
             rotArr.push(page.rotate || 0);
           } catch (pageError) {
@@ -457,14 +476,14 @@ function UploadAC21PageContent() {
             ctx.drawImage(img, 0, 0);
             ctx.restore();
             
-            // Convertir canvas a blob
+             // Convertir canvas a blob (PNG sin pérdidas para mantener máxima calidad)
             canvas.toBlob((blob) => {
               if (blob) {
                 resolve(blob);
               } else {
                 reject(new Error("Error al convertir canvas a blob"));
-              }
-            }, 'image/jpeg', 1.0);
+               }
+             }, 'image/png');
           };
           
           img.onerror = () => reject(new Error("Error al cargar imagen"));
@@ -477,6 +496,13 @@ function UploadAC21PageContent() {
       const fileName = rotation === 0 ? selectedFile.name : `${selectedFile.name}_rotated_${rotation}deg`;
       formData.append("file", imageBlob, fileName); 
       formData.append("document_type", "ac21");
+      // Enviar parámetros de recorte (porcentaje 0..1) SOLO si el usuario ha activado el recorte
+      if (usarRecorte) {
+        formData.append("crop_top", String(cropTop));
+        formData.append("crop_bottom", String(cropBottom));
+        formData.append("crop_left", String(cropLeft));
+        formData.append("crop_right", String(cropRight));
+      }
 
       console.log(`📤 [OCR] Enviando imagen con rotación ${rotation}° aplicada al servicio OCR`);
       const response = await processAC21Image(formData);
@@ -525,15 +551,22 @@ function UploadAC21PageContent() {
           // Limpiar numero_registro_entrada: si está vacío, null, undefined o 'String', dejarlo como ''
           let numRegEntrada = cleanString(numeroRegistroEntrada);
           
-          // Asegurar que fecha_transaccion no se copie desde fecha_informe
+          // Limpiar fechas
+          const fechaInforme = cleanString(cab?.fecha_informe);
           let fechaTransaccion = cleanString(cab?.fecha_transaccion);
-          // Si fecha_transaccion está vacía, debe quedarse vacía (no copiar desde fecha_informe)
+
+          // Heurística: si el OCR ha rellenado fecha_transaccion con el MISMO valor que fecha_informe,
+          // y en el documento el campo venía vacío, preferimos dejarlo vacío para que en la UI
+          // se muestre el placeholder "dd/mm/yyyy" en lugar de una fecha inventada.
+          if (fechaTransaccion && fechaInforme && fechaTransaccion === fechaInforme) {
+            fechaTransaccion = '';
+          }
           
           return {
             numero_registro_salida: cleanString(cab?.numero_registro_salida),
-            fecha_transaccion: fechaTransaccion, // Mantener vacío si viene vacío del OCR
+            fecha_transaccion: fechaTransaccion, // Mantener vacío si viene vacío (o sospechosamente copiado) del OCR
             numero_registro_entrada: numRegEntrada, // Mantener vacío si viene vacío del OCR
-            fecha_informe: cleanString(cab?.fecha_informe),
+            fecha_informe: fechaInforme,
             odmc_numero: cleanString(cab?.odmc_numero),
             tipo_transaccion: cleanString(tipoTransaccion),
           };
@@ -647,31 +680,56 @@ function UploadAC21PageContent() {
     handleConfirmContinuado();
   };
 
-  // Función para agregar una nueva línea manualmente
-  const handleAgregarLinea = () => {
-    const nuevaLinea = {
-      codigo_producto: '',
-      titulo: '',
-      descripcion: '',
-      observaciones: '',
-      cantidad: 1,
-      numero_serie: '',
-      numero_serie_inicio: '',
-      numero_serie_fin: '',
-      cc: '',
-      tipo: '',
-    };
-    
-    setProcessedData((prev: any) => ({
-      ...prev,
-      articulos: [...(prev.articulos || []), nuevaLinea]
-    }));
-    
-    // Seleccionar automáticamente la nueva línea
-    const nuevoIndex = processedData.articulos?.length || 0;
-    setSelectedArticulos((prev: Set<number>) => new Set([...prev, nuevoIndex]));
-    
-    toast.success('Nueva línea agregada');
+  // Crea una línea vacía de artículo (para inserciones manuales)
+  const crearLineaVacia = () => ({
+    codigo_producto: '',
+    titulo: '',
+    descripcion: '',
+    observaciones: '',
+    cantidad: 1,
+    numero_serie: '',
+    numero_serie_inicio: '',
+    numero_serie_fin: '',
+    cc: '',
+    tipo: '',
+  });
+
+  // Insertar una nueva línea en una posición concreta, empujando el resto hacia abajo
+  const handleInsertLineaAt = (insertIndex: number) => {
+    const nuevaLinea = crearLineaVacia();
+
+    setProcessedData((prev: any) => {
+      const articulosPrev = prev.articulos || [];
+      const nuevosArticulos = [...articulosPrev];
+      // Insertar en la posición indicada (por ejemplo, encima de la fila actual)
+      nuevosArticulos.splice(insertIndex, 0, nuevaLinea);
+      return {
+        ...prev,
+        articulos: nuevosArticulos,
+      };
+    });
+
+    // Actualizar selección: desplazar índices >= insertIndex y seleccionar la nueva línea
+    setSelectedArticulos((prev: Set<number>) => {
+      const updated = new Set<number>();
+      prev.forEach(i => {
+        if (i >= insertIndex) {
+          updated.add(i + 1);
+        } else {
+          updated.add(i);
+        }
+      });
+      updated.add(insertIndex);
+      return updated;
+    });
+
+    toast.success('Nueva línea insertada');
+  };
+
+  // Agregar una nueva línea al final de la tabla
+  const handleAgregarLineaAbajo = () => {
+    const articulosLength = processedData.articulos?.length || 0;
+    handleInsertLineaAt(articulosLength);
   };
 
   // Función para guardar en línea temporal y redirigir
@@ -685,10 +743,13 @@ function UploadAC21PageContent() {
       const articulosAInsertar = processedData.articulos
         .filter((_: any, index: number) => selectedArticulos.has(index) && !indicesDuplicados.has(index))
         .map((art: any) => {
-          // Mapeo correcto: codigo_producto viene del OCR (TÍTULO CORTO / EDICIÓN)
-          // descripcion viene del OCR (OBSERVACIONES)
-          const codigo = art.codigo_producto || art.titulo_corto || art.codigo || art.descripcion || '';
-          const descripcion = art.descripcion || art.observaciones || codigo || '';
+          // Mapeo correcto:
+          // - codigo_producto viene del OCR (TÍTULO CORTO / EDICIÓN)
+          // - descripcion viene del OCR (OBSERVACIONES)
+          // IMPORTANTE: no usar el código como fallback de descripción para evitar
+          // que la columna de OBSERVACIONES se rellene con el TÍTULO CORTO/EDICIÓN.
+          const codigo = art.codigo_producto || art.titulo_corto || art.codigo || '';
+          const descripcion = art.descripcion || art.observaciones || '';
           
           // Asegurar que cantidad sea un número válido
           let cantidad = art.cantidad;
@@ -1137,6 +1198,23 @@ function UploadAC21PageContent() {
     cantidad: '',
   });
 
+  // Calcular información sobre índices de fila detectados y filas faltantes
+  const filaIndices: number[] = (processedData?.articulos || []).map(
+    (art: any, idx: number) =>
+      (typeof art?.indice_fila === 'number' && !Number.isNaN(art.indice_fila))
+        ? art.indice_fila
+        : idx + 1
+  );
+
+  const maxFilaIndex = filaIndices.length > 0 ? Math.max(...filaIndices) : 0;
+  const filasPresentes = new Set(filaIndices);
+  const filasFaltantes: number[] = [];
+  for (let i = 1; i <= maxFilaIndex; i++) {
+    if (!filasPresentes.has(i)) {
+      filasFaltantes.push(i);
+    }
+  }
+
   // Función para agregar accesorio
   const handleAddAccesorio = () => {
     if (!newAccesorio.codigo || !newAccesorio.cantidad) {
@@ -1496,8 +1574,8 @@ function UploadAC21PageContent() {
        ctx.drawImage(img, 0, 0);
        ctx.restore();
        
-       // Descargar imagen rotada
-       const rotatedDataUrl = canvas.toDataURL('image/jpeg', 1.0);
+        // Descargar imagen rotada (PNG sin pérdidas para depuración)
+        const rotatedDataUrl = canvas.toDataURL('image/png');
        const link = document.createElement('a');
        link.download = `imagen_1241px_pagina_${pageIndex + 1}_rotada_${rotation}deg_${Date.now()}.jpg`;
        link.href = rotatedDataUrl;
@@ -1629,11 +1707,11 @@ function UploadAC21PageContent() {
                 </div>
               </form>
 
-              {/* Preview del archivo */}
-              <div className="mt-4 bg-gray-50 rounded-lg min-h-[300px] flex items-center justify-center">
+               {/* Preview del archivo */}
+               <div className="mt-4 bg-gray-50 rounded-lg min-h-[300px] flex flex-col items-stretch justify-start">
                 {previewImages.length > 0 ? (
-                  // Barra de controles y paginador
-                  <div className="w-full">
+                   // Barra de controles, paginador y recorte
+                   <div className="w-full">
                     <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                       {/* Paginador */}
                       <div className="flex items-center gap-2">
@@ -1653,8 +1731,8 @@ function UploadAC21PageContent() {
                           title="Página siguiente"
                         >&#62;</button>
                       </div>
-                      {/* Controles de zoom y rotación */}
-                      <div className="flex items-center gap-1">
+                       {/* Controles de zoom, rotación y recorte */}
+                       <div className="flex items-center gap-1">
                         <Button variant="outline" size="sm" className="bg-white/90 backdrop-blur-sm" onClick={() => zoomInRef?.()} title="Acercar"><ZoomIn className="h-4 w-4" /></Button>
                         <Button variant="outline" size="sm" className="bg-white/90 backdrop-blur-sm" onClick={() => zoomOutRef?.()} title="Alejar"><ZoomOut className="h-4 w-4" /></Button>
                         <Button variant="outline" size="sm" className="bg-white/90 backdrop-blur-sm" onClick={() => resetTransformRef?.()} title="Centrar y restablecer zoom">
@@ -1677,7 +1755,60 @@ function UploadAC21PageContent() {
                         </Button>
                       </div>
                     </div>
-                    {/* Visor de imagen OPTIMIZADO - ALTURA MÁXIMA */}
+                     {/* Controles sencillos de recorte vertical (solo afectan a la extracción de tabla) */}
+                     <div className="mt-2 flex flex-col gap-1 text-xs text-gray-700 bg-white/70 rounded px-2 py-1 border border-gray-200">
+                       <div className="flex items-center justify-between">
+                         <span className="font-semibold">Zona de tabla para OCR (recorte vertical)</span>
+                         <label className="flex items-center gap-1 text-[11px] cursor-pointer">
+                           <input
+                             type="checkbox"
+                             className="cursor-pointer"
+                             checked={usarRecorte}
+                             onChange={(e) => setUsarRecorte(e.target.checked)}
+                           />
+                           <span>Aplicar recorte</span>
+                         </label>
+                       </div>
+                       <div className="flex items-center gap-2">
+                         <span>Arriba</span>
+                         <input
+                           type="range"
+                           min={0}
+                           max={80}
+                           value={Math.round(cropTop * 100)}
+                           onChange={(e) => {
+                             const val = Number(e.target.value) / 100;
+                             // Mantener al menos un 5% de separación con bottom
+                             const safeVal = Math.min(val, cropBottom - 0.05);
+                             setCropTop(safeVal);
+                           }}
+                           className="flex-1"
+                           disabled={!usarRecorte}
+                         />
+                         <span>{Math.round(cropTop * 100)}%</span>
+                       </div>
+                       <div className="flex items-center gap-2">
+                         <span>Abajo</span>
+                         <input
+                           type="range"
+                           min={20}
+                           max={100}
+                           value={Math.round(cropBottom * 100)}
+                           onChange={(e) => {
+                             const val = Number(e.target.value) / 100;
+                             const safeVal = Math.max(val, cropTop + 0.05);
+                             setCropBottom(safeVal);
+                           }}
+                           className="flex-1"
+                           disabled={!usarRecorte}
+                         />
+                         <span>{Math.round(cropBottom * 100)}%</span>
+                       </div>
+                       <span className="text-[10px] text-gray-500">
+                         Estos controles no afectan a la imagen mostrada, solo a qué parte se usa para leer la tabla de inventario. Si no marcas "Aplicar recorte", se usará la página completa.
+                       </span>
+                     </div>
+                     {/* Visor de imagen OPTIMIZADO - ALTURA MÁXIMA */}
                     <div className="relative w-full bg-white rounded-lg border border-gray-200 mb-2 min-h-[650px]">
                       <TransformWrapper
                         initialScale={1.4}
@@ -1715,6 +1846,18 @@ function UploadAC21PageContent() {
                           );
                         }}
                       </TransformWrapper>
+                      {/* Recuadro visual de recorte (solo visible si el recorte está activado) */}
+                      {usarRecorte && (
+                        <div
+                          className="pointer-events-none absolute border-2 border-red-500/80 bg-red-500/10"
+                          style={{
+                            top: `${cropTop * 100}%`,
+                            bottom: `${(1 - cropBottom) * 100}%`,
+                            left: `${cropLeft * 100}%`,
+                            right: `${(1 - cropRight) * 100}%`,
+                          }}
+                        />
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -2055,9 +2198,19 @@ function UploadAC21PageContent() {
                 </Tabs>
               </div>
 
-              {/* Tabla de artículos pegada al bloque superior */}
-              <div>
-                <div className="overflow-x-auto">
+               {/* Tabla de artículos pegada al bloque superior */}
+               <div>
+                 {/* Aviso si faltan filas según los índices detectados por el OCR */}
+                 {filasFaltantes.length > 0 && (
+                   <div className="mb-2 text-xs text-yellow-900 bg-yellow-50 border border-yellow-200 rounded px-2 py-1">
+                     Faltan filas en la tabla del AC21:{" "}
+                     <span className="font-semibold">
+                       {filasFaltantes.join(", ")}
+                     </span>
+                     . Revisa que no se haya omitido ninguna línea del documento original.
+                   </div>
+                 )}
+                 <div className="overflow-x-auto">
                   <table className="min-w-full border border-gray-400 text-xs">
                     <thead>
                       <tr>
@@ -2073,13 +2226,30 @@ function UploadAC21PageContent() {
                         <th className="border border-gray-400 px-2 py-1 text-center align-middle w-28">FIN</th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {processedData.articulos?.map((articulo: any, index: number) => {
+                     <tbody className="bg-white divide-y divide-gray-200">
+                       {processedData.articulos?.map((articulo: any, index: number) => {
                         const yaExiste = productosYaEnAlbaran.some((prod: any) => prod.index === index);
+                         const rowNumber = (typeof articulo?.indice_fila === 'number' && !Number.isNaN(articulo.indice_fila))
+                           ? articulo.indice_fila
+                           : index + 1;
                         return (
-                          <tr key={index} className={yaExiste ? 'bg-gray-100 opacity-70' : (index % 2 === 0 ? 'bg-white' : 'bg-gray-50')}>
-                            {/* Numeración */}
-                            <td className="border border-gray-400 px-2 py-1 text-center align-middle font-semibold">{index + 1}</td>
+                          <tr
+                            key={index}
+                            className={`group ${yaExiste ? 'bg-gray-100 opacity-70' : (index % 2 === 0 ? 'bg-white' : 'bg-gray-50')}`}
+                          >
+                            {/* Numeración + botón de inserción de línea */}
+                             <td className="border border-gray-400 px-2 py-1 text-center align-middle font-semibold relative">
+                              {/* Botón flotante para insertar una línea encima de la actual */}
+                              <button
+                                type="button"
+                                onClick={() => handleInsertLineaAt(index)}
+                                className="absolute -left-3 top-1/2 -translate-y-1/2 h-4 w-4 rounded-full border border-gray-400 bg-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Insertar línea encima"
+                               >
+                                 +
+                               </button>
+                               {rowNumber}
+                            </td>
                             {/* Título corto/edición (codigo_producto) */}
                             <td className="border border-gray-400 px-2 py-1">
                               <input
@@ -2173,10 +2343,11 @@ function UploadAC21PageContent() {
                     </tbody>
                   </table>
                 </div>
+                {/* Botón para añadir una línea nueva al final de la tabla */}
                 <div className="mt-2 flex justify-end">
                   <Button
                     type="button"
-                    onClick={handleAgregarLinea}
+                    onClick={handleAgregarLineaAbajo}
                     variant="outline"
                     size="sm"
                     className="text-xs"
@@ -2646,7 +2817,11 @@ function UploadAC21PageContent() {
                 <h4 className="font-medium text-sm mb-2">Productos seleccionados para agregar:</h4>
                 <div className="text-sm text-gray-600">
                   {Array.from(selectedArticulos).map(index => {
-                    const articulo = processedData.articulos[index];
+                    const articulo = processedData.articulos?.[index];
+                    if (!articulo) {
+                      // Si por cualquier motivo el índice está desfasado, no renderizamos nada para evitar errores
+                      return null;
+                    }
                     const yaExiste = productosYaEnAlbaran.some(
                       (prod: any) => prod.index === index
                     );
