@@ -167,7 +167,7 @@ def send_hps_rejected_email(self, hps_request_id: int, rejection_reason: str = "
         return {"status": "error", "message": str(e)}
 
 
-@shared_task(bind=True, name="hps_expiration.check_expiration")
+@shared_task(bind=True, name="hps_core.tasks.check_hps_expiration_task")
 def check_hps_expiration_task(self):
     """
     Tarea para verificar HPS que están próximas a caducar (9 meses)
@@ -378,7 +378,7 @@ def send_generic_email_task(self, email_data: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
-@shared_task(bind=True, name="hps_core.monitor_hps_emails_task")
+@shared_task(bind=True, name="hps_core.tasks.monitor_hps_emails_task")
 def monitor_hps_emails_task(self, since_days: int = 1) -> Dict[str, Any]:
     """
     Tarea Celery para monitorización automática de correos HPS entrantes.

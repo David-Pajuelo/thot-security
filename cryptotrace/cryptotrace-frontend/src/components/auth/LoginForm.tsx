@@ -18,7 +18,7 @@ interface JWTPayload {
 
 export default function LoginForm() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [checkingToken, setCheckingToken] = useState(true);
@@ -168,15 +168,27 @@ export default function LoginForm() {
     e.preventDefault();
     setError("");
 
+    // Validar formato de email
+    const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+    if (!email.trim()) {
+      setError("El correo electrónico es requerido");
+      return;
+    }
+    if (!emailRegex.test(email.trim())) {
+      setError("Por favor, introduce un correo electrónico válido");
+      return;
+    }
+
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/token/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        // El backend acepta email o username en el campo 'username'
+        body: JSON.stringify({ username: email.trim(), password }),
       });
 
       if (!response.ok) {
-        throw new Error("Usuario o contraseña incorrectos");
+        throw new Error("Correo electrónico o contraseña incorrectos");
       }
 
       const data = await response.json();
@@ -252,21 +264,35 @@ export default function LoginForm() {
         <h2 className="text-2xl font-bold mb-4">Iniciar Sesión</h2>
         {error && <p className="text-red-500 mb-4">{error}</p>}
         <form onSubmit={handleLogin}>
-          <input
-            type="text"
-            placeholder="Usuario"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="w-full p-2 mb-2 border rounded"
-          />
-          <input
-            type="password"
-            placeholder="Contraseña"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full p-2 mb-4 border rounded"
-          />
-          <button type="submit" className="w-full bg-blue-500 text-white p-2 rounded">
+          <div className="mb-2">
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+              Correo Electrónico
+            </label>
+            <input
+              id="email"
+              type="email"
+              placeholder="correo@ejemplo.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              autoComplete="email"
+            />
+          </div>
+          <div className="mb-4">
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+              Contraseña
+            </label>
+            <input
+              id="password"
+              type="password"
+              placeholder="Contraseña"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              autoComplete="current-password"
+            />
+          </div>
+          <button type="submit" className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
             Iniciar Sesión
           </button>
         </form>
