@@ -70,26 +70,31 @@ const Chat = () => {
     scrollToBottom();
   }, [messages]);
 
+  // Referencia para rastrear si ya se ejecutó la limpieza inicial
+  const hasInitializedRef = useRef(false);
+  
   // Inicializar conexión WebSocket global
   useEffect(() => {
     if (token && user) {
       const connectToWebSocket = async () => {
         try {
-          // Verificar si es una recarga de página (navegación)
-          // Si es una recarga, limpiar mensajes del store para evitar duplicados
-          // y permitir que el backend envíe el mensaje de bienvenida si corresponde
-          const navEntries = performance.getEntriesByType('navigation');
-          const isPageReload = navEntries.length > 0 && 
-                               navEntries[0]?.type === 'reload';
-          
-          if (isPageReload) {
-            console.log('🔄 Recarga de página detectada, limpiando mensajes del store');
-            // Limpiar mensajes pero mantener conversationId si existe
-            const currentConversationId = useChatStore.getState().conversationId;
-            setMessages([]);
-            if (currentConversationId) {
-              setConversationId(currentConversationId);
+          // Solo limpiar mensajes en la primera carga de la página (recarga real)
+          // No limpiar en reconexiones o cuando cambian token/user
+          if (!hasInitializedRef.current) {
+            const navEntries = performance.getEntriesByType('navigation');
+            const isPageReload = navEntries.length > 0 && 
+                                 navEntries[0]?.type === 'reload';
+            
+            if (isPageReload) {
+              console.log('🔄 Recarga de página detectada, limpiando mensajes del store');
+              // Limpiar mensajes pero mantener conversationId si existe
+              const currentConversationId = useChatStore.getState().conversationId;
+              setMessages([]);
+              if (currentConversationId) {
+                setConversationId(currentConversationId);
+              }
             }
+            hasInitializedRef.current = true;
           }
           
           // Configurar listener ANTES de conectar para no perder mensajes iniciales
@@ -195,6 +200,11 @@ const Chat = () => {
       setConnectionStatus('Conectado');
     }
     
+    // Ignorar mensajes de pong (keepalive)
+    if (data.type === 'pong') {
+      return;
+    }
+    
     // Manejar conversation_id
     if (data.type === 'conversation_id') {
       console.log('Recibido conversation_id:', data.conversation_id);
@@ -208,6 +218,29 @@ const Chat = () => {
     }
     
     switch (data.type) {
+      case 'user':
+        // Mensaje del usuario (del historial)
+        const userMessageContent = data.message;
+        const existingUserMessage = messages.find(msg => 
+          msg.content === userMessageContent && 
+          msg.type === 'user' &&
+          Math.abs(new Date(msg.timestamp) - new Date(data.timestamp)) < 1000 // Dentro de 1 segundo
+        );
+        
+        if (existingUserMessage) {
+          console.log('Mensaje de usuario duplicado detectado, ignorando:', userMessageContent);
+          return;
+        }
+        
+        addMessage({
+          id: Date.now(),
+          type: 'user',
+          content: data.message,
+          timestamp: new Date(data.timestamp),
+          conversationId: data.conversation_id || conversationId
+        });
+        break;
+        
       case 'system':
       case 'assistant':
         // Verificar si el mensaje ya existe para evitar duplicados
@@ -653,36 +686,48 @@ const Chat = () => {
           </div>
         )}
 
-        {Array.isArray(messages) && messages.map((message) => (
-          <div key={message.id} className="flex flex-col space-y-1">
-            <div className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${getMessageBgColor(message.type)}`}>
-                <div className="flex items-center space-x-2 mb-1">
-                  <span className="text-sm">{getMessageIcon(message.type)}</span>
-                  <span className="text-xs opacity-75">{formatTime(message.timestamp)}</span>
+        {Array.isArray(messages) && messages.map((message, index) => {
+          // Si es un mensaje de sistema con solo sugerencias (sin contenido), mostrar solo las sugerencias
+          const isSystemSuggestionsOnly = message.type === 'system' && (!message.content || message.content.trim() === '') && message.suggestions && message.suggestions.length > 0;
+          
+          // Encontrar el último mensaje del asistente/sistema para mostrar solo sus sugerencias
+          const assistantMessages = messages.filter(msg => msg.type === 'assistant' || msg.type === 'system');
+          const lastAssistantMessage = assistantMessages.length > 0 ? assistantMessages[assistantMessages.length - 1] : null;
+          const isLastAssistantMessage = lastAssistantMessage && message.id === lastAssistantMessage.id;
+          
+          return (
+            <div key={message.id} className="flex flex-col space-y-1">
+              {!isSystemSuggestionsOnly && (
+                <div className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${getMessageBgColor(message.type)}`}>
+                    <div className="flex items-center space-x-2 mb-1">
+                      <span className="text-sm">{getMessageIcon(message.type)}</span>
+                      <span className="text-xs opacity-75">{formatTime(message.timestamp)}</span>
+                    </div>
+                    <div className="text-sm whitespace-pre-wrap">
+                      {renderHPSFormLink(message.content)}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-sm whitespace-pre-wrap">
-                  {renderHPSFormLink(message.content)}
+              )}
+              
+              {/* Sugerencias - Solo mostrar en el último mensaje del asistente/sistema */}
+              {message.suggestions && message.suggestions.length > 0 && isLastAssistantMessage && (
+                <div className={`flex flex-wrap gap-2 ${isSystemSuggestionsOnly ? 'mt-0' : 'mt-2 ml-4'}`}>
+                  {message.suggestions.map((suggestion, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleSuggestionClick(suggestion)}
+                      className="text-xs px-3 py-1 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 hover:shadow-sm active:bg-blue-200 transition-all duration-150 cursor-pointer border border-blue-200"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
                 </div>
-              </div>
+              )}
             </div>
-            
-            {/* Sugerencias */}
-            {message.suggestions && message.suggestions.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-2 ml-4">
-                {message.suggestions.map((suggestion, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleSuggestionClick(suggestion)}
-                    className="text-xs px-3 py-1 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 hover:shadow-sm active:bg-blue-200 transition-all duration-150 cursor-pointer border border-blue-200"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+          );
+        })}
 
         {/* Indicador de "pensando" */}
         {isTyping && (

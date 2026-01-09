@@ -23,15 +23,15 @@ class RoleConfig:
         "jefe_seguridad": [
             "¿Qué comandos puedes ejecutar?",
             "Dame un resumen de todas las HPS",
-            "Solicitar traspaso HPS para un miembro",
-            "Estado de mi equipo",
+            "Enviar solicitud HPS",
+            "Enviar solicitud de traspaso HPS",
             "¿Hay HPS pendientes en mi equipo?"
         ],
         "jefe_seguridad_suplente": [
             "¿Qué comandos puedes ejecutar?",
             "Dame un resumen de todas las HPS",
-            "Solicitar traspaso HPS para un miembro",
-            "Estado de mi equipo",
+            "Enviar solicitud HPS",
+            "Enviar solicitud de traspaso HPS",
             "¿Hay HPS pendientes en mi equipo?"
         ],
         "crypto": [

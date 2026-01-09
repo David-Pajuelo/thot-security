@@ -429,9 +429,9 @@ const useAuthStore = create(
               showChangePasswordModal: userInfo.is_temp_password || false
             });
             
-            // Limpiar chat al inicializar autenticación para evitar mensajes duplicados
-            const chatStore = (await import('./chatStore')).default;
-            chatStore.getState().clearChatCompletely();
+            // NOTA: No limpiar el chat automáticamente al inicializar autenticación
+            // El chat debe persistir entre sesiones. Solo se limpia cuando el usuario
+            // explícitamente presiona el botón "Reset" en el chat.
             
           } catch (error) {
             console.log('initializeAuth - Token inválido o error:', error);

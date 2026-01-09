@@ -134,6 +134,16 @@ class ChatConsumer(AsyncWebsocketConsumer):
         """Manejar mensajes recibidos del cliente"""
         try:
             data = json.loads(text_data)
+            
+            # Manejar mensajes de ping (keepalive)
+            if data.get('type') == 'ping':
+                # Responder con pong para mantener la conexión viva
+                await self.send(text_data=json.dumps({
+                    'type': 'pong',
+                    'timestamp': datetime.now().isoformat()
+                }))
+                return
+            
             message = data.get('message', '').strip()
             
             if not message:
@@ -154,7 +164,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             else:
                 logger.warning("⚠️ No hay conversation_id, mensaje del usuario no guardado")
             
-            # PRIMERO: Verificar si hay un flujo activo (esto tiene prioridad sobre OpenAI)
+            # PRIMERO: Verificar si hay un flujo activo
             user_id = self.user_context.get("id")
             flow_key = f"{user_id}_flow"
             has_active_flow = flow_key in self.command_processor.conversation_flows
@@ -164,19 +174,32 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 flow_info = self.command_processor.conversation_flows.get(flow_key, {})
                 logger.info(f"🔄 Flujo activo detectado: tipo={flow_info.get('type')}, email={flow_info.get('email', 'N/A')}")
             
-            if has_active_flow:
-                # Si hay flujo activo, procesar directamente sin OpenAI
-                logger.info(f"🔄 Flujo activo detectado para usuario {user_id}, procesando directamente")
-                # Crear una respuesta simulada para que execute_command la procese
-                ai_response = {
-                    "tipo": "comando",
-                    "accion": "continuar_flujo",  # Acción especial para flujos
-                    "parametros": {},
-                    "user_message": message,
-                    "requiere_api": True
-                }
+            # Si hay un flujo activo de solicitar_hps y el mensaje parece ser un email, forzar continuación del flujo
+            flow_type = self.command_processor.conversation_flows.get(flow_key, {}).get('type', '') if has_active_flow else ''
+            if has_active_flow and flow_type == "solicitar_hps":
+                # Verificar si el mensaje parece ser un email (aunque no sea válido)
+                import re
+                email_like_pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+'
+                if re.search(email_like_pattern, message):
+                    logger.info(f"🔄 Flujo solicitar_hps activo y mensaje parece email, forzando continuación del flujo")
+                    ai_response = {
+                        "tipo": "comando",
+                        "accion": "continuar_flujo",
+                        "parametros": {},
+                        "user_message": message,
+                        "requiere_api": True
+                    }
+                else:
+                    # No parece email, procesar con OpenAI para ver si es un comando
+                    logger.info(f"🤖 Enviando mensaje a OpenAI para procesamiento")
+                    ai_response = await self.openai_service.process_message(
+                        message,
+                        self.user_context
+                    )
+                    logger.info(f"🤖 Respuesta de OpenAI: tipo={ai_response.get('tipo')}, accion={ai_response.get('accion')}")
             else:
-                # Procesar mensaje con OpenAI
+                # SIEMPRE procesar con OpenAI primero para detectar si es un nuevo comando
+                # Esto permite que el usuario pueda cancelar un flujo escribiendo un nuevo comando
                 logger.info(f"🤖 Enviando mensaje a OpenAI para procesamiento")
                 ai_response = await self.openai_service.process_message(
                     message,
@@ -184,15 +207,74 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 )
                 logger.info(f"🤖 Respuesta de OpenAI: tipo={ai_response.get('tipo')}, accion={ai_response.get('accion')}")
             
+            # Comandos que inician flujos conversacionales (deben cancelar cualquier flujo anterior)
+            comandos_que_inician_flujo = ['crear_usuario', 'modificar_rol']
+            new_action = ai_response.get('accion', '')
+            
+            # Si el usuario intenta iniciar un nuevo flujo, cancelar el flujo anterior
+            if new_action in comandos_que_inician_flujo and has_active_flow:
+                logger.info(f"🔄 Comando que inicia flujo detectado ({new_action}), cancelando flujo anterior")
+                if flow_key in self.command_processor.conversation_flows:
+                    del self.command_processor.conversation_flows[flow_key]
+                    logger.info(f"✅ Flujo anterior cancelado: {flow_key}")
+            
+            # Si hay un flujo activo PERO el usuario escribió un comando válido diferente, cancelar el flujo
+            if has_active_flow and ai_response.get('tipo') == 'comando' and flow_type != "solicitar_hps":
+                flow_type = self.command_processor.conversation_flows.get(flow_key, {}).get('type', '')
+                
+                # Lista de comandos que NO son parte de ningún flujo conversacional
+                comandos_que_cancelan_flujo = [
+                    'consultar_todas_hps', 'consultar_estado_hps', 'consultar_hps_equipo',
+                    'listar_usuarios', 'listar_equipos', 'comandos_disponibles',
+                    'solicitar_hps', 'trasladar_hps', 'renovar_hps',
+                    'aprobar_hps', 'rechazar_hps', 'crear_equipo',
+                    'asignar_usuario_equipo', 'dar_alta_jefe_equipo'
+                ]
+                
+                # Si el nuevo comando es diferente del flujo activo, cancelar el flujo
+                if new_action in comandos_que_cancelan_flujo or (new_action != 'continuar_flujo' and new_action != flow_type and new_action not in comandos_que_inician_flujo):
+                    logger.info(f"🔄 Nuevo comando detectado ({new_action}) mientras hay flujo activo ({flow_type}), cancelando flujo")
+                    if flow_key in self.command_processor.conversation_flows:
+                        del self.command_processor.conversation_flows[flow_key]
+                        logger.info(f"✅ Flujo cancelado: {flow_key}")
+                elif new_action == flow_type or new_action == 'continuar_flujo':
+                    # Es el mismo comando o continuación del flujo, procesar como flujo
+                    logger.info(f"🔄 Continuando con flujo activo: {flow_type}")
+                    ai_response = {
+                        "tipo": "comando",
+                        "accion": "continuar_flujo",
+                        "parametros": {},
+                        "user_message": message,
+                        "requiere_api": True
+                    }
+            elif has_active_flow and flow_type != "solicitar_hps":
+                # Hay flujo activo pero no es un comando, continuar con el flujo
+                logger.info(f"🔄 Flujo activo detectado, procesando como continuación del flujo")
+                ai_response = {
+                    "tipo": "comando",
+                    "accion": "continuar_flujo",
+                    "parametros": {},
+                    "user_message": message,
+                    "requiere_api": True
+                }
+            
             # Agregar user_message al contexto para el command processor
             ai_response['user_message'] = message
+            
+            # Manejar caso especial: OpenAI puede devolver tipo="comandos_disponibles" directamente
+            if ai_response.get('tipo') == 'comandos_disponibles' and not ai_response.get('accion'):
+                ai_response['tipo'] = 'comando'
+                ai_response['accion'] = 'comandos_disponibles'
+                logger.info(f"🔄 Corrigiendo respuesta OpenAI: tipo=comandos_disponibles -> tipo=comando, accion=comandos_disponibles")
             
             # Si es un comando, ejecutarlo
             if ai_response.get('tipo') == 'comando':
                 accion = ai_response.get('accion', '')
                 # CRÍTICO: Algunos comandos siempre deben ejecutarse para iniciar flujos conversacionales
                 # incluso si requiere_api es false (como crear_usuario o modificar_rol sin parámetros)
-                comandos_que_siempre_ejecutar = ['crear_usuario', 'modificar_rol']
+                # También comandos que muestran información (como comandos_disponibles)
+                # Y comandos de solicitud HPS que necesitan iniciar flujos conversacionales
+                comandos_que_siempre_ejecutar = ['crear_usuario', 'modificar_rol', 'comandos_disponibles', 'ayuda_hps', 'solicitar_hps', 'trasladar_hps', 'renovar_hps', 'consultar_hps_por_estado', 'consultar_todas_hps', 'consultar_estado_hps', 'consultar_hps_equipo', 'listar_usuarios', 'listar_equipos']
                 
                 if ai_response.get('requiere_api', False) or accion in comandos_que_siempre_ejecutar:
                     logger.info(f"🔧 Ejecutando comando: {accion} (requiere_api={ai_response.get('requiere_api', False)})")
@@ -382,7 +464,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         """Cargar historial de conversación"""
         try:
             if not self.conversation_id:
-                # Si no hay conversation_id, enviar bienvenida
+                # Si no hay conversation_id, enviar bienvenida (primera vez)
                 await self._send_welcome_message()
                 return
             
@@ -393,37 +475,42 @@ class ChatConsumer(AsyncWebsocketConsumer):
             
             if messages and len(messages) > 0:
                 logger.info(f"📜 Cargando {len(messages)} mensajes del historial")
+                last_message_has_suggestions = False
+                
                 for msg in messages:
+                    # Incluir sugerencias si existen en el mensaje
+                    suggestions = msg.get('suggestions', [])
+                    if suggestions and len(suggestions) > 0:
+                        last_message_has_suggestions = True
+                    
                     await self.send(text_data=json.dumps({
                         'type': msg.get('type', 'assistant'),
                         'message': msg.get('message', ''),
                         'timestamp': msg.get('timestamp', datetime.now().isoformat()),
-                        'conversation_id': self.conversation_id
+                        'conversation_id': self.conversation_id,
+                        'suggestions': suggestions if suggestions else []
                     }))
-                # Después de cargar historial, verificar si el último mensaje es reciente
-                # Si el último mensaje es muy antiguo (más de 5 minutos), enviar bienvenida
-                if messages:
-                    last_message = messages[-1]
-                    last_timestamp = last_message.get('timestamp')
-                    if last_timestamp:
-                        try:
-                            from datetime import timezone
-                            last_msg_time = datetime.fromisoformat(last_timestamp.replace('Z', '+00:00'))
-                            time_diff = (datetime.now(timezone.utc) - last_msg_time.replace(tzinfo=timezone.utc)).total_seconds()
-                            # Si el último mensaje es de hace más de 5 minutos, enviar bienvenida
-                            if time_diff > 300:  # 5 minutos
-                                logger.info(f"📜 Último mensaje es antiguo ({int(time_diff)}s), enviando bienvenida")
-                                await self._send_welcome_message()
-                        except Exception as time_error:
-                            logger.warning(f"⚠️ Error calculando tiempo del último mensaje: {time_error}")
-                            # Si hay error, enviar bienvenida por seguridad
-                            await self._send_welcome_message()
+                
+                # Si el último mensaje no tiene sugerencias, enviar un mensaje con sugerencias actuales
+                if not last_message_has_suggestions:
+                    user_role = self.user_context.get('role', 'member')
+                    suggestions = RoleConfig.get_suggestions_by_role(user_role)
+                    if suggestions and len(suggestions) > 0:
+                        logger.info(f"📋 Último mensaje sin sugerencias, enviando sugerencias actuales para rol {user_role}")
+                        await self.send(text_data=json.dumps({
+                            'type': 'system',
+                            'message': '',
+                            'timestamp': datetime.now().isoformat(),
+                            'conversation_id': self.conversation_id,
+                            'suggestions': suggestions
+                        }))
+                # No enviar bienvenida si hay historial - solo se muestra en primera vez o después de reset
             else:
-                # Si no hay historial, enviar bienvenida
+                # Si no hay historial, enviar bienvenida (primera vez o después de reset)
                 logger.info("📜 No hay mensajes en el historial, enviando bienvenida")
                 await self._send_welcome_message()
                 
         except Exception as e:
             logger.error(f"❌ Error cargando historial: {e}")
-            # Enviar bienvenida si hay error
+            # Enviar bienvenida si hay error (por seguridad)
             await self._send_welcome_message()

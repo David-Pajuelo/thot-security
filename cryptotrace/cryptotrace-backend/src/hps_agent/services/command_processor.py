@@ -70,6 +70,35 @@ class CommandProcessor:
                         "mensaje": "📧 Necesito el email del usuario para crearlo.\n\n**Por favor, proporciona el email:**\n• Ejemplo: usuario@empresa.com"
                     }
             
+            # Si hay un flujo activo de solicitar_hps
+            elif flow_type == "solicitar_hps":
+                logger.info(f"🔄 Procesando flujo solicitar_hps, user_message={user_message}")
+                email = None
+                
+                # Intentar extraer cualquier texto que parezca email (aunque no sea válido)
+                import re
+                # Patrón más flexible: cualquier cosa@cualquier cosa
+                email_like_pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+'
+                email_match = re.search(email_like_pattern, user_message)
+                if email_match:
+                    email = email_match.group(0).strip()
+                    logger.info(f"✅ Email-like detectado en flujo: {email}")
+                
+                if email:
+                    # Continuar con el flujo de solicitar HPS (no verificar si el usuario existe)
+                    is_transfer = flow.get("is_transfer", False)
+                    parametros = {"email": email, "user_message": user_message}
+                    del self.conversation_flows[flow_key]  # Limpiar flujo
+                    return await self._solicitar_hps(parametros, user_context, is_transfer=is_transfer)
+                else:
+                    # El mensaje no contiene algo que parezca un email
+                    is_transfer = flow.get("is_transfer", False)
+                    tipo_solicitud = "traspaso de HPS" if is_transfer else "nueva HPS"
+                    return {
+                        "tipo": "conversacion",
+                        "mensaje": f"📧 Necesito un email para solicitar {tipo_solicitud}.\n\n**Por favor, proporciona el email:**\n• Ejemplo: usuario@empresa.com"
+                    }
+            
             # Si hay un flujo activo de modificar_rol
             elif flow_type == "modificar_rol":
                 email = flow.get("email")
@@ -124,6 +153,7 @@ class CommandProcessor:
         
         # Detectar si el mensaje es solo un email (solo si NO hay flujo activo)
         # IMPORTANTE: Esta verificación debe ir DESPUÉS de verificar flujos activos
+        # Solo interpretar como consulta de estado HPS si es un email válido Y no hay flujo activo
         if user_message and flow_key not in self.conversation_flows:
             email = is_email_only(user_message)
             if email:
@@ -157,6 +187,30 @@ class CommandProcessor:
                 return await self._consultar_hps_equipo(user_context)
             elif accion == "consultar_todas_hps":
                 return await self._consultar_todas_hps(user_context)
+            elif accion == "consultar_hps_pendientes":
+                return await self._consultar_hps_por_estado(user_context, "pending")
+            elif accion == "consultar_hps_enviadas":
+                return await self._consultar_hps_por_estado(user_context, "submitted")
+            elif accion == "consultar_hps_rechazadas":
+                return await self._consultar_hps_por_estado(user_context, "rejected")
+            elif accion == "consultar_hps_por_estado":
+                # Comando genérico para consultar HPS por cualquier estado
+                estado = parametros.get("estado") or parametros.get("status")
+                if estado:
+                    # Mapear estado en español a estado en inglés
+                    estado_mapeado = self._mapear_estado_hps(estado)
+                    if estado_mapeado:
+                        return await self._consultar_hps_por_estado(user_context, estado_mapeado)
+                    else:
+                        return {
+                            "tipo": "conversacion",
+                            "mensaje": f"❌ Estado '{estado}' no reconocido. Estados válidos: pendientes, enviadas, rechazadas, aprobadas, expiradas, esperando dps."
+                        }
+                else:
+                    return {
+                        "tipo": "conversacion",
+                        "mensaje": "📋 Para consultar HPS por estado, necesito que especifiques el estado.\n\n**Estados disponibles:**\n• Pendientes\n• Enviadas\n• Rechazadas\n• Aprobadas\n• Expiradas\n• Esperando DPS\n\n**Ejemplo:** 'solicitudes aprobadas' o 'hps pendientes'"
+                    }
             elif accion == "listar_usuarios":
                 return await self._listar_usuarios(user_context)
             elif accion == "listar_equipos":
@@ -417,6 +471,132 @@ class CommandProcessor:
             logger.error(traceback.format_exc())
             return None
     
+    def _mapear_estado_hps(self, estado: str) -> Optional[str]:
+        """Mapear estado en español a estado en inglés de la BD"""
+        estado_lower = estado.lower().strip()
+        
+        # Mapeo de estados en español a estados en inglés
+        mapeo_estados = {
+            "pendiente": "pending",
+            "pendientes": "pending",
+            "enviada": "submitted",
+            "enviadas": "submitted",
+            "rechazada": "rejected",
+            "rechazadas": "rejected",
+            "denegada": "rejected",
+            "denegadas": "rejected",
+            "aprobada": "approved",
+            "aprobadas": "approved",
+            "expirada": "expired",
+            "expiradas": "expired",
+            "esperando dps": "waiting_dps",
+            "esperando_dps": "waiting_dps",
+            "waiting_dps": "waiting_dps",
+            # También aceptar estados en inglés directamente
+            "pending": "pending",
+            "submitted": "submitted",
+            "rejected": "rejected",
+            "approved": "approved",
+            "expired": "expired"
+        }
+        
+        return mapeo_estados.get(estado_lower)
+    
+    async def _consultar_hps_por_estado(self, user_context: Dict[str, Any], status: str) -> Dict[str, Any]:
+        """Consultar HPS por estado específico (jefe_seguridad, jefe_seguridad_suplente)"""
+        user_role = user_context.get("role", "").lower()
+        user_id = user_context.get("id")
+        
+        # Obtener rol del perfil HPS si está disponible
+        hps_role = await self._get_user_hps_role(user_id)
+        if hps_role:
+            user_role = hps_role.lower()
+        
+        # Permitir acceso a admin, jefe_seguridad y jefe_seguridad_suplente
+        allowed_roles = ["admin", "jefe_seguridad", "jefe_seguridad_suplente", "security_chief"]
+        
+        if user_role not in allowed_roles:
+            return {
+                "tipo": "conversacion",
+                "mensaje": "❌ Solo los administradores y jefes de seguridad pueden consultar HPS por estado."
+            }
+        
+        # Mapeo de estados a nombres en español
+        estado_nombres = {
+            "pending": "Pendientes",
+            "submitted": "Enviadas",
+            "rejected": "Rechazadas",
+            "approved": "Aprobadas",
+            "expired": "Expiradas",
+            "waiting_dps": "Esperando DPS"
+        }
+        
+        estado_nombre = estado_nombres.get(status, status)
+        
+        try:
+            hps_list = await self._get_hps_by_status(status)
+            
+            if not hps_list or len(hps_list) == 0:
+                return {
+                    "tipo": "conversacion",
+                    "mensaje": f"ℹ️ No hay solicitudes HPS con estado '{estado_nombre}'."
+                }
+            
+            mensaje = f"📋 **Solicitudes HPS {estado_nombre}:**\n\n"
+            mensaje += f"**Total:** {len(hps_list)}\n\n"
+            
+            # Mostrar hasta 20 solicitudes
+            for i, hps in enumerate(hps_list[:20], 1):
+                user_email = hps.get('user_email', 'N/A')
+                created_at = hps.get('created_at', 'N/A')
+                if created_at and created_at != 'N/A':
+                    try:
+                        from datetime import datetime
+                        if isinstance(created_at, str):
+                            dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            created_at = dt.strftime('%d/%m/%Y %H:%M')
+                    except:
+                        pass
+                
+                mensaje += f"{i}. **{user_email}** - Creada: {created_at}\n"
+            
+            if len(hps_list) > 20:
+                mensaje += f"\n... y {len(hps_list) - 20} más."
+            
+            return {
+                "tipo": "exito",
+                "mensaje": mensaje,
+                "data": {"status": status, "count": len(hps_list), "hps": hps_list[:20]}
+            }
+            
+        except Exception as e:
+            logger.error(f"Error consultando HPS por estado {status}: {e}")
+            return {
+                "tipo": "error",
+                "mensaje": f"❌ Hubo un error consultando las HPS {estado_nombre}."
+            }
+    
+    @database_sync_to_async
+    def _get_hps_by_status(self, status: str):
+        """Obtener lista de HPS por estado"""
+        try:
+            hps_requests = HpsRequest.objects.filter(status=status).order_by('-created_at')
+            
+            result = []
+            for hps in hps_requests:
+                result.append({
+                    'id': str(hps.id),
+                    'user_email': hps.user.email if hps.user else 'N/A',
+                    'status': hps.status,
+                    'created_at': hps.created_at.isoformat() if hps.created_at else None,
+                    'updated_at': hps.updated_at.isoformat() if hps.updated_at else None,
+                })
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error obteniendo HPS por estado {status}: {e}")
+            return []
+    
     @database_sync_to_async
     def _get_all_hps_stats(self):
         """Obtener estadísticas de todas las HPS"""
@@ -621,15 +801,32 @@ class CommandProcessor:
                 }
         
         if not email:
+            # Iniciar flujo conversacional para solicitar email
+            user_id = user_context.get("id")
+            flow_key = f"{user_id}_flow"
+            
+            # Cancelar cualquier flujo anterior antes de iniciar uno nuevo
+            if flow_key in self.conversation_flows:
+                logger.info(f"🔄 Cancelando flujo anterior antes de iniciar solicitar_hps: {self.conversation_flows[flow_key].get('type')}")
+                del self.conversation_flows[flow_key]
+            
+            # Iniciar flujo conversacional
+            self.conversation_flows[flow_key] = {
+                "type": "solicitar_hps",
+                "is_transfer": is_transfer,
+                "started_at": datetime.now().isoformat()
+            }
+            logger.info(f"🔄 Flujo solicitar_hps iniciado para usuario {user_id}, flow_key={flow_key}, is_transfer={is_transfer}")
+            
             if is_transfer:
                 return {
                     "tipo": "conversacion",
-                    "mensaje": "📧 Para solicitar un **traspaso de HPS**, necesito el email del usuario.\n\n**Por favor, proporciona el email:**\n• Ejemplo: 'envío traspaso hps a usuario@empresa.com'\n• O: 'trasladar hps de usuario@empresa.com'\n• O simplemente escribe: 'usuario@empresa.com'"
+                    "mensaje": "📧 Para solicitar un **traspaso de HPS**, necesito el email del usuario.\n\n**Por favor, proporciona el email:**\n• Ejemplo: usuario@empresa.com"
                 }
             else:
                 return {
                     "tipo": "conversacion",
-                    "mensaje": "📧 Para solicitar una **nueva HPS**, necesito el email del usuario.\n\n**Por favor, proporciona el email:**\n• Ejemplo: 'envío hps a usuario@empresa.com'\n• O: 'solicitar hps para usuario@empresa.com'\n• O simplemente escribe: 'usuario@empresa.com'"
+                    "mensaje": "📧 Para solicitar una **nueva HPS**, necesito el email del usuario.\n\n**Por favor, proporciona el email:**\n• Ejemplo: usuario@empresa.com"
                 }
         
         try:
@@ -664,10 +861,7 @@ class CommandProcessor:
             # Generar URL del formulario
             url = f"{self.frontend_url}/hps-form?token={token.token}&email={email}&type={form_type}"
             
-            # Verificar si el usuario existe
-            user_exists = await self._check_user_exists(email)
-            
-            # Enviar email con formulario
+            # Enviar email con formulario (no se verifica si el usuario existe)
             user_name = email.split("@")[0].replace(".", " ").title()
             email_sent = await self._send_hps_form_email(email, url, user_name)
             
@@ -676,18 +870,15 @@ class CommandProcessor:
             
             # Mensaje según el tipo de solicitud
             if is_transfer:
-                message = f"✅ Se ha enviado la **solicitud de traspaso HPS** a {email}.\n\n📧 El correo contiene el formulario de traspaso que el usuario debe completar.\n\nEl enlace es válido por 72 horas."
+                message = f"✅ Se ha enviado la **solicitud de traspaso HPS** a {email}.\n\n📧 El correo contiene el formulario de traspaso que debe completar.\n\nEl enlace es válido por 72 horas."
             elif is_renewal:
-                message = f"✅ Se ha enviado la **solicitud de renovación HPS** a {email}.\n\n📧 El correo contiene el formulario de renovación que el usuario debe completar.\n\nEl enlace es válido por 72 horas."
+                message = f"✅ Se ha enviado la **solicitud de renovación HPS** a {email}.\n\n📧 El correo contiene el formulario de renovación que debe completar.\n\nEl enlace es válido por 72 horas."
             else:
                 # Solicitud de nueva HPS
                 if user_role in ["team_lead", "team_leader"]:
-                    message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que el usuario debe completar.\n\n📋 **El usuario se registrará automáticamente en tu equipo** cuando complete el formulario.\n\nEl enlace es válido por 72 horas."
+                    message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\n📋 **Si el usuario no existe, se registrará automáticamente en tu equipo** cuando complete el formulario.\n\nEl enlace es válido por 72 horas."
                 else:
-                    message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que el usuario debe completar.\n\nEl enlace es válido por 72 horas."
-            
-            if not user_exists:
-                message += "\n\n🔑 Si el usuario no existe, se creará automáticamente y se le enviarán las credenciales de acceso."
+                    message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\nEl enlace es válido por 72 horas."
             
             return {
                 "tipo": "exito",
@@ -698,7 +889,6 @@ class CommandProcessor:
                     "email": email,
                     "expires_at": token.expires_at.isoformat() if token.expires_at else None,
                     "email_sent": email_sent,
-                    "user_exists": user_exists,
                     "form_type": form_type
                 }
             }
@@ -796,26 +986,22 @@ class CommandProcessor:
 
 ¿Qué comando quieres ejecutar? 🤔"""
         elif user_role in ["jefe_seguridad", "jefe_seguridad_suplente"]:
-            message = """🔹 **Comandos disponibles (JEFE DE SEGURIDAD):**
+            message = """Como Jefe de Seguridad, puedes ejecutar los siguientes comandos: 
 
-**📋 Consultas:**
-• `estado hps de [email]` - Consultar estado de HPS
-• `todas las hps` - Estadísticas globales
-• `listar equipos` - Ver todos los equipos
+🔹 **GESTIÓN DE HPS - SOLICITUDES:**
+1. Solicitar nueva HPS.
+2. Solicitar traspaso HPS.
+3. Solicitar renovación HPS.
 
-**👥 Gestión de Usuarios:**
-• `modificar rol de [email] a [rol]` - Cambiar rol de usuario
+🔹 **GESTIÓN DE HPS - CONSULTAS:**
+4. Ver estadísticas globales de HPS.
+5. Consultar HPS por cualquier estado.
+6. Consultar estado de la HPS de un email específico.
 
-**📧 Solicitudes HPS:**
-• `envío hps a [email]` o `solicitar hps para [email]` - Solicitar **nueva HPS** (envía formulario)
-• `envío traspaso hps a [email]` o `trasladar hps de [email]` - Solicitar **traspaso HPS** (envía formulario)
-• `renovar hps de [email]` - Solicitar **renovación HPS** (envía formulario)
+🔹 **CONSULTAS:**
+7. Ver todos los equipos del sistema. 
 
-**✅ Gestión de HPS:**
-• `aprobar hps de [email]` - Aprobar solicitud HPS
-• `rechazar hps de [email]` - Rechazar solicitud HPS
-
-¿Qué comando quieres ejecutar? 🤔"""
+Si necesitas más información sobre alguna de estas acciones, ¡no dudes en preguntar!"""
         elif user_role in ["team_lead", "team_leader"]:
             message = """🔹 **Comandos disponibles (JEFE DE EQUIPO):**
 
@@ -881,9 +1067,14 @@ class CommandProcessor:
             email = is_email_only(user_message)
             logger.info(f"🔍 Intentando extraer email de user_message: email={email}")
             if not email:
-                # Iniciar flujo conversacional
+                # Cancelar cualquier flujo anterior antes de iniciar uno nuevo
                 user_id = user_context.get("id")
                 flow_key = f"{user_id}_flow"
+                if flow_key in self.conversation_flows:
+                    logger.info(f"🔄 Cancelando flujo anterior antes de iniciar crear_usuario: {self.conversation_flows[flow_key].get('type')}")
+                    del self.conversation_flows[flow_key]
+                
+                # Iniciar flujo conversacional
                 self.conversation_flows[flow_key] = {
                     "type": "crear_usuario",
                     "started_at": datetime.now().isoformat()
@@ -1217,11 +1408,11 @@ class CommandProcessor:
         new_role_name = parametros.get("rol") or parametros.get("role")
         user_message = parametros.get("user_message", "")
         
-        # Verificar permisos
-        if user_role not in ["admin", "jefe_seguridad"]:
+        # Verificar permisos (solo admin puede modificar roles)
+        if user_role not in ["admin"]:
             return {
                 "tipo": "error",
-                "mensaje": "❌ Solo administradores y jefes de seguridad pueden modificar roles."
+                "mensaje": "❌ Solo los administradores pueden modificar roles."
             }
         
         # IMPORTANTE: Si el email viene del contexto del usuario actual, ignorarlo
@@ -1235,9 +1426,14 @@ class CommandProcessor:
             # Intentar extraer email del mensaje
             email = is_email_only(user_message)
             if not email:
-                # Iniciar flujo conversacional
+                # Cancelar cualquier flujo anterior antes de iniciar uno nuevo
                 user_id = user_context.get("id")
                 flow_key = f"{user_id}_flow"
+                if flow_key in self.conversation_flows:
+                    logger.info(f"🔄 Cancelando flujo anterior antes de iniciar modificar_rol: {self.conversation_flows[flow_key].get('type')}")
+                    del self.conversation_flows[flow_key]
+                
+                # Iniciar flujo conversacional
                 self.conversation_flows[flow_key] = {
                     "type": "modificar_rol",
                     "started_at": datetime.now().isoformat()
@@ -1341,8 +1537,8 @@ class CommandProcessor:
         user_role = user_context.get("role", "").lower()
         email = parametros.get("email")
         
-        # Verificar permisos
-        allowed_roles = ["admin", "jefe_seguridad", "jefe_seguridad_suplente", "crypto", "team_lead", "team_leader"]
+        # Verificar permisos (jefe_seguridad no puede aprobar/rechazar por chat)
+        allowed_roles = ["admin", "crypto", "team_lead", "team_leader"]
         if user_role not in allowed_roles:
             return {
                 "tipo": "error",
@@ -1432,8 +1628,8 @@ class CommandProcessor:
         email = parametros.get("email")
         notes = parametros.get("notas") or parametros.get("notes", "")
         
-        # Verificar permisos
-        allowed_roles = ["admin", "jefe_seguridad", "jefe_seguridad_suplente", "crypto", "team_lead", "team_leader"]
+        # Verificar permisos (jefe_seguridad no puede aprobar/rechazar por chat)
+        allowed_roles = ["admin", "crypto", "team_lead", "team_leader"]
         if user_role not in allowed_roles:
             return {
                 "tipo": "error",

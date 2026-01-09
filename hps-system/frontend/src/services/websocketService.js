@@ -10,6 +10,7 @@ class WebSocketService {
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;
     this.isConnecting = false;
+    this.keepAliveInterval = null;
   }
 
   connect(token) {
@@ -56,6 +57,10 @@ class WebSocketService {
           console.log('WebSocket conectado globalmente - ID:', this.ws?.url);
           this.isConnecting = false;
           this.reconnectAttempts = 0;
+          
+          // Iniciar keepalive para mantener la conexión viva
+          this.startKeepAlive();
+          
           resolve();
         };
         
@@ -72,8 +77,16 @@ class WebSocketService {
           console.log('WebSocket cerrado:', event.code, event.reason);
           this.isConnecting = false;
           
-          // Archivar conversación activa si existe
-          this.archiveActiveConversation();
+          // Detener keepalive cuando se cierra la conexión
+          this.stopKeepAlive();
+          
+          // NO archivar conversación automáticamente en desconexiones no intencionales
+          // Solo archivar cuando es un cierre intencional (código 1000) o logout
+          // Esto evita perder el historial cuando el WebSocket se desconecta por timeout o error
+          if (event.code === 1000) {
+            // Cierre intencional (logout, etc.), archivar conversación
+            this.archiveActiveConversation();
+          }
           
           // Reconexión automática solo si no fue cierre intencional
           if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
@@ -133,6 +146,7 @@ class WebSocketService {
   }
 
   disconnect() {
+    this.stopKeepAlive();
     if (this.ws) {
       this.ws.close(1000, 'Desconexión intencional');
       this.ws = null;
@@ -212,8 +226,46 @@ class WebSocketService {
 
   // Método para desconexión intencional (logout)
   async disconnectIntentionally() {
+    this.stopKeepAlive();
     await this.archiveActiveConversation();
     this.disconnect();
+  }
+  
+  // Keepalive para mantener la conexión WebSocket viva
+  startKeepAlive() {
+    this.stopKeepAlive(); // Asegurar que no hay múltiples intervalos
+    
+    // Enviar ping cada 30 segundos para mantener la conexión viva
+    this.keepAliveInterval = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        try {
+          // Enviar un mensaje de ping simple
+          this.ws.send(JSON.stringify({ type: 'ping' }));
+        } catch (error) {
+          console.warn('Error enviando keepalive ping:', error);
+          this.stopKeepAlive();
+        }
+      } else {
+        // WebSocket no está abierto, detener keepalive
+        this.stopKeepAlive();
+      }
+    }, 30000); // 30 segundos
+  }
+  
+  stopKeepAlive() {
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = null;
+    }
+  }
+  
+  disconnect() {
+    this.stopKeepAlive();
+    if (this.ws) {
+      this.ws.close(1000, 'Desconexión intencional');
+      this.ws = null;
+    }
+    this.listeners.clear();
   }
 }
 

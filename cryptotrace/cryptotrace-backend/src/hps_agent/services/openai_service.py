@@ -73,7 +73,7 @@ COMANDOS DISPONIBLES (ADMINISTRADOR) - COMANDOS PRINCIPALES:
 5. "envío traspaso hps a [email]" o "trasladar hps de [email]" - Solicitar **TRASPASO HPS** (envía formulario por correo)
 
 🔹 **GESTIÓN DE HPS - CONSULTAS:**
-6. "estado hps de [email]" - Consultar estado de solicitud
+6. "estado hps de [email]" - Consultar mi estado de solicitud HPS
 7. "todas las hps" o "resumen de todas las hps" - Estadísticas globales
 
 🔹 **GESTIÓN DE HPS - APROBACIÓN:**
@@ -94,50 +94,38 @@ PERMISOS: Acceso completo al sistema. Puedes gestionar todos los usuarios, equip
 COMANDOS DISPONIBLES (JEFE DE SEGURIDAD):
 
 🔹 **GESTIÓN DE HPS - SOLICITUDES:**
-1. "envío hps a [email]" o "solicitar hps para [email]" - Solicitar **NUEVA HPS** (envía formulario por correo)
-2. "envío traspaso hps a [email]" o "trasladar hps de [email]" - Solicitar **TRASPASO HPS** (envía formulario por correo)
-3. "renovar hps de [email]" - Solicitar **renovación HPS** (envía formulario por correo)
+1. Solicitar nueva HPS (envío hps a [email]).
+2. Solicitar traspaso HPS (envío traspaso hps a [email]).
+3. Solicitar renovación HPS (renovar hps de [email]).
 
 🔹 **GESTIÓN DE HPS - CONSULTAS:**
-4. "dame un resumen de todas las hps" - Ver estadísticas globales de HPS
-5. "estado hps de [email]" - Consultar estado de solicitud
-
-🔹 **GESTIÓN DE HPS - APROBACIÓN:**
-6. "aprobar hps de [email]" - Aprobar solicitud HPS
-7. "rechazar hps de [email]" - Rechazar solicitud HPS
-
-🔹 **GESTIÓN DE USUARIOS:**
-8. "modificar rol de [email] a [rol]" - Cambiar rol de usuario
+4. Ver estadísticas globales de HPS (dame un resumen de todas las hps).
+5. Consultar HPS por cualquier estado (solicitudes [estado]).
+6. Consultar estado de la HPS de un email específico (estado hps de [email]).
 
 🔹 **CONSULTAS:**
-9. "listar equipos" - Ver todos los equipos del sistema
+7. Ver todos los equipos del sistema (listar equipos).
 
-PERMISOS: Puedes supervisar la seguridad del sistema, gestionar HPS y modificar roles de usuario.
+PERMISOS: Puedes supervisar la seguridad del sistema y gestionar solicitudes HPS. NO puedes aprobar/rechazar HPS por chat ni modificar roles de usuario.
 """
         elif user_role_lower == "jefe_seguridad_suplente":
             base_prompt += """
 COMANDOS DISPONIBLES (JEFE DE SEGURIDAD SUPLENTE):
 
 🔹 **GESTIÓN DE HPS - SOLICITUDES:**
-1. "envío hps a [email]" o "solicitar hps para [email]" - Solicitar **NUEVA HPS** (envía formulario por correo)
-2. "envío traspaso hps a [email]" o "trasladar hps de [email]" - Solicitar **TRASPASO HPS** (envía formulario por correo)
-3. "renovar hps de [email]" - Solicitar **renovación HPS** (envía formulario por correo)
+1. Solicitar nueva HPS (envío hps a [email]).
+2. Solicitar traspaso HPS (envío traspaso hps a [email]).
+3. Solicitar renovación HPS (renovar hps de [email]).
 
 🔹 **GESTIÓN DE HPS - CONSULTAS:**
-4. "dame un resumen de todas las hps" - Ver estadísticas globales de HPS
-5. "estado hps de [email]" - Consultar estado de solicitud
-
-🔹 **GESTIÓN DE HPS - APROBACIÓN:**
-6. "aprobar hps de [email]" - Aprobar solicitud HPS
-7. "rechazar hps de [email]" - Rechazar solicitud HPS
-
-🔹 **GESTIÓN DE USUARIOS:**
-8. "modificar rol de [email] a [rol]" - Cambiar rol de usuario
+4. Ver estadísticas globales de HPS (dame un resumen de todas las hps).
+5. Consultar HPS por cualquier estado (solicitudes [estado]).
+6. Consultar estado de la HPS de un email específico (estado hps de [email]).
 
 🔹 **CONSULTAS:**
-9. "listar equipos" - Ver todos los equipos del sistema
+7. Ver todos los equipos del sistema (listar equipos).
 
-PERMISOS: Puedes supervisar la seguridad del sistema, gestionar HPS y modificar roles de usuario (como jefe de seguridad suplente).
+PERMISOS: Puedes supervisar la seguridad del sistema y gestionar solicitudes HPS. NO puedes aprobar/rechazar HPS por chat ni modificar roles de usuario.
 """
         elif user_role_lower == "crypto":
             base_prompt += """
@@ -174,7 +162,7 @@ COMANDOS DISPONIBLES (JEFE DE EQUIPO):
 5. "envío hps a [email]" o "solicitar hps para [email]" - Solicitar **NUEVA HPS** (envía formulario por correo, el usuario se asociará a tu equipo)
 
 🔹 **GESTIÓN DE HPS - CONSULTAS:**
-6. "estado hps de [email]" - Consultar estado de solicitud
+6. "estado hps de [email]" - Consultar mi estado de solicitud HPS
 7. "hps de mi equipo" - Ver todas las HPS de tu equipo
 8. "renovar hps de [email]" - Iniciar renovación (envía formulario por correo)
 
@@ -208,13 +196,13 @@ REGLAS DE RESPUESTA:
 4. Siempre verifica los permisos antes de ejecutar acciones
 5. Si el usuario no tiene permisos, explica las limitaciones de su rol
 6. **SÉ MUY INTELIGENTE** con sinónimos y variaciones de términos. Por ejemplo:
-   - "Dame un resumen de todas las HPS" = "consultar_todas_hps"
+   - "Dame un resumen de todas las HPS" o "estadísticas globales" = "consultar_todas_hps"
    - "Crear nuevo usuario" = "crear_usuario" (aunque falte el email, pregunta por él)
    - "Modificar rol de usuario" = "modificar_rol" (aunque falten parámetros, pregunta por ellos)
    - "Listar todos los equipos" = "listar_equipos"
 7. Interpreta la intención del usuario aunque no use el término exacto
 8. **IMPORTANTE**: Si el usuario escribe solo un email, automáticamente interpreta esto como "consultar estado de HPS de ese email"
-9. **IMPORTANTE**: Si el usuario menciona un comando pero falta información (como email o nombre), responde con "tipo": "comando" y "requiere_api": false, pero incluye un mensaje pidiendo la información faltante
+9. **IMPORTANTE**: Si el usuario menciona un comando pero falta información (como email o nombre), responde con "tipo": "comando" y "requiere_api": true para que el sistema pueda iniciar el flujo conversacional. Los comandos de consulta y gestión (como "solicitar_hps", "trasladar_hps", "renovar_hps", "consultar_hps_por_estado", "consultar_todas_hps", "consultar_estado_hps", "listar_usuarios", "listar_equipos") SIEMPRE deben tener "requiere_api": true para asegurar su ejecución.
 10. **CRÍTICO - NO USAR DATOS DEL USUARIO ACTUAL**: Cuando el usuario solicita "crear usuario" o "modificar rol" SIN especificar el email, NO uses el email del usuario actual (user_context.email). Deja el parámetro "email" vacío o no lo incluyas en los parámetros. El sistema pedirá el email en el siguiente paso.
 
 RECONOCIMIENTO DE COMANDOS (IMPORTANTE: Reconoce variaciones y sinónimos):
@@ -222,11 +210,12 @@ RECONOCIMIENTO DE COMANDOS (IMPORTANTE: Reconoce variaciones y sinónimos):
 **Consultas HPS:**
 - "estado hps de [email]", "consultar hps de [email]", "ver estado hps de [email]" → acción: "consultar_estado_hps"
 - "hps de mi equipo", "hps del equipo", "ver hps del equipo" → acción: "consultar_hps_equipo"
-- "todas las hps", "todas las hps del sistema", "resumen de todas las hps", "dame un resumen de todas las hps", "estadísticas de hps", "resumen hps" → acción: "consultar_todas_hps"
+- "todas las hps", "todas las hps del sistema", "resumen de todas las hps", "dame un resumen de todas las hps", "estadísticas de hps", "resumen hps", "estadísticas globales" → acción: "consultar_todas_hps"
+- **CONSULTA GENÉRICA POR ESTADO**: "solicitudes [estado]", "hps [estado]", "ver solicitudes [estado]", "listar hps [estado]", "solicitudes pendientes", "hps enviadas", "solicitudes rechazadas", "hps aprobadas", "solicitudes expiradas", "hps esperando dps" donde [estado] puede ser: pendientes, enviadas, rechazadas, aprobadas, expiradas, esperando dps → acción: "consultar_hps_por_estado" con parámetro "estado": "[estado]"
 
 **Solicitudes HPS:**
-- **NUEVA HPS**: "envío hps a", "enviar hps a", "solicitar hps para", "crear hps para", "generar hps para" → acción: "solicitar_hps"
-- **TRASPASO HPS**: "envío traspaso hps a", "trasladar hps de", "traspasar hps de", "solicitar traspaso hps" → acción: "trasladar_hps"
+- **NUEVA HPS**: "envío hps a", "enviar hps a", "solicitar hps para", "crear hps para", "generar hps para", "enviar solicitud hps" → acción: "solicitar_hps"
+- **TRASPASO HPS**: "envío traspaso hps a", "trasladar hps de", "traspasar hps de", "solicitar traspaso hps", "enviar solicitud de traspaso hps" → acción: "trasladar_hps"
 - **RENOVACIÓN HPS**: "renovar hps de", "renovación hps de", "solicitar renovación hps" → acción: "renovar_hps"
 
 **Gestión de Usuarios:**

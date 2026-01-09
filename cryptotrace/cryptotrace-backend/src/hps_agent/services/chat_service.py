@@ -70,12 +70,19 @@ class ChatService:
         """Registrar mensaje del usuario"""
         try:
             conversation = ChatConversation.objects.get(id=conversation_id)
+            
+            # Serializar metadata a JSON string si es un diccionario
+            metadata_str = ''
+            if metadata:
+                import json
+                metadata_str = json.dumps(metadata)
+            
             ChatMessage.objects.create(
                 conversation=conversation,
                 message_type='user',
                 content=message,
                 tokens_used=tokens_used,
-                message_metadata=metadata or {}
+                message_metadata=metadata_str
             )
             # Actualizar contador de mensajes
             conversation.total_messages = conversation.messages.count()
@@ -102,6 +109,12 @@ class ChatService:
             conversation = ChatConversation.objects.get(id=conversation_id)
             # Preparar datos para crear el mensaje
             # error_message debe ser cadena vacía si es None (el modelo no acepta null)
+            # Serializar metadata a JSON string si es un diccionario
+            metadata_str = ''
+            if metadata:
+                import json
+                metadata_str = json.dumps(metadata)
+            
             message_data = {
                 'conversation': conversation,
                 'message_type': 'assistant',
@@ -110,7 +123,7 @@ class ChatService:
                 'response_time_ms': response_time_ms,
                 'is_error': is_error,
                 'error_message': error_message or '',  # Cadena vacía si es None
-                'message_metadata': metadata or {}
+                'message_metadata': metadata_str
             }
             
             ChatMessage.objects.create(**message_data)
@@ -157,16 +170,32 @@ class ChatService:
                 conversation=conversation
             ).order_by('created_at')[:limit]
             
-            return [
-                {
+            result = []
+            import json
+            for msg in messages:
+                # Parsear metadata si es un string JSON
+                metadata = {}
+                if msg.message_metadata:
+                    try:
+                        if isinstance(msg.message_metadata, str):
+                            metadata = json.loads(msg.message_metadata) if msg.message_metadata.strip() else {}
+                        elif isinstance(msg.message_metadata, dict):
+                            metadata = msg.message_metadata
+                    except (json.JSONDecodeError, TypeError):
+                        metadata = {}
+                
+                # Extraer sugerencias del metadata si existen
+                suggestions = metadata.get('suggestions', [])
+                
+                result.append({
                     'type': msg.message_type,
                     'message': msg.content,
                     'timestamp': msg.created_at.isoformat(),
                     'tokens_used': msg.tokens_used,
-                    'metadata': msg.message_metadata
-                }
-                for msg in messages
-            ]
+                    'metadata': metadata,
+                    'suggestions': suggestions if suggestions else []
+                })
+            return result
         except Exception as e:
             logger.error(f"Error obteniendo mensajes: {e}")
             return []
