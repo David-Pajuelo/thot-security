@@ -1368,16 +1368,15 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             print("❌ [BACKEND] ERROR: No hay artículos")
             return Response({"error": "No se proporcionaron artículos"}, status=400)
 
-        # 🔹 Eliminar registros temporales no procesados existentes para este albarán y usuario
-        # Esto evita duplicaciones si el usuario sale y vuelve a procesar el mismo albarán
+        # 🔹 Eliminar TODOS los registros temporales no procesados del usuario
+        # Esto evita que se acumulen registros "colgados" de procesamientos anteriores no completados
         registros_existentes = LineaTemporalProducto.objects.filter(
             usuario=request.user,
-            numero_albaran=numero_albaran,
             procesado=False
         )
         count_existentes = registros_existentes.count()
         if count_existentes > 0:
-            print(f"🧹 [BACKEND] Eliminando {count_existentes} registros temporales no procesados existentes para este albarán")
+            print(f"🧹 [BACKEND] Eliminando {count_existentes} registros temporales no procesados del usuario antes de crear nuevos")
             registros_existentes.delete()
 
         # Crear registros temporales
@@ -1585,9 +1584,14 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 numero_serie_inicio = datos_adic.get('numero_serie_inicio', '').strip() if datos_adic.get('numero_serie_inicio') else ''
                 numero_serie_fin = datos_adic.get('numero_serie_fin', '').strip() if datos_adic.get('numero_serie_fin') else ''
                 
-                # Si hay inicio Y fin, crear rango "inicio - fin"
+                # Si hay inicio Y fin
                 if numero_serie_inicio and numero_serie_fin:
-                    rangos_serie.append(f"{numero_serie_inicio} - {numero_serie_fin}")
+                    # Si son iguales, mostrar solo uno (una sola unidad)
+                    if numero_serie_inicio == numero_serie_fin:
+                        rangos_serie.append(numero_serie_inicio)
+                    else:
+                        # Si son diferentes, mostrar rango "inicio - fin"
+                        rangos_serie.append(f"{numero_serie_inicio} - {numero_serie_fin}")
                 elif numero_serie_inicio:
                     rangos_serie.append(numero_serie_inicio)
                 elif numero_serie_fin:
