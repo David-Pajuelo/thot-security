@@ -1717,16 +1717,27 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
         print("📢 [BACKEND] Payload recibido en procesar:", json.dumps(request.data, indent=2, default=str))
         
         from django.db import transaction
-        productos_temporales = self.get_queryset().filter(procesado=False, usuario=request.user)
-        print(f"📦 [BACKEND] Productos temporales encontrados: {productos_temporales.count()}")
+        # Obtener todos los productos temporales no procesados del usuario
+        productos_temporales_base = self.get_queryset().filter(procesado=False, usuario=request.user)
+        print(f"📦 [BACKEND] Productos temporales no procesados encontrados: {productos_temporales_base.count()}")
 
-        if not productos_temporales.exists():
+        if not productos_temporales_base.exists():
             print("❌ [BACKEND] ERROR: No hay productos temporales")
             return Response({"detail": "No hay productos temporales para procesar."}, status=400)
 
         # Extraer campos generales del primer producto temporal (todos comparten cabecera, empresas, etc.)
-        p0 = productos_temporales.first()
-        print(f"📋 [BACKEND] Primer producto temporal: ID={p0.id}")
+        p0 = productos_temporales_base.first()
+        print(f"📋 [BACKEND] Primer producto temporal: ID={p0.id}, numero_albaran={p0.numero_albaran}")
+        
+        # 🔹 FILTRAR POR numero_albaran: Solo procesar productos del mismo documento
+        # Esto evita mezclar productos de diferentes documentos
+        numero_albaran_documento = p0.numero_albaran
+        productos_temporales = productos_temporales_base.filter(numero_albaran=numero_albaran_documento)
+        print(f"📦 [BACKEND] Productos temporales del documento {numero_albaran_documento}: {productos_temporales.count()}")
+        
+        if not productos_temporales.exists():
+            print("❌ [BACKEND] ERROR: No hay productos temporales para este documento")
+            return Response({"detail": "No hay productos temporales para procesar en este documento."}, status=400)
         
         # Obtener datos desde el campo JSON datos_adicionales
         datos_adicionales = getattr(p0, 'datos_adicionales', {}) or {}
@@ -1932,6 +1943,17 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 productos_temporales.update(procesado=True)
                 print("✅ [BACKEND] Productos temporales marcados como procesados")
                 
+                # 🔹 LIMPIAR registros no procesados restantes del usuario
+                # Esto elimina cualquier registro "huérfano" que pueda quedar de procesamientos anteriores
+                registros_restantes = LineaTemporalProducto.objects.filter(
+                    usuario=request.user,
+                    procesado=False
+                )
+                count_restantes = registros_restantes.count()
+                if count_restantes > 0:
+                    print(f"🧹 [BACKEND] Eliminando {count_restantes} registros temporales no procesados restantes del usuario")
+                    registros_restantes.delete()
+                
                 print(f"🎉 [BACKEND] procesar COMPLETADO - Albarán ID={albaran.id}")
                 return Response({"detail": "Albarán creado correctamente.", "albaran_id": albaran.id}, status=201)
         except Exception as e:
@@ -2002,6 +2024,20 @@ class EmpresaViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         # Por defecto, solo mostrar empresas activas
         return Empresa.objects.filter(activa=True)
+
+    def create(self, request, *args, **kwargs):
+        print(f"🏢 [BACKEND] Creando empresa - request.data: {request.data}")
+        print(f"🏢 [BACKEND] Content-Type: {request.content_type}")
+        
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            print(f"❌ [BACKEND] Errores de validación: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        print(f"✅ [BACKEND] Empresa creada: {serializer.data}")
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def destroy(self, request, *args, **kwargs):
         empresa = self.get_object()

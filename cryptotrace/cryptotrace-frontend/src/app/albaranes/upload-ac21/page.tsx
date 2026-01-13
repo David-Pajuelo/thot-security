@@ -248,20 +248,54 @@ function UploadAC21PageContent() {
     return noTipificados.every((art: any) => getCodigoProducto(art) === codigoBase);
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  // Función compartida para procesar archivos (usada tanto por handleFileSelect como por onDrop)
+  const processFile = async (file: File) => {
     if (!file) return;
+    
     // Loguear archivo seleccionado
-    console.log('[AC21] Archivo seleccionado:', file);
+    console.log('[AC21] Archivo seleccionado:', file, 'Tipo:', file.type, 'Nombre:', file.name);
+    
+    // Detectar tipo de archivo: primero por MIME type, luego por extensión
+    const isPdfByType = file.type === 'application/pdf';
+    const isPdfByExtension = file.name.toLowerCase().endsWith('.pdf');
+    const isPdf = isPdfByType || isPdfByExtension;
+    
+    // Detectar si es imagen
+    const isImageByType = file.type.startsWith('image/');
+    const isImageByExtension = /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(file.name);
+    const isImage = isImageByType || isImageByExtension;
+    
+    console.log('[AC21] Detección de tipo:', { isPdfByType, isPdfByExtension, isPdf, isImageByType, isImageByExtension, isImage });
+    
     // Renombrar el archivo con un timestamp para evitar caché
     const uniqueName = `${Date.now()}_${file.name}`;
-    const renamedFile = new File([file], uniqueName, { type: file.type });
+    // Asegurar que el tipo MIME esté correcto si no estaba definido
+    let fileType = file.type;
+    if (!fileType) {
+      if (isPdf) fileType = 'application/pdf';
+      else if (isImage) {
+        // Intentar detectar el tipo de imagen por extensión
+        const ext = file.name.toLowerCase().split('.').pop();
+        const imageTypes: { [key: string]: string } = {
+          'jpg': 'image/jpeg',
+          'jpeg': 'image/jpeg',
+          'png': 'image/png',
+          'gif': 'image/gif',
+          'bmp': 'image/bmp',
+          'webp': 'image/webp'
+        };
+        fileType = imageTypes[ext || ''] || 'image/jpeg';
+      }
+    }
+    const renamedFile = new File([file], uniqueName, { type: fileType });
+    
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setSelectedFile(renamedFile);
     setPreviewUrl(null); // No usar más previewUrl, solo previewImages
     setPreviewImages([]);
     setRotations([]);
     setCurrentPage(0); // Resetear currentPage al cambiar de archivo
+    
     // Resetear estados relacionados
     setProcessedData({
       cabecera: {
@@ -271,32 +305,32 @@ function UploadAC21PageContent() {
         fecha_informe: null,
         odmc_numero: null,
       },
-                          empresa_origen: {
-                        nombre: null,
-                        direccion: null,
-                        codigo_postal: null,
-                        ciudad: null,
-                        provincia: null,
-                        pais: null,
-                        codigo_odmc: null,
-                        codigo_emad: null,
-                        nif: null,
-                        telefono: null,
-                        email: null,
-                      },
-                      empresa_destino: {
-                        nombre: null,
-                        direccion: null,
-                        codigo_postal: null,
-                        ciudad: null,
-                        provincia: null,
-                        pais: null,
-                        codigo_odmc: null,
-                        codigo_emad: null,
-                        nif: null,
-                        telefono: null,
-                        email: null,
-                      },
+      empresa_origen: {
+        nombre: null,
+        direccion: null,
+        codigo_postal: null,
+        ciudad: null,
+        provincia: null,
+        pais: null,
+        codigo_odmc: null,
+        codigo_emad: null,
+        nif: null,
+        telefono: null,
+        email: null,
+      },
+      empresa_destino: {
+        nombre: null,
+        direccion: null,
+        codigo_postal: null,
+        ciudad: null,
+        provincia: null,
+        pais: null,
+        codigo_odmc: null,
+        numero_odmc: null,
+        nif: null,
+        telefono: null,
+        email: null,
+      },
       articulos: [],
       accesorios: [],
       equipos_prueba: [],
@@ -320,8 +354,9 @@ function UploadAC21PageContent() {
       descripcion: '',
       cantidad: '',
     });
+    
     // Si es PDF, convertir a imágenes con MÁXIMA CALIDAD
-    if (file.type === 'application/pdf') {
+    if (isPdf) {
       console.log('📄 PDF detectado, procesando con configuración optimizada...');
       
       if (!pdfjsLib) {
@@ -405,14 +440,20 @@ function UploadAC21PageContent() {
         setRotations([]);
         setSelectedFile(null);
       }
-    } else if (file.type.startsWith('image/')) {
+    } else if (isImage) {
       // Imagen suelta
       const url = URL.createObjectURL(renamedFile);
       setPreviewImages([url]);
       setRotations([0]);
     } else {
-      toast.error('Formato de archivo no soportado.');
+      toast.error('Formato de archivo no soportado. Por favor, sube un PDF o una imagen.');
     }
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await processFile(file);
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -1083,10 +1124,30 @@ function UploadAC21PageContent() {
   const handleAltaEmpresa = async (formData: any) => {
     try {
       setIsSavingEmpresa(true);
-      const nuevaEmpresa = await createEmpresa({
-        ...formData,
+      // Validar que todos los campos requeridos estén presentes
+      const requiredFields = ['nombre', 'direccion', 'ciudad', 'codigo_postal', 'provincia'];
+      const missingFields = requiredFields.filter(field => !formData[field] || formData[field].trim() === '');
+      
+      if (missingFields.length > 0) {
+        toast.error(`Faltan campos requeridos: ${missingFields.join(', ')}`);
+        return;
+      }
+      
+      // Filtrar solo los campos que acepta el backend y limpiar valores
+      const empresaData: any = {
+        nombre: (formData.nombre || '').trim(),
+        direccion: (formData.direccion || '').trim(),
+        ciudad: (formData.ciudad || '').trim(),
+        codigo_postal: (formData.codigo_postal || '').trim(),
+        provincia: (formData.provincia || '').trim(),
         activa: true
-      });
+      };
+      // Solo incluir numero_odmc si existe y no está vacío
+      if (formData.numero_odmc && formData.numero_odmc.trim() !== '') {
+        empresaData.numero_odmc = formData.numero_odmc.trim();
+      }
+      console.log('📤 Enviando datos de empresa:', empresaData);
+      const nuevaEmpresa = await createEmpresa(empresaData);
 
       // Actualizar los datos procesados con la nueva empresa
       const updatedData = { ...processedData };
@@ -1104,7 +1165,9 @@ function UploadAC21PageContent() {
       setShowEmpresaModal(false);
     } catch (error: any) {
       console.error("Error creando empresa:", error);
-      toast.error(error.message || "Error al crear la empresa");
+      console.error("Error data:", error.data);
+      const errorMessage = error.data ? JSON.stringify(error.data, null, 2) : error.message;
+      toast.error(errorMessage || "Error al crear la empresa");
     } finally {
       setIsSavingEmpresa(false);
     }
@@ -1618,56 +1681,11 @@ function UploadAC21PageContent() {
                     onDragEnter={e => { e.preventDefault(); setIsDragging(true); }}
                     onDragLeave={e => { e.preventDefault(); setIsDragging(false); }}
                     onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
-                    onDrop={e => {
+                    onDrop={async e => {
                       e.preventDefault();
                       setIsDragging(false);
                       if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                        setSelectedFile(e.dataTransfer.files[0]);
-                        const url = URL.createObjectURL(e.dataTransfer.files[0]);
-                        setPreviewUrl(url);
-                        setProcessedData({
-                          cabecera: {
-                            numero_registro_salida: null,
-                            fecha_transaccion: null,
-                            numero_registro_entrada: null,
-                            fecha_informe: null,
-                            odmc_numero: null,
-                          },
-                          empresa_origen: {
-                            nombre: null,
-                            direccion: null,
-                            codigo_postal: null,
-                            ciudad: null,
-                            provincia: null,
-                            pais: null,
-                            codigo_odmc: null,
-                            codigo_emad: null,
-                            nif: null,
-                            telefono: null,
-                            email: null,
-                          },
-                          empresa_destino: {
-                            nombre: null,
-                            direccion: null,
-                            codigo_postal: null,
-                            ciudad: null,
-                            provincia: null,
-                            pais: null,
-                            codigo_odmc: null,
-                            codigo_emad: null,
-                            nif: null,
-                            telefono: null,
-                            email: null,
-                          },
-                          articulos: [],
-                          accesorios: [],
-                          equipos_prueba: [],
-                          observaciones: null,
-                          firmas: {
-                            firma_a: { nombre: null, cargo: null, empleo_rango: null },
-                            firma_b: { nombre: null, cargo: null, empleo_rango: null },
-                          },
-                        });
+                        await processFile(e.dataTransfer.files[0]);
                       }
                     }}
                   >
@@ -2724,10 +2742,6 @@ function UploadAC21PageContent() {
                 <div>
                   <Label htmlFor="provincia">Provincia</Label>
                   <Input id="provincia" name="provincia" defaultValue={empresaToEdit?.provincia} required />
-                </div>
-                <div>
-                  <Label htmlFor="pais">País</Label>
-                  <Input id="pais" name="pais" defaultValue={empresaToEdit?.pais} required />
                 </div>
                 <div>
                   <Label htmlFor="numero_odmc">Número ODMC</Label>
