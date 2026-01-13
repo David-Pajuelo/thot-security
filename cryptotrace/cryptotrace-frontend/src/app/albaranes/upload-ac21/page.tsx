@@ -592,9 +592,97 @@ function UploadAC21PageContent() {
           // Limpiar numero_registro_entrada: si está vacío, null, undefined o 'String', dejarlo como ''
           let numRegEntrada = cleanString(numeroRegistroEntrada);
           
-          // Limpiar fechas
-          const fechaInforme = cleanString(cab?.fecha_informe);
+          // Validar numero_registro_entrada: si parece ser un ODMC, limpiarlo
+          if (numRegEntrada) {
+            const numRegEntradaLower = numRegEntrada.toLowerCase();
+            // Si parece ser un ODMC (contiene "odmc", "acct", "emad", o es un código alfanumérico/número)
+            // Los ODMC pueden tener formato como "EMAD-004-E08", "EMAD - 004", "000303", "ODMC-123", etc.
+            const numRegEntradaTrimmed = numRegEntrada.trim();
+            const numRegEntradaCleaned = numRegEntradaTrimmed.replace(/\s*-\s*/g, '-');
+            const looksLikeODMC = numRegEntradaLower.includes('odmc') || 
+                                  numRegEntradaLower.includes('acct') || 
+                                  numRegEntradaLower.includes('emad') ||
+                                  /^[A-Za-z]+-\d+-[A-Za-z0-9]+$/.test(numRegEntradaCleaned) || // Formato EMAD-004-E08
+                                  /^[A-Za-z]+-\d+$/.test(numRegEntradaCleaned) || // Formato EMAD - 004
+                                  /^\d{4,10}$/.test(numRegEntradaTrimmed) || // Solo números como "000303"
+                                  (/^[A-Za-z0-9\-]{1,20}$/.test(numRegEntradaTrimmed) && 
+                                   /[A-Za-z]/.test(numRegEntrada) && 
+                                   /\d/.test(numRegEntrada) && 
+                                   !/^\d{4}-\d{2}-\d{2}$|^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(numRegEntrada)); // Código alfanumérico que no es fecha
+            if (looksLikeODMC) {
+              console.warn('⚠️ [AC21] numero_registro_entrada parece ser un número ODMC, limpiando:', numRegEntrada);
+              numRegEntrada = '';
+            }
+          }
+          
+          // Función para validar si un string es una fecha válida (formato YYYY-MM-DD o DD/MM/YYYY)
+          const isValidDate = (str: string): boolean => {
+            if (!str || str.length < 8) return false;
+            // Patrón para YYYY-MM-DD
+            const pattern1 = /^\d{4}-\d{2}-\d{2}$/;
+            // Patrón para DD/MM/YYYY o DD-MM-YYYY
+            const pattern2 = /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/;
+            return pattern1.test(str) || pattern2.test(str);
+          };
+
+          // Función para detectar si un string NO es una fecha (es un código, número ODMC, etc.)
+          const isNotADate = (str: string): boolean => {
+            if (!str) return false;
+            const strTrimmed = str.trim();
+            const strLower = strTrimmed.toLowerCase();
+            
+            // Si contiene "odmc" explícitamente, NO es una fecha
+            if (strLower.includes('odmc')) return true;
+            
+            // Si es solo números y tiene menos de 8 caracteres, probablemente NO es una fecha
+            if (/^\d+$/.test(strTrimmed) && strTrimmed.length < 8) return true;
+            
+            // Si contiene letras y números mezclados (código alfanumérico), NO es una fecha
+            if (/[A-Za-z]/.test(strTrimmed) && /\d/.test(strTrimmed)) return true;
+            
+            // Si contiene solo números pero no tiene el formato de fecha (YYYY-MM-DD o DD/MM/YYYY), NO es una fecha
+            if (/^\d+$/.test(strTrimmed) && !isValidDate(strTrimmed)) return true;
+            
+            // Si tiene formato de fecha pero los valores no son válidos (mes > 12, día > 31, etc.)
+            if (isValidDate(strTrimmed)) {
+              const match1 = strTrimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+              const match2 = strTrimmed.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
+              
+              if (match1) {
+                const [, year, month, day] = match1;
+                const m = parseInt(month, 10);
+                const d = parseInt(day, 10);
+                if (m > 12 || d > 31 || m === 0 || d === 0) return true;
+              } else if (match2) {
+                const [, day, month, year] = match2;
+                const m = parseInt(month, 10);
+                const d = parseInt(day, 10);
+                if (m > 12 || d > 31 || m === 0 || d === 0) return true;
+              }
+            }
+            
+            return false;
+          };
+
+          // Limpiar fechas - validación más estricta
+          let fechaInforme = cleanString(cab?.fecha_informe);
           let fechaTransaccion = cleanString(cab?.fecha_transaccion);
+
+          // Si fecha_informe existe pero NO es una fecha válida, limpiarla
+          if (fechaInforme) {
+            if (!isValidDate(fechaInforme) || isNotADate(fechaInforme)) {
+              console.warn('⚠️ [AC21] fecha_informe no es una fecha válida, limpiando:', fechaInforme);
+              fechaInforme = '';
+            }
+          }
+
+          // Si fecha_transaccion existe pero NO es una fecha válida, limpiarla
+          if (fechaTransaccion) {
+            if (!isValidDate(fechaTransaccion) || isNotADate(fechaTransaccion)) {
+              console.warn('⚠️ [AC21] fecha_transaccion no es una fecha válida, limpiando:', fechaTransaccion);
+              fechaTransaccion = '';
+            }
+          }
 
           // Heurística: si el OCR ha rellenado fecha_transaccion con el MISMO valor que fecha_informe,
           // y en el documento el campo venía vacío, preferimos dejarlo vacío para que en la UI
@@ -603,29 +691,160 @@ function UploadAC21PageContent() {
             fechaTransaccion = '';
           }
           
+          // Validar numero_registro_salida: si parece ser una dirección o un ODMC, limpiarlo
+          let numRegSalida = cleanString(cab?.numero_registro_salida);
+          if (numRegSalida) {
+            const numRegSalidaLower = numRegSalida.toLowerCase();
+            const palabrasDireccion = ['calle', 'avenida', 'avenida', 'plaza', 'paseo', 'carretera', 'km', 'número', 'nº', 'n°', 'cp', 'código postal', 'ciudad', 'provincia'];
+            // Si contiene palabras de dirección o es muy largo (más de 50 caracteres, probablemente es una dirección completa)
+            if (palabrasDireccion.some(palabra => numRegSalidaLower.includes(palabra)) || numRegSalida.length > 50) {
+              console.warn('⚠️ [AC21] numero_registro_salida parece ser una dirección, limpiando:', numRegSalida);
+              numRegSalida = '';
+            }
+            // Si parece ser un ODMC (contiene "odmc", "acct", "emad", o es un código alfanumérico/número)
+            // Los ODMC pueden tener formato como "EMAD-004-E08", "EMAD - 004", "000303", "ODMC-123", etc.
+            const numRegSalidaTrimmed = numRegSalida.trim();
+            const numRegSalidaCleaned = numRegSalidaTrimmed.replace(/\s*-\s*/g, '-');
+            const looksLikeODMC = numRegSalidaLower.includes('odmc') || 
+                                  numRegSalidaLower.includes('acct') || 
+                                  numRegSalidaLower.includes('emad') ||
+                                  /^[A-Za-z]+-\d+-[A-Za-z0-9]+$/.test(numRegSalidaCleaned) || // Formato EMAD-004-E08
+                                  /^[A-Za-z]+-\d+$/.test(numRegSalidaCleaned) || // Formato EMAD - 004
+                                  /^\d{4,10}$/.test(numRegSalidaTrimmed) || // Solo números como "000303"
+                                  (/^[A-Za-z0-9\-]{1,20}$/.test(numRegSalidaTrimmed) && 
+                                   /[A-Za-z]/.test(numRegSalida) && 
+                                   /\d/.test(numRegSalida) && 
+                                   !/^\d{4}-\d{2}-\d{2}$|^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(numRegSalida)); // Código alfanumérico que no es fecha
+            if (looksLikeODMC) {
+              console.warn('⚠️ [AC21] numero_registro_salida parece ser un número ODMC, limpiando:', numRegSalida);
+              numRegSalida = '';
+            }
+          }
+          
+          // Extraer y limpiar ODMC
+          let odmcNumero = cleanString(cab?.odmc_numero);
+          
+          // Validación cruzada: si encontramos un número ODMC en las fechas, moverlo al campo odmc_numero
+          // y limpiar las fechas
+          const extractODMCFromString = (str: string): string | null => {
+            if (!str) return null;
+            const strLower = str.toLowerCase();
+            const strTrimmed = str.trim();
+            
+            // Si contiene "odmc" explícitamente, extraer el número (puede incluir guiones)
+            if (strLower.includes('odmc')) {
+              // Buscar números/códigos cerca de "odmc" (pueden incluir guiones como "EMAD-004-E08")
+              const match = str.match(/odmc[:\s]*([A-Za-z0-9\-]+)/i);
+              if (match && match[1]) return match[1].trim();
+              // Si no hay número después, buscar antes
+              const match2 = str.match(/([A-Za-z0-9\-]+)[\s]*odmc/i);
+              if (match2 && match2[1]) return match2[1].trim();
+            }
+            
+            // Si contiene "emad" explícitamente, extraer el código completo
+            // Formatos: "EMAD-004-E08", "EMAD - 004", "EMAD004", etc.
+            if (strLower.includes('emad')) {
+              // Formato con guiones: "EMAD-004-E08" o "EMAD - 004"
+              const match1 = str.match(/([A-Za-z]+[\s\-]+\d+[\s\-]*[A-Za-z0-9]*)/i);
+              if (match1 && match1[1]) {
+                // Limpiar espacios alrededor de guiones
+                return match1[1].replace(/\s*-\s*/g, '-').replace(/\s+/g, '').trim();
+              }
+              // Formato sin guiones: "EMAD004"
+              const match2 = str.match(/([A-Za-z]+\d+[A-Za-z0-9]*)/i);
+              if (match2 && match2[1]) return match2[1].trim();
+            }
+            
+            // Si contiene "acct" (Account Number), extraer el código
+            if (strLower.includes('acct')) {
+              const match = str.match(/acct[.\s]*no[:\s]*([A-Za-z0-9\-]+)/i);
+              if (match && match[1]) return match[1].trim();
+            }
+            
+            // Si es un código alfanumérico con guiones (formato ODMC típico como "EMAD-004-E08" o "EMAD - 004")
+            // Limpiar espacios alrededor de guiones primero
+            const cleaned = strTrimmed.replace(/\s*-\s*/g, '-').replace(/\s+/g, '');
+            if (/^[A-Za-z]+-\d+-[A-Za-z0-9]+$/.test(cleaned)) {
+              return cleaned;
+            }
+            
+            // Formato más simple: "EMAD - 004" o "EMAD-004"
+            if (/^[A-Za-z]+[\s\-]+\d+$/.test(strTrimmed)) {
+              return cleaned;
+            }
+            
+            // Si es solo números (formato como "000303", "123456") y no es una fecha válida
+            if (/^\d{4,10}$/.test(strTrimmed) && !isValidDate(strTrimmed)) {
+              return strTrimmed;
+            }
+            
+            // Si es un código alfanumérico con o sin guiones (probablemente ODMC)
+            // Acepta: "EMAD-004", "EMAD004", "ABC123", "ODMC-123", etc.
+            if (/^[A-Za-z0-9\-]{1,20}$/.test(strTrimmed) && 
+                /[A-Za-z]/.test(strTrimmed) && 
+                /\d/.test(strTrimmed) && 
+                !isValidDate(strTrimmed)) {
+              return cleaned;
+            }
+            
+            return null;
+          };
+          
+          // Si fecha_informe contiene ODMC, extraerlo y limpiar la fecha
+          if (fechaInforme && isNotADate(fechaInforme)) {
+            const odmcFromFecha = extractODMCFromString(fechaInforme);
+            if (odmcFromFecha && !odmcNumero) {
+              console.log('✅ [AC21] Moviendo ODMC desde fecha_informe a odmc_numero:', odmcFromFecha);
+              odmcNumero = odmcFromFecha;
+              fechaInforme = '';
+            } else if (odmcFromFecha) {
+              console.warn('⚠️ [AC21] fecha_informe contiene ODMC pero odmc_numero ya tiene valor, limpiando fecha:', fechaInforme);
+              fechaInforme = '';
+            }
+          }
+          
+          // Si fecha_transaccion contiene ODMC, extraerlo y limpiar la fecha
+          if (fechaTransaccion && isNotADate(fechaTransaccion)) {
+            const odmcFromFecha = extractODMCFromString(fechaTransaccion);
+            if (odmcFromFecha && !odmcNumero) {
+              console.log('✅ [AC21] Moviendo ODMC desde fecha_transaccion a odmc_numero:', odmcFromFecha);
+              odmcNumero = odmcFromFecha;
+              fechaTransaccion = '';
+            } else if (odmcFromFecha) {
+              console.warn('⚠️ [AC21] fecha_transaccion contiene ODMC pero odmc_numero ya tiene valor, limpiando fecha:', fechaTransaccion);
+              fechaTransaccion = '';
+            }
+          }
+          
           return {
-            numero_registro_salida: cleanString(cab?.numero_registro_salida),
+            numero_registro_salida: numRegSalida,
             fecha_transaccion: fechaTransaccion, // Mantener vacío si viene vacío (o sospechosamente copiado) del OCR
             numero_registro_entrada: numRegEntrada, // Mantener vacío si viene vacío del OCR
             fecha_informe: fechaInforme,
-            odmc_numero: cleanString(cab?.odmc_numero),
+            odmc_numero: odmcNumero,
             tipo_transaccion: cleanString(tipoTransaccion),
           };
         };
         // Limpiar empresas
-        const cleanEmpresa = (emp: any) => ({
-          nombre: cleanString(emp?.nombre),
-          direccion: cleanString(emp?.direccion),
-          codigo_postal: cleanString(emp?.codigo_postal),
-          ciudad: cleanString(emp?.ciudad),
-          provincia: cleanString(emp?.provincia),
-          pais: cleanString(emp?.pais),
-          numero_odmc: cleanString(emp?.numero_odmc),
-          nif: cleanString(emp?.nif),
-          telefono: cleanString(emp?.telefono),
-          email: cleanString(emp?.email),
-          id: emp?.id || undefined
-        });
+        const cleanEmpresa = (emp: any) => {
+          // El OCR puede devolver codigo_odmc o numero_odmc, usar el que esté disponible
+          const odmc = cleanString(emp?.numero_odmc || emp?.codigo_odmc || '');
+          
+          return {
+            nombre: cleanString(emp?.nombre),
+            direccion: cleanString(emp?.direccion),
+            codigo_postal: cleanString(emp?.codigo_postal),
+            ciudad: cleanString(emp?.ciudad),
+            provincia: cleanString(emp?.provincia),
+            pais: cleanString(emp?.pais),
+            numero_odmc: odmc, // Usar numero_odmc o codigo_odmc del OCR
+            codigo_odmc: odmc, // Mantener también codigo_odmc por compatibilidad
+            nif: cleanString(emp?.nif),
+            telefono: cleanString(emp?.telefono),
+            email: cleanString(emp?.email),
+            id: emp?.id || undefined
+          };
+        };
         // Construir nuevo objeto de datos, asegurando que sobrescriba completamente el estado anterior
         // IMPORTANTE: Esto evita que valores previos persistan cuando el OCR devuelve campos vacíos
         const newFormData: any = {
@@ -1163,6 +1382,10 @@ function UploadAC21PageContent() {
 
       toast.success("Empresa creada correctamente");
       setShowEmpresaModal(false);
+      
+      // Recargar la lista de empresas para que aparezca en el desplegable
+      const empresasActualizadas = await fetchEmpresas();
+      setEmpresas(empresasActualizadas);
     } catch (error: any) {
       console.error("Error creando empresa:", error);
       console.error("Error data:", error.data);
@@ -1174,6 +1397,21 @@ function UploadAC21PageContent() {
   };
 
   const handleOpenEmpresaModal = (empresa: any, tipo: 'origen' | 'destino') => {
+    // Si se pasa un objeto vacío, usar los datos del OCR si están disponibles
+    if (!empresa || Object.keys(empresa).length === 0) {
+      const ocrData = tipo === 'origen' ? processedData.empresa_origen : processedData.empresa_destino;
+      if (ocrData) {
+        // Mapear los datos del OCR al formato del formulario
+        empresa = {
+          nombre: ocrData.nombre || '',
+          direccion: ocrData.direccion || '',
+          codigo_postal: ocrData.codigo_postal || '',
+          ciudad: ocrData.ciudad || '',
+          provincia: ocrData.provincia || '',
+          numero_odmc: ocrData.numero_odmc || ocrData.codigo_odmc || '',
+        };
+      }
+    }
     setEmpresaToEdit({ ...empresa, tipo });
     setShowEmpresaModal(true);
   };
@@ -1854,28 +2092,32 @@ function UploadAC21PageContent() {
                               wrapperClass="!w-full !h-[650px]" 
                               contentClass="!w-full !h-full flex items-center justify-center"
                             >
-                              <img
-                                src={previewImages[currentPage]}
-                                alt={`Preview ${currentPage + 1}`}
-                                className="max-w-full max-h-full object-contain"
-                                style={{ transform: `rotate(${rotations[currentPage] || 0}deg)` }}
-                              />
+                              <div className="relative inline-block">
+                                <img
+                                  src={previewImages[currentPage]}
+                                  alt={`Preview ${currentPage + 1}`}
+                                  className="max-w-full max-h-full object-contain"
+                                  style={{ transform: `rotate(${rotations[currentPage] || 0}deg)` }}
+                                />
+                                {/* Recuadro visual de recorte (dentro del TransformComponent para que se mueva con la imagen) */}
+                                {usarRecorte && (
+                                  <div
+                                    className="pointer-events-none absolute border-2 border-red-500/80 bg-red-500/10"
+                                    style={{
+                                      // Posicionar el recuadro respecto a la imagen usando porcentajes
+                                      // El contenedor tiene el tamaño de la imagen debido a inline-block
+                                      top: `${cropTop * 100}%`,
+                                      left: `${cropLeft * 100}%`,
+                                      width: `${(cropRight - cropLeft) * 100}%`,
+                                      height: `${(cropBottom - cropTop) * 100}%`,
+                                    }}
+                                  />
+                                )}
+                              </div>
                             </TransformComponent>
                           );
                         }}
                       </TransformWrapper>
-                      {/* Recuadro visual de recorte (solo visible si el recorte está activado) */}
-                      {usarRecorte && (
-                        <div
-                          className="pointer-events-none absolute border-2 border-red-500/80 bg-red-500/10"
-                          style={{
-                            top: `${cropTop * 100}%`,
-                            bottom: `${(1 - cropBottom) * 100}%`,
-                            left: `${cropLeft * 100}%`,
-                            right: `${(1 - cropRight) * 100}%`,
-                          }}
-                        />
-                      )}
                     </div>
                   </div>
                 ) : (

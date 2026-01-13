@@ -585,8 +585,29 @@ class AC21Processor:
                         "text": """
                         Analiza la imagen de este documento AC-21 y extrae la información estructurada en formato JSON. Presta especial atención a los siguientes puntos:
                         
-                        1.  **Cabecera**: Extrae los campos de la parte superior: `numero_registro_salida`, `fecha_informe`, `numero_registro_entrada`, `fecha_transaccion`, y `odmc_numero`.
-                        2.  **Empresas (DE/PARA)**: Identifica claramente la empresa de origen (DE) y la de destino (PARA). Extrae nombre, dirección completa y códigos.
+                        1.  **Cabecera**: Extrae los campos de la parte superior:
+                            - `numero_registro_salida`: **CRÍTICO** - Número de registro de salida. Este es un NÚMERO o CÓDIGO alfanumérico (ej: "SA2024-0001", "12345", etc.), NO es una dirección física. Busca etiquetas como "Nº Registro de Salida", "Número Registro Salida", "Registro Salida", etc. en la parte superior del documento. Si encuentras una dirección completa (con calle, número, ciudad), NO la uses aquí. Si no encuentras un número de registro de salida, usa una cadena vacía "".
+                            - `fecha_informe`: **CRÍTICO** - Fecha del informe. Busca etiquetas en ESPAÑOL: "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Busca etiquetas en INGLÉS: "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15"). NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha. Si no encuentras una fecha, usa una cadena vacía "".
+                            - `numero_registro_entrada`: **CRÍTICO** - Número de registro de entrada. Este es un NÚMERO o CÓDIGO alfanumérico, NO es un número ODMC, NO es "ACCT. NO". Busca etiquetas en ESPAÑOL: "Nº Registro de Entrada", "Registro Entrada". Busca etiquetas en INGLÉS: "Incoming Number", "Incoming No.", "Entry Registration Number", "Entry Reg. No.". **IMPORTANTE**: Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si no encuentras un número de registro de entrada, usa una cadena vacía "".
+                            - `fecha_transaccion`: **🔥 CRÍTICO - ESTE CAMPO ES PRIORITARIO** - Fecha de la transacción. **⚠️⚠️⚠️ ATENCIÓN: Este campo es DIFERENTE de "Fecha del Informe" / "Date of Report". NO los confundas. ⚠️⚠️⚠️** 
+                          
+                          **INSTRUCCIONES ESPECÍFICAS PARA EXTRAER `fecha_transaccion`:**
+                          1. Busca en la CABECERA del documento (parte superior) cualquier etiqueta que mencione "TRANSACCIÓN" o "TRANSACTION".
+                          2. Etiquetas en ESPAÑOL que debes buscar: "Fecha de la Transacción", "Fecha Transacción", "Fecha Transacción:", "Fecha de Transacción", "Fecha Transacción", "Fecha Transacción", "Fecha Transacción".
+                          3. Etiquetas en INGLÉS que debes buscar: "Date of Transaction", "Transaction Date", "Date of Transaction:", "Transaction Date:", "Date Transaction", "Transaction Date", "Transaction Date", "Date of Transaction", "Transaction Date", "Date Transaction".
+                          4. **BUSCA ACTIVAMENTE**: Escanea toda la cabecera buscando estas palabras clave. Si ves "Transaction" o "Transacción" cerca de una fecha, esa fecha probablemente es `fecha_transaccion`.
+                          5. **DIFERENCIA CRÍTICA**: 
+                             - "Date of Report" / "Report Date" / "Fecha del Informe" → va a `fecha_informe`
+                             - "Date of Transaction" / "Transaction Date" / "Fecha de la Transacción" → va a `fecha_transaccion`
+                          6. Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15").
+                          7. NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha.
+                          8. **SI ENCUENTRAS una fecha junto a "Transaction" / "Transacción" en la cabecera, esa es `fecha_transaccion`.**
+                          9. Si NO encuentras ninguna fecha etiquetada como "Transaction" / "Transacción", usa una cadena vacía "" en lugar de inventar una fecha.
+                            - `odmc_numero`: **CRÍTICO** - Número ODMC. Busca etiquetas en ESPAÑOL: "ODMC", "ODMC Nº", "ODMC Number", "ODMC No.". Busca etiquetas en INGLÉS: "ODMC", "ODMC Number", "ODMC No.", "ACCT. NO" (Account Number - el número que aparece debajo de "ACCT. NO" es el ODMC). El formato del ODMC puede variar mucho: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004", "ODMC-123"), solo números (ej: "000303", "123456"), o códigos alfanuméricos sin guiones (ej: "EMAD004", "ABC123"). **IMPORTANTE**: Si encuentras cualquier código o número junto a las etiquetas "ODMC", "ACCT. NO", o "EMAD", ese es el ODMC. Este es un código/número específico, NO es una fecha. NO lo pongas en campos de fecha.
+                        2.  **Empresas (DE/PARA)**: Identifica claramente la empresa de origen (DE/FROM) y la de destino (PARA/TO/DESTINATION). Extrae nombre, dirección completa, código postal, ciudad, provincia (por separado), y códigos ODMC/EMAD. **CRÍTICO**: Cada empresa (DE y PARA) puede tener su propio número ODMC. Busca "ACCT. NO" o "ODMC" en AMBAS secciones:
+                           - En la sección DE/FROM: el número debajo de "ACCT. NO" es el `numero_odmc` de `empresa_origen`
+                           - En la sección PARA/TO/DESTINATION: el número debajo de "ACCT. NO" es el `numero_odmc` de `empresa_destino`
+                           NO confundas el ODMC de una empresa con el de la otra. Cada empresa tiene su propio ODMC.
                         3.  **Tabla de Artículos**:
                             - Primero, cuenta el número TOTAL de filas de la tabla de inventario (excluyendo cabeceras).
                             - Debes devolver EXACTAMENTE ese mismo número de elementos en la lista `articulos`. No debes agrupar ni fusionar filas aunque parezcan similares o repetidas.
@@ -629,8 +650,8 @@ class AC21Processor:
                             "fecha_transaccion": "String (YYYY-MM-DD)",
                             "odmc_numero": "String"
                           },
-                          "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_odmc": "String", "codigo_emad": "String" },
-                          "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_odmc": "String" },
+                          "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "codigo_odmc": "String", "codigo_emad": "String", "numero_odmc": "String" },
+                          "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "codigo_odmc": "String", "numero_odmc": "String" },
                           "articulos": [
                             { "indice_fila": "Int (número de fila en la tabla, empezando en 1)", "codigo_producto": "String (TÍTULO CORTO / EDICIÓN)", "descripcion": "String (OBSERVACIONES)", "cantidad": "Int", "numero_serie_inicio": "String", "numero_serie_fin": "String", "cc": "String" }
                           ],
@@ -676,8 +697,34 @@ class AC21Processor:
                         "type": "text",
                         "text": """
                         Analiza la imagen de este documento AC-21 y EXTRAe ÚNICAMENTE:
-                        - La CABECERA (tipo_transaccion, numero_registro_salida, fecha_informe, numero_registro_entrada, fecha_transaccion, odmc_numero)
-                        - Los datos de EMPRESA ORIGEN (DE) y EMPRESA DESTINO (PARA)
+                        - La CABECERA:
+                          * `tipo_transaccion`: Tipo de transacción (TRANSFERENCIA, INVENTARIO, etc.)
+                          * `numero_registro_salida`: **CRÍTICO** - Número de registro de salida. Este es un NÚMERO o CÓDIGO alfanumérico (ej: "SA2024-0001", "12345", etc.), NO es una dirección física, NO es un número ODMC, NO es "ACCT. NO". Busca etiquetas en ESPAÑOL: "Nº Registro de Salida", "Número Registro Salida", "Registro Salida". Busca etiquetas en INGLÉS: "Outgoing Number", "Outgoing No.", "Exit Registration Number", "Registration Number", "Exit Reg. No.", "Reg. No.". **IMPORTANTE**: Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si encuentras una dirección completa (con calle, número, ciudad), NO la uses aquí. Si no encuentras un número de registro de salida, usa una cadena vacía "".
+                          * `fecha_informe`: **CRÍTICO** - Fecha del informe. Busca etiquetas en ESPAÑOL: "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Busca etiquetas en INGLÉS: "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15"). NO uses números ODMC, códigos, "ACCT. NO", ni ningún otro valor que no sea una fecha. Si no encuentras una fecha, usa una cadena vacía "".
+                          * `numero_registro_entrada`: **CRÍTICO** - Número de registro de entrada. Este es un NÚMERO o CÓDIGO alfanumérico, NO es un número ODMC, NO es "ACCT. NO". Busca etiquetas en ESPAÑOL: "Nº Registro de Entrada", "Registro Entrada". Busca etiquetas en INGLÉS: "Incoming Number", "Incoming No.", "Entry Registration Number", "Entry Reg. No.". **IMPORTANTE**: Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si no encuentras un número de registro de entrada, usa una cadena vacía "".
+                          * `fecha_transaccion`: **🔥 CRÍTICO - ESTE CAMPO ES PRIORITARIO** - Fecha de la transacción. **⚠️⚠️⚠️ ATENCIÓN: Este campo es DIFERENTE de "Fecha del Informe" / "Date of Report". NO los confundas. ⚠️⚠️⚠️** 
+                          
+                          **INSTRUCCIONES ESPECÍFICAS PARA EXTRAER `fecha_transaccion`:**
+                          1. Busca en la CABECERA del documento (parte superior) cualquier etiqueta que mencione "TRANSACCIÓN" o "TRANSACTION".
+                          2. Etiquetas en ESPAÑOL que debes buscar: "Fecha de la Transacción", "Fecha Transacción", "Fecha Transacción:", "Fecha de Transacción", "Fecha Transacción", "Fecha Transacción", "Fecha Transacción".
+                          3. Etiquetas en INGLÉS que debes buscar: "Date of Transaction", "Transaction Date", "Date of Transaction:", "Transaction Date:", "Date Transaction", "Transaction Date", "Transaction Date", "Date of Transaction", "Transaction Date", "Date Transaction".
+                          4. **BUSCA ACTIVAMENTE**: Escanea toda la cabecera buscando estas palabras clave. Si ves "Transaction" o "Transacción" cerca de una fecha, esa fecha probablemente es `fecha_transaccion`.
+                          5. **DIFERENCIA CRÍTICA**: 
+                             - "Date of Report" / "Report Date" / "Fecha del Informe" → va a `fecha_informe`
+                             - "Date of Transaction" / "Transaction Date" / "Fecha de la Transacción" → va a `fecha_transaccion`
+                          6. Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15").
+                          7. NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha.
+                          8. **SI ENCUENTRAS una fecha junto a "Transaction" / "Transacción" en la cabecera, esa es `fecha_transaccion`.**
+                          9. Si NO encuentras ninguna fecha etiquetada como "Transaction" / "Transacción", usa una cadena vacía "".
+                          * `odmc_numero`: **CRÍTICO** - Número ODMC. Busca etiquetas en ESPAÑOL: "ODMC", "ODMC Nº", "ODMC Number", "ODMC No.". Busca etiquetas en INGLÉS: "ODMC", "ODMC Number", "ODMC No.", "ACCT. NO" (Account Number - el número que aparece debajo de "ACCT. NO" es el ODMC). El formato del ODMC puede variar mucho: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004", "ODMC-123"), solo números (ej: "000303", "123456"), o códigos alfanuméricos sin guiones (ej: "EMAD004", "ABC123"). **IMPORTANTE**: Si encuentras cualquier código o número junto a las etiquetas "ODMC", "ACCT. NO", o "EMAD", ese es el ODMC. Este es un código/número específico, NO es una fecha. NO lo pongas en campos de fecha.
+                        - Los datos de EMPRESA ORIGEN (DE) y EMPRESA DESTINO (PARA): 
+                          * `nombre`: Nombre de la empresa
+                          * `direccion`: Dirección completa (calle, número, etc.)
+                          * `codigo_postal`: Código postal (extraer por separado)
+                          * `ciudad`: Ciudad (extraer por separado)
+                          * `provincia`: Provincia (extraer por separado)
+                          * `numero_odmc` o `codigo_odmc`: **CRÍTICO** - Número/código ODMC de la empresa. Busca etiquetas en ESPAÑOL: "ODMC", "ODMC Nº", "ODMC Number", "ODMC No." en la sección de cada empresa (DE/PARA). Busca etiquetas en INGLÉS: "ODMC", "ODMC Number", "ODMC No.", "ACCT. NO" (Account Number - el número que aparece debajo de "ACCT. NO" en la sección de la empresa es el ODMC de esa empresa). El formato del ODMC puede variar mucho: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004", "ODMC-123"), solo números (ej: "000303", "123456"), o códigos alfanuméricos sin guiones (ej: "EMAD004", "ABC123"). **IMPORTANTE**: Debes buscar el ODMC TANTO en la sección DE (FROM) como en la sección PARA (TO/DESTINATION). Cada empresa puede tener su propio número ODMC. Si encuentras "ACCT. NO" en la sección DE, el número debajo es el ODMC de la empresa origen. Si encuentras "ACCT. NO" en la sección PARA/TO/DESTINATION, el número debajo es el ODMC de la empresa destino. Este es un código/número específico de la empresa, NO es una fecha ni un número de registro. Si encuentras un número ODMC en la sección de la empresa, colócalo aquí. Si no encuentras un número ODMC para la empresa, usa una cadena vacía "".
+                          * `codigo_emad`: Código EMAD (si está disponible)
                         - El ESTADO DEL MATERIAL (recibido, inventariado, destruido)
                         - Las FIRMAS (bloque izquierdo = destinatario, bloque derecho = testigo)
                         - Las OBSERVACIONES GENERALES del punto 17
