@@ -864,6 +864,53 @@ function UploadAC21PageContent() {
         // IMPORTANTE: Usar setProcessedData con el objeto completo para sobrescribir completamente el estado anterior
         // Esto evita que valores previos persistan cuando el OCR devuelve campos vacíos (null/undefined)
         setProcessedData(newFormData);
+        
+        // Intentar auto-match de empresas después de procesar el OCR
+        // Esperar un tick para asegurar que las empresas están cargadas
+        setTimeout(() => {
+          fetchEmpresas().then((empresasList) => {
+            if (empresasList.length > 0) {
+              setProcessedData((prev: any) => {
+                let updated = { ...prev };
+                let hasChanges = false;
+
+                // Intentar match para empresa_origen
+                if (prev.empresa_origen?.nombre && !prev.empresa_origen?.id) {
+                  const match = matchEmpresa(prev.empresa_origen, empresasList);
+                  if (match) {
+                    updated.empresa_origen = {
+                      ...prev.empresa_origen,
+                      ...match,
+                      id: match.id
+                    };
+                    hasChanges = true;
+                  }
+                }
+
+                // Intentar match para empresa_destino
+                if (prev.empresa_destino?.nombre && !prev.empresa_destino?.id) {
+                  const match = matchEmpresa(prev.empresa_destino, empresasList);
+                  if (match) {
+                    updated.empresa_destino = {
+                      ...prev.empresa_destino,
+                      ...match,
+                      id: match.id
+                    };
+                    hasChanges = true;
+                  }
+                }
+
+                if (hasChanges) {
+                  console.log('🔄 [AC21] Auto-match de empresas aplicado después del OCR');
+                  toast.success("Empresas encontradas y seleccionadas automáticamente");
+                }
+
+                return hasChanges ? updated : prev;
+              });
+            }
+          });
+        }, 100);
+        
         // Guardar la imagen rotada para su posterior uso
         setImagenParaGuardar(imageBlob);
         console.log("🖼️ [AC21] Imagen rotada guardada para posterior uso", imageBlob.size, "bytes");
@@ -1396,18 +1443,122 @@ function UploadAC21PageContent() {
     }
   };
 
+  // Función para parsear y separar una dirección completa en sus componentes
+  const parseDireccion = (direccionCompleta: string, ocrData: any) => {
+    if (!direccionCompleta) return { direccion: '', codigo_postal: '', ciudad: '', provincia: '' };
+
+    let direccion = direccionCompleta.trim();
+    let codigo_postal = ocrData?.codigo_postal || '';
+    let ciudad = ocrData?.ciudad || '';
+    let provincia = ocrData?.provincia || '';
+
+    // Si ya tenemos código postal, ciudad y provincia separados, usarlos
+    if (codigo_postal && ciudad && provincia) {
+      return { direccion, codigo_postal, ciudad, provincia };
+    }
+
+    // Patrón para código postal español (5 dígitos)
+    const codigoPostalPattern = /\b(\d{5})\b/g;
+    const codigoPostalMatch = direccion.match(codigoPostalPattern);
+    
+    if (codigoPostalMatch && !codigo_postal) {
+      // Tomar el último código postal encontrado (por si hay varios)
+      codigo_postal = codigoPostalMatch[codigoPostalMatch.length - 1];
+      // Eliminar el código postal de la dirección
+      direccion = direccion.replace(new RegExp(`\\b${codigo_postal}\\b`, 'g'), '').trim();
+    }
+
+    // Intentar extraer ciudad y provincia
+    // Patrones comunes: "Ciudad, Provincia" o "Ciudad Provincia" o "Ciudad (Provincia)"
+    const ciudadProvinciaPatterns = [
+      /([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)\s*,\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:\s|$)/, // "Ciudad, Provincia"
+      /([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)\s*\(([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)\)/, // "Ciudad (Provincia)"
+      /([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{2,})\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{2,})(?:\s|$)/, // "Ciudad Provincia"
+    ];
+
+    // Si no tenemos ciudad y provincia, intentar extraerlas de la dirección
+    if (!ciudad || !provincia) {
+      for (const pattern of ciudadProvinciaPatterns) {
+        const match = direccion.match(pattern);
+        if (match && match[1] && match[2]) {
+          const posibleCiudad = match[1].trim();
+          const posibleProvincia = match[2].trim();
+          
+          // Validar que no sean parte de la dirección (calle, número, etc.)
+          const palabrasDireccion = ['calle', 'avenida', 'plaza', 'paseo', 'carretera', 'km', 'número', 'nº', 'n°', 'cp', 'código'];
+          const esParteDireccion = palabrasDireccion.some(palabra => 
+            posibleCiudad.toLowerCase().includes(palabra) || posibleProvincia.toLowerCase().includes(palabra)
+          );
+
+          if (!esParteDireccion && posibleCiudad.length > 2 && posibleProvincia.length > 2) {
+            if (!ciudad) ciudad = posibleCiudad;
+            if (!provincia) provincia = posibleProvincia;
+            // Eliminar ciudad y provincia de la dirección
+            direccion = direccion.replace(pattern, '').trim();
+            break;
+          }
+        }
+      }
+    }
+
+    // Si aún no tenemos ciudad/provincia, intentar extraer la última palabra como provincia
+    // y la penúltima como ciudad (patrón común en direcciones españolas)
+    if (!ciudad || !provincia) {
+      const partes = direccion.split(/\s+/).filter(p => p.length > 0);
+      if (partes.length >= 2) {
+        const ultimaParte = partes[partes.length - 1];
+        const penultimaParte = partes[partes.length - 2];
+        
+        // Si la última parte parece una provincia (palabra capitalizada, no es número, no es código postal)
+        if (!provincia && /^[A-ZÁÉÍÓÚÑ]/.test(ultimaParte) && !/^\d+$/.test(ultimaParte) && ultimaParte.length > 2) {
+          provincia = ultimaParte;
+          direccion = direccion.replace(new RegExp(`\\b${ultimaParte}\\b$`, 'i'), '').trim();
+        }
+        
+        // Si la penúltima parte parece una ciudad
+        if (!ciudad && /^[A-ZÁÉÍÓÚÑ]/.test(penultimaParte) && !/^\d+$/.test(penultimaParte) && penultimaParte.length > 2) {
+          ciudad = penultimaParte;
+          direccion = direccion.replace(new RegExp(`\\b${penultimaParte}\\b$`, 'i'), '').trim();
+        }
+      }
+    }
+
+    // Limpiar la dirección de comas y espacios múltiples
+    direccion = direccion.replace(/,\s*,/g, ',').replace(/\s+/g, ' ').replace(/^,\s*|\s*,$/g, '').trim();
+
+    return {
+      direccion: direccion || ocrData?.direccion || '',
+      codigo_postal: codigo_postal || ocrData?.codigo_postal || '',
+      ciudad: ciudad || ocrData?.ciudad || '',
+      provincia: provincia || ocrData?.provincia || '',
+    };
+  };
+
   const handleOpenEmpresaModal = (empresa: any, tipo: 'origen' | 'destino') => {
     // Si se pasa un objeto vacío, usar los datos del OCR si están disponibles
     if (!empresa || Object.keys(empresa).length === 0) {
       const ocrData = tipo === 'origen' ? processedData.empresa_origen : processedData.empresa_destino;
       if (ocrData) {
+        // Si la dirección viene completa pero faltan campos separados, intentar parsearla
+        const direccionCompleta = ocrData.direccion || '';
+        const tieneDireccionCompleta = direccionCompleta && direccionCompleta.length > 10;
+        const faltanCampos = !ocrData.codigo_postal || !ocrData.ciudad || !ocrData.provincia;
+        
+        let direccionParsed = { direccion: direccionCompleta, codigo_postal: '', ciudad: '', provincia: '' };
+        
+        if (tieneDireccionCompleta && faltanCampos) {
+          console.log('🔍 [AC21] Parseando dirección completa:', direccionCompleta);
+          direccionParsed = parseDireccion(direccionCompleta, ocrData);
+          console.log('✅ [AC21] Dirección parseada:', direccionParsed);
+        }
+
         // Mapear los datos del OCR al formato del formulario
         empresa = {
           nombre: ocrData.nombre || '',
-          direccion: ocrData.direccion || '',
-          codigo_postal: ocrData.codigo_postal || '',
-          ciudad: ocrData.ciudad || '',
-          provincia: ocrData.provincia || '',
+          direccion: direccionParsed.direccion || ocrData.direccion || '',
+          codigo_postal: direccionParsed.codigo_postal || ocrData.codigo_postal || '',
+          ciudad: direccionParsed.ciudad || ocrData.ciudad || '',
+          provincia: direccionParsed.provincia || ocrData.provincia || '',
           numero_odmc: ocrData.numero_odmc || ocrData.codigo_odmc || '',
         };
       }
@@ -1475,6 +1626,92 @@ function UploadAC21PageContent() {
   useEffect(() => {
     fetchEmpresas().then(setEmpresas);
   }, []);
+
+  // Función para normalizar nombres de empresas para comparación
+  const normalizeCompanyName = (name: string): string => {
+    if (!name) return '';
+    return name
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ') // Normalizar espacios múltiples a uno solo
+      .replace(/[.,\-_]/g, '') // Eliminar puntuación común
+      .normalize('NFD') // Normalizar caracteres acentuados
+      .replace(/[\u0300-\u036f]/g, ''); // Eliminar diacríticos
+  };
+
+  // Función para hacer match de empresa del OCR con empresas existentes
+  const matchEmpresa = (ocrEmpresa: any, empresasList: any[]): any | null => {
+    if (!ocrEmpresa?.nombre || empresasList.length === 0) return null;
+
+    const ocrNombreNormalizado = normalizeCompanyName(ocrEmpresa.nombre);
+    
+    // Buscar match exacto por nombre normalizado
+    const matchExacto = empresasList.find(emp => {
+      const empNombreNormalizado = normalizeCompanyName(emp.nombre);
+      return empNombreNormalizado === ocrNombreNormalizado;
+    });
+
+    if (matchExacto) {
+      console.log(`✅ [AC21] Match encontrado para empresa "${ocrEmpresa.nombre}" → "${matchExacto.nombre}" (ID: ${matchExacto.id})`);
+      return matchExacto;
+    }
+
+    // Si no hay match exacto, intentar match parcial (el nombre del OCR contiene el de la BD o viceversa)
+    const matchParcial = empresasList.find(emp => {
+      const empNombreNormalizado = normalizeCompanyName(emp.nombre);
+      return ocrNombreNormalizado.includes(empNombreNormalizado) || 
+             empNombreNormalizado.includes(ocrNombreNormalizado);
+    });
+
+    if (matchParcial) {
+      console.log(`✅ [AC21] Match parcial encontrado para empresa "${ocrEmpresa.nombre}" → "${matchParcial.nombre}" (ID: ${matchParcial.id})`);
+      return matchParcial;
+    }
+
+    return null;
+  };
+
+  // Auto-match de empresas cuando se procesan datos del OCR o se cargan empresas
+  useEffect(() => {
+    if (empresas.length === 0) return; // Esperar a que se carguen las empresas
+
+    setProcessedData((prev: any) => {
+      let updated = { ...prev };
+      let hasChanges = false;
+
+      // Intentar match para empresa_origen
+      if (prev.empresa_origen?.nombre && !prev.empresa_origen?.id) {
+        const match = matchEmpresa(prev.empresa_origen, empresas);
+        if (match) {
+          updated.empresa_origen = {
+            ...prev.empresa_origen,
+            ...match, // Incluir todos los datos de la empresa encontrada
+            id: match.id
+          };
+          hasChanges = true;
+        }
+      }
+
+      // Intentar match para empresa_destino
+      if (prev.empresa_destino?.nombre && !prev.empresa_destino?.id) {
+        const match = matchEmpresa(prev.empresa_destino, empresas);
+        if (match) {
+          updated.empresa_destino = {
+            ...prev.empresa_destino,
+            ...match, // Incluir todos los datos de la empresa encontrada
+            id: match.id
+          };
+          hasChanges = true;
+        }
+      }
+
+      if (hasChanges) {
+        console.log('🔄 [AC21] Auto-match de empresas aplicado');
+      }
+
+      return hasChanges ? updated : prev;
+    });
+  }, [empresas, processedData.empresa_origen?.nombre, processedData.empresa_destino?.nombre]);
 
   // Estado para el modal de agregar producto manual
   const [showAddProductModal, setShowAddProductModal] = useState(false);
