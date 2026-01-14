@@ -72,7 +72,7 @@ async def send_email(
     """
     try:
         # Verificar permisos (solo admin puede enviar correos)
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para enviar correos"
@@ -122,7 +122,7 @@ async def send_confirmation_email(
     """
     try:
         # Verificar permisos
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para enviar correos"
@@ -174,7 +174,7 @@ async def send_status_update_email(
     """
     try:
         # Verificar permisos
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para enviar correos"
@@ -220,7 +220,7 @@ async def check_new_emails(
     """
     try:
         # Verificar permisos
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para revisar correos"
@@ -260,7 +260,7 @@ async def mark_email_as_read(
     """
     try:
         # Verificar permisos
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para marcar correos"
@@ -304,7 +304,7 @@ async def test_email_connections(
     """
     try:
         # Verificar permisos
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para probar conexiones"
@@ -348,7 +348,7 @@ async def get_email_logs(
     """
     try:
         # Verificar permisos
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para ver logs de email"
@@ -384,7 +384,7 @@ async def get_available_templates(
     """
     try:
         # Verificar permisos
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para ver templates"
@@ -432,7 +432,7 @@ async def send_email_async(
     """
     try:
         # Verificar permisos (solo admin puede enviar correos)
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para enviar correos"
@@ -499,7 +499,7 @@ async def send_hps_form_email_async(
     """
     try:
         # Verificar permisos (solo admin puede enviar correos)
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para enviar correos"
@@ -558,7 +558,7 @@ async def get_task_status(
     """
     try:
         # Verificar permisos
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=403,
                 detail="No tienes permisos para consultar tareas"

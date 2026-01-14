@@ -368,13 +368,13 @@ export const apiUtils = {
   // Verificar si el usuario es team leader
   isTeamLeader: () => {
     const user = apiUtils.getStoredUser();
-    return user?.role === 'team_leader';
+    return user?.role === 'team_lead';
   },
   
   // Verificar si el usuario puede gestionar usuarios
   canManageUsers: () => {
     const user = apiUtils.getStoredUser();
-    return user?.role === 'admin' || user?.role === 'team_leader';
+    return user?.role === 'admin' || user?.role === 'team_lead';
   }
 };
 

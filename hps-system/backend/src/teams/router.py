@@ -49,7 +49,7 @@ async def list_teams(
     - **Team Leaders**: Solo ven su equipo
     - **Members**: Acceso denegado
     """
-    if current_user.role.name not in ['admin', 'team_leader']:
+    if current_user.role.name not in ['admin', 'team_lead']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para ver la lista de equipos"
@@ -104,7 +104,7 @@ async def get_team(
     team_service = TeamService(db)
     
     # Verificar permisos
-    if current_user.role.name == 'team_leader':
+    if current_user.role.name == 'team_lead':
         # Los team leaders solo pueden ver su propio equipo
         if current_user.team_id != team_id:
             raise HTTPException(
@@ -150,7 +150,7 @@ async def update_team(
         )
     
     # Verificar permisos para team leaders
-    if current_user.role.name == 'team_leader':
+    if current_user.role.name == 'team_lead':
         if current_user.team_id != team_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

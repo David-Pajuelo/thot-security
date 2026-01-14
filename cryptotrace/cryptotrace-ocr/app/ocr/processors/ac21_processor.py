@@ -587,41 +587,63 @@ class AC21Processor:
                         
                         1.  **Cabecera**: Extrae los campos de la parte superior:
                             - `numero_registro_salida`: **CRÍTICO** - Número de registro de salida. Este es un NÚMERO o CÓDIGO alfanumérico (ej: "SA2024-0001", "12345", etc.), NO es una dirección física. Busca etiquetas como "Nº Registro de Salida", "Número Registro Salida", "Registro Salida", etc. en la parte superior del documento. Si encuentras una dirección completa (con calle, número, ciudad), NO la uses aquí. Si no encuentras un número de registro de salida, usa una cadena vacía "".
-                            - `fecha_informe`: **CRÍTICO** - Fecha del informe. Busca etiquetas en ESPAÑOL: "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Busca etiquetas en INGLÉS: "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15"). NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha. Si no encuentras una fecha, usa una cadena vacía "".
+                            - `fecha_informe`: **CRÍTICO** - Fecha del informe. **BUSCA ESPECÍFICAMENTE EL PUNTO 3**: Busca "3." seguido de "DATE OF REPORT" o "Fecha del Informe". Etiquetas en ESPAÑOL: "3. Fecha del Informe", "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Etiquetas en INGLÉS: "3. DATE OF REPORT", "3. Report Date", "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15"). NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha. Si no encuentras una fecha en el punto 3, usa una cadena vacía "".
                             - `numero_registro_entrada`: **CRÍTICO** - Número de registro de entrada. Este es un NÚMERO o CÓDIGO alfanumérico, NO es un número ODMC, NO es "ACCT. NO". Busca etiquetas en ESPAÑOL: "Nº Registro de Entrada", "Registro Entrada". Busca etiquetas en INGLÉS: "Incoming Number", "Incoming No.", "Entry Registration Number", "Entry Reg. No.". **IMPORTANTE**: Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si no encuentras un número de registro de entrada, usa una cadena vacía "".
                             - `fecha_transaccion`: **🔥 CRÍTICO - ESTE CAMPO ES PRIORITARIO** - Fecha de la transacción. **⚠️⚠️⚠️ ATENCIÓN: Este campo es DIFERENTE de "Fecha del Informe" / "Date of Report". NO los confundas. ⚠️⚠️⚠️** 
                           
                           **INSTRUCCIONES ESPECÍFICAS PARA EXTRAER `fecha_transaccion`:**
-                          1. Busca en la CABECERA del documento (parte superior) cualquier etiqueta que mencione "TRANSACCIÓN" o "TRANSACTION".
-                          2. Etiquetas en ESPAÑOL que debes buscar: "Fecha de la Transacción", "Fecha Transacción", "Fecha Transacción:", "Fecha de Transacción", "Fecha Transacción", "Fecha Transacción", "Fecha Transacción".
-                          3. Etiquetas en INGLÉS que debes buscar: "Date of Transaction", "Transaction Date", "Date of Transaction:", "Transaction Date:", "Date Transaction", "Transaction Date", "Transaction Date", "Date of Transaction", "Transaction Date", "Date Transaction".
-                          4. **BUSCA ACTIVAMENTE**: Escanea toda la cabecera buscando estas palabras clave. Si ves "Transaction" o "Transacción" cerca de una fecha, esa fecha probablemente es `fecha_transaccion`.
-                          5. **DIFERENCIA CRÍTICA**: 
-                             - "Date of Report" / "Report Date" / "Fecha del Informe" → va a `fecha_informe`
-                             - "Date of Transaction" / "Transaction Date" / "Fecha de la Transacción" → va a `fecha_transaccion`
+                          1. **BUSCA ESPECÍFICAMENTE EL PUNTO 5**: Busca "5." seguido de texto que mencione "DATE OF" o "FECHA DE". La sección 5 es SIEMPRE la fecha de transacción. NO confundas con el punto 3 que es la fecha del informe.
+                          2. Etiquetas en ESPAÑOL que debes buscar: "5. Fecha de la Transacción", "5. Fecha Transacción", "5. Fecha de Transacción", "Fecha de la Transacción", "Fecha Transacción".
+                          3. Etiquetas en INGLÉS que debes buscar: "5. DATE OF TRASACTION" (con error de ortografía), "5. DATE OF TRANSACTION", "5. DATE OF TRAS ACTION", "5. DATE OF TRASACTION" (con error), "5. Transaction Date".
+                          4. **REGLA ABSOLUTA**: 
+                             - Si ves "3." seguido de "DATE OF REPORT" o "Fecha del Informe" → esa fecha va a `fecha_informe` (punto 3)
+                             - Si ves "5." seguido de "DATE OF TRANSACTION" / "DATE OF TRASACTION" / "Fecha de la Transacción" → esa fecha va a `fecha_transaccion` (punto 5)
+                          5. **BUSCA ACTIVAMENTE EL PUNTO 5**: Escanea la cabecera buscando específicamente "5." seguido de "DATE OF" o "FECHA DE" y luego una fecha. Esa fecha es `fecha_transaccion`.
                           6. Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15").
                           7. NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha.
-                          8. **SI ENCUENTRAS una fecha junto a "Transaction" / "Transacción" en la cabecera, esa es `fecha_transaccion`.**
-                          9. Si NO encuentras ninguna fecha etiquetada como "Transaction" / "Transacción", usa una cadena vacía "" en lugar de inventar una fecha.
-                            - `odmc_numero`: **CRÍTICO** - Número ODMC. Busca etiquetas en ESPAÑOL: "ODMC", "ODMC Nº", "ODMC Number", "ODMC No.". Busca etiquetas en INGLÉS: "ODMC", "ODMC Number", "ODMC No.", "ACCT. NO" (Account Number - el número que aparece debajo de "ACCT. NO" es el ODMC). El formato del ODMC puede variar mucho: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004", "ODMC-123"), solo números (ej: "000303", "123456"), o códigos alfanuméricos sin guiones (ej: "EMAD004", "ABC123"). **IMPORTANTE**: Si encuentras cualquier código o número junto a las etiquetas "ODMC", "ACCT. NO", o "EMAD", ese es el ODMC. Este es un código/número específico, NO es una fecha. NO lo pongas en campos de fecha.
-                        2.  **Empresas (DE/PARA)**: Identifica claramente la empresa de origen (DE/FROM) y la de destino (PARA/TO/DESTINATION). Extrae nombre, dirección completa, código postal, ciudad, provincia (por separado), y códigos ODMC/EMAD. **CRÍTICO**: Cada empresa (DE y PARA) puede tener su propio número ODMC. Busca "ACCT. NO" o "ODMC" en AMBAS secciones:
-                           - En la sección DE/FROM: el número debajo de "ACCT. NO" es el `numero_odmc` de `empresa_origen`
-                           - En la sección PARA/TO/DESTINATION: el número debajo de "ACCT. NO" es el `numero_odmc` de `empresa_destino`
-                           NO confundas el ODMC de una empresa con el de la otra. Cada empresa tiene su propio ODMC.
+                          8. **SI ENCUENTRAS una fecha en el punto 5 (junto a "5." y "Transaction"/"Transacción"/"Trasaction"), esa es `fecha_transaccion`.**
+                          9. Si NO encuentras ninguna fecha en el punto 5, usa una cadena vacía "" en lugar de inventar una fecha.
+                            - `odmc_numero`: **CRÍTICO** - Número ODMC. Busca etiquetas en ESPAÑOL: "ODMC", "ODMC Nº", "ODMC Number", "ODMC No.". Busca etiquetas en INGLÉS: "ODMC", "ODMC Number", "ODMC No.", "ACCT. NO" (Account Number - el número que aparece debajo de "ACCT. NO" es el ODMC). El formato del ODMC puede variar mucho: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004", "ODMC-123"), con puntos (ej: "02.01.06.21", "12.34.56.78"), solo números (ej: "000303", "123456"), o códigos alfanuméricos sin guiones (ej: "EMAD004", "ABC123"). **IMPORTANTE**: Si encuentras cualquier código o número junto a las etiquetas "ODMC", "ACCT. NO", o "EMAD", ese es el ODMC. Este es un código/número específico, NO es una fecha. NO lo pongas en campos de fecha.
+                        2.  **Empresas**: 
+                            - Busca dos secciones de empresa en el documento. Identifícalas por posición visual:
+                              * La sección que está ARRIBA (parte superior del documento) → `empresa_origen`
+                              * La sección que está ABAJO (parte inferior del documento) → `empresa_destino`
+                            - Si hay etiquetas explícitas, úsalas como referencia adicional:
+                              * "DE", "FROM", "ORIGEN", "ORIGIN" → `empresa_origen`
+                              * "PARA", "TO", "DESTINATION" → `empresa_destino`
+                            - Para cada empresa extrae los siguientes campos siguiendo el orden típico (puede haber saltos):
+                              * **`numero_odmc`**: Busca "ACCT. NO" o "ODMC" y extrae el número/código que aparece debajo o junto a esa etiqueta. Formato ODMC puede ser: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004"), con puntos (ej: "02.01.06.21"), solo números (ej: "000303", "2010622"), o códigos alfanuméricos sin guiones (ej: "EMAD004").
+                              * **`nombre`**: El nombre completo de la empresa/organización. Está después del número ODMC, ANTES de las líneas de dirección/ciudad. Las letras sueltas (T, R, F, OM, etc.) son parte de "TO" o "FROM" escritas en VERTICAL, NO son etiquetas. Ignora esas letras verticales. El nombre puede ser una línea completa o múltiples líneas si forman parte del nombre de la empresa. **NO uses ciudades o direcciones como nombre**.
+                              * **`direccion`**: La dirección física completa (calle, número, etc.). Aparece después del nombre. Si es una calle con número, es `direccion`. Si es solo un nombre de lugar/ciudad sin calle, puede ser `ciudad` o `direccion` según el contexto. Si solo aparece una ciudad sin calle, déjala en `ciudad` y `direccion` vacío.
+                              * **`codigo_postal`**: Código postal numérico (5 dígitos típicamente). Si no está visible, usa "".
+                              * **`ciudad`**: Nombre de la ciudad. Aparece después de la dirección. Si aparece "Madrid", "San Agustin de Guadalix", etc., es `ciudad`. NO confundas ciudades con nombres de empresa.
+                              * **`provincia`**: Nombre de la provincia/región. Si no está visible, usa "".
+                              * **`pais`**: Nombre del país. Si no está visible, usa "".
+                            - **ORDEN TÍPICO DE INFORMACIÓN** (puede haber saltos): Número ODMC → Nombre → Dirección → Código Postal → Ciudad → Provincia → País
+                            - **NOTA**: Las letras sueltas (T, R, F, OM) son parte de "TO"/"FROM" escritas verticalmente. Ignóralas al extraer datos.
+                            - **NO confundas**: El nombre de la empresa NO es una ciudad. "San Agustin de Guadalix" es ciudad, NO nombre de empresa. "EMPRESA AICOX" es nombre de empresa.
+                            - **NO inviertas**: ARRIBA = origen, ABAJO = destino.
                         3.  **Tabla de Artículos**:
                             - Primero, cuenta el número TOTAL de filas de la tabla de inventario (excluyendo cabeceras).
                             - Debes devolver EXACTAMENTE ese mismo número de elementos en la lista `articulos`. No debes agrupar ni fusionar filas aunque parezcan similares o repetidas.
                             - Extrae CADA fila de la tabla en una lista de objetos `articulos` (una fila = un elemento en `articulos`).
                             - Para CADA artículo, DEBES extraer los siguientes campos de la tabla:
                               * `indice_fila`: el número de la fila tal y como aparece en la primera columna de la tabla (1, 2, 3, ...).
-                              * `codigo_producto` o `titulo_corto`: El valor de la columna "TÍTULO CORTO / EDICIÓN" (este es el código del producto)
-                              * `descripcion`: El valor de la columna "OBSERVACIONES" (esta es la descripción del producto)
+                              * `codigo_producto` o `titulo_corto`: **CRÍTICO** - El valor de la columna "TÍTULO CORTO / EDICIÓN" (en ESPAÑOL) o "SHORT TITLE / EDITION" (en INGLÉS). Este es el código del producto. **NO confundir con OBSERVACIONES/REMARKS**.
+                              * `descripcion`: **CRÍTICO** - El valor de la columna "OBSERVACIONES" (en ESPAÑOL) o "REMARKS" (en INGLÉS). Esta es la descripción/observaciones del producto. **MUY IMPORTANTE**: 
+                                - Este campo NO debe contener el mismo valor que "TÍTULO CORTO / EDICIÓN" o "SHORT TITLE / EDITION".
+                                - Si la celda de OBSERVACIONES/REMARKS está vacía o contiene el mismo texto que el título corto, usa una cadena vacía "".
+                                - Solo extrae texto que sea diferente del título corto y que sea información adicional sobre el producto.
                               * `cantidad`: El número de la columna "CANTIDAD" (debe ser un número entero)
                               * `numero_serie_inicio`: El valor de la columna "NÚMERO DE SERIE - INICIO"
                               * `numero_serie_fin`: El valor de la columna "NÚMERO DE SERIE - FIN"
                               * `cc`: El valor de la columna "CC" (código de contabilidad)
                             - Es CRÍTICO que no omitas ningún artículo, aunque dos filas sean idénticas o casi idénticas. Si hay 30 filas en la tabla, debe haber 30 elementos en `articulos`, con `indice_fila` de 1 a 30 sin huecos.
-                            - IMPORTANTE: "TÍTULO CORTO / EDICIÓN" va a `codigo_producto`, y "OBSERVACIONES" va a `descripcion`.
+                            - **IMPORTANTE**: 
+                              - "TÍTULO CORTO / EDICIÓN" (ESPAÑOL) o "SHORT TITLE / EDITION" (INGLÉS) va a `codigo_producto`.
+                              - "OBSERVACIONES" (ESPAÑOL) o "REMARKS" (INGLÉS) va a `descripcion`.
+                              - **NO dupliques información**: Si OBSERVACIONES/REMARKS contiene el mismo texto que TÍTULO CORTO/EDICIÓN, deja `descripcion` como cadena vacía "".
+                              - `descripcion` solo debe contener información adicional que NO esté en el título corto.
                         4.  **Accesorios y Equipos de Prueba**: Extrae las listas de "ACCESORIOS ENTREGADOS" y "EQUIPOS PRUEBAS". A veces el título puede variar ligeramente (p.ej. "EQUIPOS DE PRUEBA AICOX"); debes poder manejar estas variaciones.
                         5.  **Firmas (CRÍTICO)**:
                             - El documento tiene dos bloques de firma: uno a la **izquierda (recuadro 15)** y otro a la **derecha (recuadro 16)**.
@@ -629,9 +651,25 @@ class AC21Processor:
                             - Los datos del bloque de la **izquierda** corresponden al objeto `destinatario`.
                             - Los datos del bloque de la **derecha** corresponden al objeto `testigo`.
                             - Es crucial que no mezcles la información. Si solo hay una firma en el bloque derecho, `destinatario` debe ser `null` o un objeto con campos vacíos.
-                            - Para cada bloque, busca explícitamente las etiquetas "Nombre y Apellidos", "Empleo" y "Cargo" y extrae sus valores para los campos `nombre`, `empleo_rango` y `cargo` respectivamente. A menudo el nombre está precedido por "D./Dª.".
+                            - Para cada bloque, busca explícitamente las etiquetas y extrae sus valores:
+                              * **Nombre**: Busca "Nombre y Apellidos" (ESPAÑOL) o "Name", "Name and Surname" (INGLÉS). Extrae el valor para el campo `nombre`. A menudo el nombre está precedido por "D./Dª." en español.
+                              * **Empleo/Rango**: Busca "Empleo" o "Rango" (ESPAÑOL) o "Grade" (INGLÉS). Extrae el valor para el campo `empleo_rango`.
+                              * **Cargo**: Busca "Cargo" (ESPAÑOL) o "Service" (INGLÉS). Extrae el valor para el campo `cargo`.
                         6.  **Observaciones Generales**: Extrae el campo "17. OBSERVACIONES DEL ODMC REMITENTE".
-                        7.  **Casillas de verificación**: Detecta el estado de las casillas en la parte superior (TRANSFERENCIA, INVENTARIO, etc.) y en la sección de recepción (RECIBIDO, INVENTARIADO, etc.).
+                        7.  **Casillas de verificación - Estado del Material (CRÍTICO)**: 
+                            - Busca la sección "14. EL MATERIAL HA SIDO:" o "14. THE MATERIAL HAS BEEN:" en el documento.
+                            - Detecta qué casilla está marcada (✓, X, o cualquier marca visible):
+                              * Si "RECIBIDO" (ESPAÑOL) o "RECEIVED" (INGLÉS) está marcado → `estado_material.recibido = true`, los demás `false`
+                              * Si "INVENTARIADO" (ESPAÑOL) o "INVENTORIED" (INGLÉS) está marcado → `estado_material.inventariado = true`, los demás `false`
+                              * Si "DESTRUIDO" (ESPAÑOL) o "DESTROYED" (INGLÉS) está marcado → `estado_material.destruido = true`, los demás `false`
+                            - **IMPORTANTE**: Solo una casilla debe estar marcada. Si ninguna está marcada, todos los campos deben ser `false`.
+                            - También detecta el estado de las casillas en la parte superior (TRANSFERENCIA, INVENTARIO, etc.) para `tipo_transaccion`.
+                        8.  **Casillas de verificación - Sección 16 (CRÍTICO)**:
+                            - Busca la sección "16." en el documento, cerca de las firmas.
+                            - Detecta qué casillas están marcadas (✓, X, o cualquier marca visible):
+                              * Si "TESTIGO" (ESPAÑOL) o "WITNESS" (INGLÉS) está marcado → `testigo = true`, si no `false`
+                              * Si "OTRO" (ESPAÑOL) o "OTHER" (INGLÉS) está marcado → `otro = true`, si no `false`
+                            - **IMPORTANTE**: Ambas casillas pueden estar marcadas o ninguna. Si no encuentras la sección 16, ambos campos deben ser `false`.
 
                         REGLAS ESTRICTAS PARA EL JSON DE SALIDA (MUY IMPORTANTE):
                         - El resultado debe ser SIEMPRE un único objeto JSON válido, sin texto adicional antes ni después.
@@ -670,6 +708,8 @@ class AC21Processor:
                             "destinatario": { "nombre": "String", "cargo": "String", "empleo_rango": "String" },
                             "testigo": { "nombre": "String", "cargo": "String", "empleo_rango": "String" }
                           },
+                          "testigo": "Boolean (true si la casilla TESTIGO está marcada en sección 16)",
+                          "otro": "Boolean (true si la casilla OTRO está marcada en sección 16)",
                           "observaciones_generales": "String"
                         }
                         """
@@ -700,33 +740,53 @@ class AC21Processor:
                         - La CABECERA:
                           * `tipo_transaccion`: Tipo de transacción (TRANSFERENCIA, INVENTARIO, etc.)
                           * `numero_registro_salida`: **CRÍTICO** - Número de registro de salida. Este es un NÚMERO o CÓDIGO alfanumérico (ej: "SA2024-0001", "12345", etc.), NO es una dirección física, NO es un número ODMC, NO es "ACCT. NO". Busca etiquetas en ESPAÑOL: "Nº Registro de Salida", "Número Registro Salida", "Registro Salida". Busca etiquetas en INGLÉS: "Outgoing Number", "Outgoing No.", "Exit Registration Number", "Registration Number", "Exit Reg. No.", "Reg. No.". **IMPORTANTE**: Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si encuentras una dirección completa (con calle, número, ciudad), NO la uses aquí. Si no encuentras un número de registro de salida, usa una cadena vacía "".
-                          * `fecha_informe`: **CRÍTICO** - Fecha del informe. Busca etiquetas en ESPAÑOL: "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Busca etiquetas en INGLÉS: "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15"). NO uses números ODMC, códigos, "ACCT. NO", ni ningún otro valor que no sea una fecha. Si no encuentras una fecha, usa una cadena vacía "".
+                          * `fecha_informe`: **CRÍTICO** - Fecha del informe. **BUSCA ESPECÍFICAMENTE EL PUNTO 3**: Busca "3." seguido de "DATE OF REPORT" o "Fecha del Informe". Etiquetas en ESPAÑOL: "3. Fecha del Informe", "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Etiquetas en INGLÉS: "3. DATE OF REPORT", "3. Report Date", "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15"). NO uses números ODMC, códigos, "ACCT. NO", ni ningún otro valor que no sea una fecha. Si no encuentras una fecha en el punto 3, usa una cadena vacía "".
                           * `numero_registro_entrada`: **CRÍTICO** - Número de registro de entrada. Este es un NÚMERO o CÓDIGO alfanumérico, NO es un número ODMC, NO es "ACCT. NO". Busca etiquetas en ESPAÑOL: "Nº Registro de Entrada", "Registro Entrada". Busca etiquetas en INGLÉS: "Incoming Number", "Incoming No.", "Entry Registration Number", "Entry Reg. No.". **IMPORTANTE**: Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si no encuentras un número de registro de entrada, usa una cadena vacía "".
                           * `fecha_transaccion`: **🔥 CRÍTICO - ESTE CAMPO ES PRIORITARIO** - Fecha de la transacción. **⚠️⚠️⚠️ ATENCIÓN: Este campo es DIFERENTE de "Fecha del Informe" / "Date of Report". NO los confundas. ⚠️⚠️⚠️** 
                           
                           **INSTRUCCIONES ESPECÍFICAS PARA EXTRAER `fecha_transaccion`:**
-                          1. Busca en la CABECERA del documento (parte superior) cualquier etiqueta que mencione "TRANSACCIÓN" o "TRANSACTION".
-                          2. Etiquetas en ESPAÑOL que debes buscar: "Fecha de la Transacción", "Fecha Transacción", "Fecha Transacción:", "Fecha de Transacción", "Fecha Transacción", "Fecha Transacción", "Fecha Transacción".
-                          3. Etiquetas en INGLÉS que debes buscar: "Date of Transaction", "Transaction Date", "Date of Transaction:", "Transaction Date:", "Date Transaction", "Transaction Date", "Transaction Date", "Date of Transaction", "Transaction Date", "Date Transaction".
-                          4. **BUSCA ACTIVAMENTE**: Escanea toda la cabecera buscando estas palabras clave. Si ves "Transaction" o "Transacción" cerca de una fecha, esa fecha probablemente es `fecha_transaccion`.
-                          5. **DIFERENCIA CRÍTICA**: 
-                             - "Date of Report" / "Report Date" / "Fecha del Informe" → va a `fecha_informe`
-                             - "Date of Transaction" / "Transaction Date" / "Fecha de la Transacción" → va a `fecha_transaccion`
-                          6. Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15").
-                          7. NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha.
-                          8. **SI ENCUENTRAS una fecha junto a "Transaction" / "Transacción" en la cabecera, esa es `fecha_transaccion`.**
-                          9. Si NO encuentras ninguna fecha etiquetada como "Transaction" / "Transacción", usa una cadena vacía "".
-                          * `odmc_numero`: **CRÍTICO** - Número ODMC. Busca etiquetas en ESPAÑOL: "ODMC", "ODMC Nº", "ODMC Number", "ODMC No.". Busca etiquetas en INGLÉS: "ODMC", "ODMC Number", "ODMC No.", "ACCT. NO" (Account Number - el número que aparece debajo de "ACCT. NO" es el ODMC). El formato del ODMC puede variar mucho: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004", "ODMC-123"), solo números (ej: "000303", "123456"), o códigos alfanuméricos sin guiones (ej: "EMAD004", "ABC123"). **IMPORTANTE**: Si encuentras cualquier código o número junto a las etiquetas "ODMC", "ACCT. NO", o "EMAD", ese es el ODMC. Este es un código/número específico, NO es una fecha. NO lo pongas en campos de fecha.
-                        - Los datos de EMPRESA ORIGEN (DE) y EMPRESA DESTINO (PARA): 
-                          * `nombre`: Nombre de la empresa
-                          * `direccion`: Dirección completa (calle, número, etc.)
-                          * `codigo_postal`: Código postal (extraer por separado)
-                          * `ciudad`: Ciudad (extraer por separado)
-                          * `provincia`: Provincia (extraer por separado)
-                          * `numero_odmc` o `codigo_odmc`: **CRÍTICO** - Número/código ODMC de la empresa. Busca etiquetas en ESPAÑOL: "ODMC", "ODMC Nº", "ODMC Number", "ODMC No." en la sección de cada empresa (DE/PARA). Busca etiquetas en INGLÉS: "ODMC", "ODMC Number", "ODMC No.", "ACCT. NO" (Account Number - el número que aparece debajo de "ACCT. NO" en la sección de la empresa es el ODMC de esa empresa). El formato del ODMC puede variar mucho: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004", "ODMC-123"), solo números (ej: "000303", "123456"), o códigos alfanuméricos sin guiones (ej: "EMAD004", "ABC123"). **IMPORTANTE**: Debes buscar el ODMC TANTO en la sección DE (FROM) como en la sección PARA (TO/DESTINATION). Cada empresa puede tener su propio número ODMC. Si encuentras "ACCT. NO" en la sección DE, el número debajo es el ODMC de la empresa origen. Si encuentras "ACCT. NO" en la sección PARA/TO/DESTINATION, el número debajo es el ODMC de la empresa destino. Este es un código/número específico de la empresa, NO es una fecha ni un número de registro. Si encuentras un número ODMC en la sección de la empresa, colócalo aquí. Si no encuentras un número ODMC para la empresa, usa una cadena vacía "".
-                          * `codigo_emad`: Código EMAD (si está disponible)
-                        - El ESTADO DEL MATERIAL (recibido, inventariado, destruido)
-                        - Las FIRMAS (bloque izquierdo = destinatario, bloque derecho = testigo)
+                          1. **BUSCA ESPECÍFICAMENTE EL PUNTO 5**: Busca "5." seguido de texto que mencione "DATE OF" o "FECHA DE". La sección 5 es SIEMPRE la fecha de transacción. NO confundas con el punto 3 que es la fecha del informe.
+                          2. **BUSCA EN LA CABECERA**: Escanea toda la parte superior del documento (cabecera) buscando:
+                             - "5." seguido de "DATE OF TRASACTION" o "DATE OF TRANSACTION" o "FECHA DE TRANSACCIÓN"
+                             - Cualquier fecha que aparezca después del punto 5 y antes del punto 6 o 7
+                          3. Etiquetas en ESPAÑOL: "5. Fecha de la Transacción", "5. Fecha Transacción", "5. Fecha de Transacción", "Fecha de la Transacción", "Fecha Transacción".
+                          4. Etiquetas en INGLÉS: "5. DATE OF TRASACTION" (con error de ortografía), "5. DATE OF TRANSACTION", "5. DATE OF TRAS ACTION", "5. Transaction Date", "5. DATE OF TRASACTION" (con error).
+                          5. **REGLA ABSOLUTA**: 
+                             - Si ves "3." seguido de "DATE OF REPORT" o "Fecha del Informe" → esa fecha va a `fecha_informe` (punto 3)
+                             - Si ves "5." seguido de "DATE OF TRANSACTION" / "DATE OF TRASACTION" / "Fecha de la Transacción" → esa fecha va a `fecha_transaccion` (punto 5)
+                          6. **BUSCA ACTIVAMENTE EL PUNTO 5**: Escanea la cabecera buscando específicamente "5." seguido de "DATE OF" o "FECHA DE" y luego una fecha. Esa fecha es `fecha_transaccion`. Si el punto 5 está vacío o no tiene fecha visible, busca cualquier fecha que esté en la misma fila o cerca del punto 5.
+                          7. Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15").
+                          8. NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha.
+                          9. **SI ENCUENTRAS una fecha en el punto 5 (junto a "5." y "Transaction"/"Transacción"/"Trasaction"), esa es `fecha_transaccion`.**
+                          10. **IMPORTANTE**: Si el punto 5 existe pero no tiene fecha visible o está vacío, busca en la misma área visual (misma fila o columna) cualquier fecha que pueda corresponder al punto 5.
+                          11. Si NO encuentras ninguna fecha en el punto 5 o cerca del punto 5, usa una cadena vacía "".
+                          * `odmc_numero`: **CRÍTICO** - Número ODMC. Busca etiquetas en ESPAÑOL: "ODMC", "ODMC Nº", "ODMC Number", "ODMC No.". Busca etiquetas en INGLÉS: "ODMC", "ODMC Number", "ODMC No.", "ACCT. NO" (Account Number - el número que aparece debajo de "ACCT. NO" es el ODMC). El formato del ODMC puede variar mucho: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004", "ODMC-123"), con puntos (ej: "02.01.06.21", "12.34.56.78"), solo números (ej: "000303", "123456"), o códigos alfanuméricos sin guiones (ej: "EMAD004", "ABC123"). **IMPORTANTE**: Si encuentras cualquier código o número junto a las etiquetas "ODMC", "ACCT. NO", o "EMAD", ese es el ODMC. Este es un código/número específico, NO es una fecha. NO lo pongas en campos de fecha.
+                        - **Empresas**: 
+                          * Busca dos secciones de empresa. Identifícalas por posición:
+                            - ARRIBA (parte superior) → `empresa_origen`
+                            - ABAJO (parte inferior) → `empresa_destino`
+                          * Si hay etiquetas, úsalas como referencia:
+                            - "DE", "FROM", "ORIGEN" → `empresa_origen`
+                            - "PARA", "TO", "DESTINATION" → `empresa_destino`
+                          * Extrae para cada empresa siguiendo el orden típico (puede haber saltos):
+                            - **`numero_odmc`**: Busca "ACCT. NO" o "ODMC" y extrae el código. Formato: "EMAD-004-E08", "02.01.06.21", "000303", "2010622", etc.
+                            - **`nombre`**: Nombre completo de la empresa/organización. Está después del número ODMC, ANTES de dirección/ciudad. Las letras sueltas (T, R, F, OM, etc.) son parte de "TO" o "FROM" escritas en VERTICAL, NO son etiquetas. Ignora esas letras verticales. El nombre puede ser múltiples líneas. **NO uses ciudades como nombre**.
+                            - **`direccion`**: Dirección física (calle, número). Aparece después del nombre. Si solo hay ciudad sin calle, deja vacío.
+                            - **`codigo_postal`**: Código postal numérico (5 dígitos). Si no está, usa "".
+                            - **`ciudad`**: Nombre de la ciudad. Aparece después de la dirección. "Madrid", "San Agustin de Guadalix" son ciudades, NO nombres de empresa.
+                            - **`provincia`**: Nombre de la provincia. Si no está, usa "".
+                            - **`pais`**: Nombre del país. Si no está, usa "".
+                          * **ORDEN TÍPICO**: Número ODMC → Nombre → Dirección → Código Postal → Ciudad → Provincia → País
+                          * **NOTA**: Las letras sueltas (T, R, F, OM) son parte de "TO"/"FROM" escritas verticalmente. Ignóralas al extraer datos.
+                          * **NO inviertas**: ARRIBA = origen, ABAJO = destino.
+                        - El ESTADO DEL MATERIAL (sección "14. EL MATERIAL HA SIDO:" o "14. THE MATERIAL HAS BEEN:"):
+                          * Detecta qué casilla está marcada: "RECIBIDO"/"RECEIVED", "INVENTARIADO"/"INVENTORIED", o "DESTRUIDO"/"DESTROYED"
+                          * Devuelve `estado_material` con los campos booleanos correspondientes (solo uno debe ser `true`)
+                        - Las FIRMAS (bloque izquierdo = destinatario, bloque derecho = testigo):
+                          * Para cada bloque de firma, busca las etiquetas:
+                            - **Nombre**: "Nombre y Apellidos" (ESPAÑOL) o "Name", "Name and Surname" (INGLÉS) → campo `nombre`
+                            - **Empleo/Rango**: "Empleo" o "Rango" (ESPAÑOL) o "Grade" (INGLÉS) → campo `empleo_rango`
+                            - **Cargo**: "Cargo" (ESPAÑOL) o "Service" (INGLÉS) → campo `cargo`
                         - Las OBSERVACIONES GENERALES del punto 17
 
                         NO debes extraer la tabla de artículos en detalle en esta llamada. 
@@ -760,6 +820,8 @@ class AC21Processor:
                             "destinatario": { "nombre": "String", "cargo": "String", "empleo_rango": "String" },
                             "testigo": { "nombre": "String", "cargo": "String", "empleo_rango": "String" }
                           },
+                          "testigo": "Boolean (true si la casilla TESTIGO está marcada en sección 16)",
+                          "otro": "Boolean (true si la casilla OTRO está marcada en sección 16)",
                           "observaciones_generales": "String",
                           "articulos": [],
                           "accesorios": [],
@@ -800,10 +862,16 @@ class AC21Processor:
                           No debes agrupar ni fusionar filas aunque parezcan similares o repetidas.
                         - Extrae CADA fila de la tabla en un objeto dentro de `articulos` (una fila = un elemento).
                         - Para cada artículo, extrae:
-                          * `codigo_producto` (TÍTULO CORTO / EDICIÓN)
-                          * `descripcion` (OBSERVACIONES). Debe incluir TODO el texto visible en la celda de observaciones:
-                            - No te quedes solo con las palabras en negrita; incluye también el texto normal y las frases completas.
-                            - No resumas ni te limites al “título” en negrita: concatena todas las líneas de la celda en una sola cadena, separadas por espacios.
+                          * `codigo_producto`: **CRÍTICO** - El valor de la columna "TÍTULO CORTO / EDICIÓN" (en ESPAÑOL) o "SHORT TITLE / EDITION" (en INGLÉS). Este es el código del producto. **NO confundir con OBSERVACIONES/REMARKS**.
+                          * `descripcion`: **CRÍTICO** - El valor de la columna "OBSERVACIONES" (en ESPAÑOL) o "REMARKS" (en INGLÉS). Esta es la descripción/observaciones del producto. **MUY IMPORTANTE**: 
+                            - Busca la columna etiquetada como "OBSERVACIONES" (ESPAÑOL) o "REMARKS" (INGLÉS).
+                            - Debe incluir TODO el texto visible en la celda de observaciones/remarks:
+                              * No te quedes solo con las palabras en negrita; incluye también el texto normal y las frases completas.
+                              * No resumas ni te limites al "título" en negrita: concatena todas las líneas de la celda en una sola cadena, separadas por espacios.
+                            - **MUY IMPORTANTE - NO DUPLICAR INFORMACIÓN**:
+                              * Si el contenido de OBSERVACIONES/REMARKS es idéntico o muy similar al contenido de TÍTULO CORTO/EDICIÓN, usa una cadena vacía "" para `descripcion`.
+                              * `descripcion` solo debe contener información adicional que NO esté ya en `codigo_producto`.
+                              * Si la celda de OBSERVACIONES/REMARKS está vacía, usa una cadena vacía "".
                           * `cantidad` (CANTIDAD, entero)
                           * `numero_serie_inicio` (NÚMERO DE SERIE - INICIO)
                           * `numero_serie_fin` (NÚMERO DE SERIE - FIN)

@@ -234,10 +234,11 @@ class CommandProcessor:
                 return await self._asignar_usuario_equipo(parametros, user_context)
             elif accion == "modificar_rol":
                 return await self._modificar_rol(parametros, user_context)
-            elif accion == "aprobar_hps":
-                return await self._aprobar_hps(parametros, user_context)
-            elif accion == "rechazar_hps":
-                return await self._rechazar_hps(parametros, user_context)
+            elif accion in ["aprobar_hps", "rechazar_hps"]:
+                return {
+                    "tipo": "error",
+                    "mensaje": "❌ La aprobación y rechazo de solicitudes HPS no se realiza a través del chat. Por favor, utiliza la interfaz web del sistema para gestionar las solicitudes HPS."
+                }
             elif accion == "renovar_hps":
                 return await self._renovar_hps(parametros, user_context)
             elif accion == "dar_alta_jefe_equipo":
@@ -289,6 +290,13 @@ class CommandProcessor:
                     "mensaje": f"❌ No se encontró ningún usuario con el email {email}."
                 }
             
+            # Verificar permisos: crypto solo puede consultar su propia HPS
+            if user_role == "crypto" and email.lower() != current_user_email.lower():
+                return {
+                    "tipo": "error",
+                    "mensaje": "❌ Solo puedes consultar el estado de tu propia HPS."
+                }
+            
             # Obtener HPS del usuario
             hps_request = await self._get_user_hps(user.id)
             
@@ -303,12 +311,48 @@ class CommandProcessor:
                 'pending': '⏳',
                 'approved': '✅',
                 'rejected': '❌',
-                'expired': '⏰'
+                'expired': '⏰',
+                'submitted': '📤',
+                'waiting_dps': '⏸️'
             }.get(status, '❓')
+            
+            # Traducir estado al español
+            status_es = {
+                'pending': 'Pendiente',
+                'approved': 'Aprobada',
+                'rejected': 'Rechazada',
+                'expired': 'Expirada',
+                'submitted': 'Enviada',
+                'waiting_dps': 'Esperando DPS'
+            }.get(status, status)
+            
+            # Formatear fechas de manera legible
+            def format_date(date_str):
+                if not date_str or date_str == 'N/A':
+                    return 'N/A'
+                try:
+                    from datetime import datetime
+                    if isinstance(date_str, str):
+                        # Parsear ISO format
+                        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    else:
+                        dt = date_str
+                    # Formato: DD/MM/YYYY HH:MM
+                    return dt.strftime('%d/%m/%Y %H:%M')
+                except:
+                    return str(date_str)
+            
+            created_at = format_date(hps_request.get('created_at'))
+            updated_at = format_date(hps_request.get('updated_at'))
+            
+            mensaje = f"{status_emoji} Estado HPS de {email}\n\n"
+            mensaje += f"Estado: {status_es}\n"
+            mensaje += f"Fecha de solicitud: {created_at}\n"
+            mensaje += f"Última actualización: {updated_at}"
             
             return {
                 "tipo": "exito",
-                "mensaje": f"{status_emoji} **Estado HPS de {email}:**\n\n• **Estado:** {status}\n• **Fecha de solicitud:** {hps_request.get('created_at', 'N/A')}\n• **Última actualización:** {hps_request.get('updated_at', 'N/A')}",
+                "mensaje": mensaje,
                 "data": hps_request
             }
             
@@ -349,14 +393,50 @@ class CommandProcessor:
                     "mensaje": "ℹ️ No hay solicitudes HPS en tu equipo."
                 }
             
-            message = f"📋 **HPS de tu equipo:**\n\n"
-            for hps in hps_list[:10]:  # Limitar a 10
-                status_emoji = {
-                    'pending': '⏳',
-                    'approved': '✅',
-                    'rejected': '❌'
-                }.get(hps.get('status', ''), '❓')
-                message += f"{status_emoji} {hps.get('email', 'N/A')} - {hps.get('status', 'N/A')}\n"
+            # Función helper para formatear fechas
+            def format_date(date_str):
+                if not date_str or date_str == 'N/A':
+                    return 'N/A'
+                try:
+                    from datetime import datetime
+                    if isinstance(date_str, str):
+                        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    else:
+                        dt = date_str
+                    return dt.strftime('%d/%m/%Y %H:%M')
+                except:
+                    return str(date_str)
+            
+            # Traducir estados al español
+            status_es = {
+                'pending': 'Pendiente',
+                'approved': 'Aprobada',
+                'rejected': 'Rechazada',
+                'expired': 'Expirada',
+                'submitted': 'Enviada',
+                'waiting_dps': 'Esperando DPS'
+            }
+            
+            status_emoji = {
+                'pending': '⏳',
+                'approved': '✅',
+                'rejected': '❌',
+                'expired': '⏰',
+                'submitted': '📤',
+                'waiting_dps': '⏸️'
+            }
+            
+            message = f"📋 HPS de tu equipo\n\n"
+            message += f"Total: {len(hps_list)}\n\n"
+            
+            # Mostrar hasta 10 solicitudes
+            for i, hps in enumerate(hps_list[:10], 1):
+                email = hps.get('email', 'N/A')
+                status = hps.get('status', 'N/A')
+                created_at = format_date(hps.get('created_at'))
+                emoji = status_emoji.get(status, '❓')
+                status_text = status_es.get(status, status)
+                message += f"{i}. {emoji} {email} - {status_text} (Creada: {created_at})\n"
             
             if len(hps_list) > 10:
                 message += f"\n... y {len(hps_list) - 10} más."
@@ -542,23 +622,28 @@ class CommandProcessor:
                     "mensaje": f"ℹ️ No hay solicitudes HPS con estado '{estado_nombre}'."
                 }
             
-            mensaje = f"📋 **Solicitudes HPS {estado_nombre}:**\n\n"
-            mensaje += f"**Total:** {len(hps_list)}\n\n"
+            # Función helper para formatear fechas
+            def format_date(date_str):
+                if not date_str or date_str == 'N/A':
+                    return 'N/A'
+                try:
+                    from datetime import datetime
+                    if isinstance(date_str, str):
+                        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    else:
+                        dt = date_str
+                    return dt.strftime('%d/%m/%Y %H:%M')
+                except:
+                    return str(date_str)
+            
+            mensaje = f"📋 Solicitudes HPS {estado_nombre}\n\n"
+            mensaje += f"Total: {len(hps_list)}\n\n"
             
             # Mostrar hasta 20 solicitudes
             for i, hps in enumerate(hps_list[:20], 1):
                 user_email = hps.get('user_email', 'N/A')
-                created_at = hps.get('created_at', 'N/A')
-                if created_at and created_at != 'N/A':
-                    try:
-                        from datetime import datetime
-                        if isinstance(created_at, str):
-                            dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                            created_at = dt.strftime('%d/%m/%Y %H:%M')
-                    except:
-                        pass
-                
-                mensaje += f"{i}. **{user_email}** - Creada: {created_at}\n"
+                created_at = format_date(hps.get('created_at'))
+                mensaje += f"{i}. {user_email} - Creada: {created_at}\n"
             
             if len(hps_list) > 20:
                 mensaje += f"\n... y {len(hps_list) - 20} más."
@@ -634,7 +719,7 @@ class CommandProcessor:
         """Listar usuarios del sistema"""
         user_role = user_context.get("role", "").lower()
         
-        if user_role not in ["admin", "team_lead", "team_leader"]:
+        if user_role not in ["admin", "team_lead"]:
             return {
                 "tipo": "conversacion",
                 "mensaje": "❌ No tienes permisos para listar usuarios."
@@ -794,7 +879,8 @@ class CommandProcessor:
                 }
         else:
             # Para nuevas HPS y renovaciones
-            if user_role not in ["admin", "team_lead", "team_leader", "jefe_seguridad", "jefe_seguridad_suplente", "crypto"]:
+            # Solo admin, jefes de equipo, jefe de seguridad y jefe de seguridad suplente pueden solicitar HPS
+            if user_role not in ["admin", "team_lead", "jefe_seguridad", "jefe_seguridad_suplente"]:
                 return {
                     "tipo": "error",
                     "mensaje": "❌ No tienes permisos para solicitar HPS para otros usuarios."
@@ -875,7 +961,7 @@ class CommandProcessor:
                 message = f"✅ Se ha enviado la **solicitud de renovación HPS** a {email}.\n\n📧 El correo contiene el formulario de renovación que debe completar.\n\nEl enlace es válido por 72 horas."
             else:
                 # Solicitud de nueva HPS
-                if user_role in ["team_lead", "team_leader"]:
+                if user_role == "team_lead":
                     message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\n📋 **Si el usuario no existe, se registrará automáticamente en tu equipo** cuando complete el formulario.\n\nEl enlace es válido por 72 horas."
                 else:
                     message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\nEl enlace es válido por 72 horas."
@@ -980,10 +1066,6 @@ class CommandProcessor:
 • `envío traspaso hps a [email]` o `trasladar hps de [email]` - Solicitar **traspaso HPS** (envía formulario)
 • `renovar hps de [email]` - Solicitar **renovación HPS** (envía formulario)
 
-**✅ Gestión de HPS:**
-• `aprobar hps de [email]` - Aprobar solicitud HPS
-• `rechazar hps de [email]` - Rechazar solicitud HPS
-
 ¿Qué comando quieres ejecutar? 🤔"""
         elif user_role in ["jefe_seguridad", "jefe_seguridad_suplente"]:
             message = """Como Jefe de Seguridad, puedes ejecutar los siguientes comandos: 
@@ -1002,30 +1084,26 @@ class CommandProcessor:
 7. Ver todos los equipos del sistema. 
 
 Si necesitas más información sobre alguna de estas acciones, ¡no dudes en preguntar!"""
-        elif user_role in ["team_lead", "team_leader"]:
-            message = """🔹 **Comandos disponibles (JEFE DE EQUIPO):**
+        elif user_role == "team_lead":
+            message = """Como Jefe de Equipo, puedes ejecutar los siguientes comandos:
 
-**📋 Consultas:**
-• `estado hps de [email]` - Consultar estado de HPS
-• `hps de mi equipo` - Ver HPS de tu equipo
-• `listar usuarios` - Ver usuarios de tu equipo
-• `listar equipos` - Ver todos los equipos
+🔹 **GESTIÓN DE USUARIOS DE TU EQUIPO:**
+1. Crear usuario en tu equipo.
+2. Asignar usuario a tu equipo.
+3. Ver usuarios de tu equipo.
 
-**👥 Gestión de Usuarios de tu Equipo:**
-• `crear usuario [email]` - Crear usuario en tu equipo
-• `asignar usuario [email] al equipo [nombre]` - Asignar usuario a tu equipo
+🔹 **GESTIÓN DE HPS - SOLICITUDES:**
+4. Solicitar nueva HPS (el usuario se asociará a tu equipo).
+5. Solicitar renovación HPS.
 
-**📧 Solicitudes HPS:**
-• `envío hps a [email]` o `solicitar hps para [email]` - Solicitar **nueva HPS** (envía formulario, el usuario se asociará a tu equipo)
-• `renovar hps de [email]` - Solicitar **renovación HPS** (envía formulario)
+🔹 **GESTIÓN DE HPS - CONSULTAS:**
+6. Consultar estado de HPS de un email específico.
+7. Ver HPS de tu equipo.
 
-**✅ Gestión de HPS de tu Equipo:**
-• `aprobar hps de [email]` - Aprobar HPS de tu equipo
-• `rechazar hps de [email]` - Rechazar HPS de tu equipo
+🔹 **CONSULTAS:**
+8. Ver todos los equipos del sistema.
 
-⚠️ **Nota:** Solo los jefes de seguridad pueden solicitar traspasos HPS.
-
-¿Qué comando quieres ejecutar? 🤔"""
+Si necesitas más información sobre alguna de estas acciones, ¡no dudes en preguntar!"""
         else:
             message = """🔹 **Comandos disponibles (MIEMBRO):**
 
@@ -1048,7 +1126,7 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
         logger.info(f"👤 _crear_usuario llamado: email={email}, user_message={user_message[:50]}")
         
         # Verificar permisos
-        if user_role not in ["admin", "team_lead", "team_leader"]:
+        if user_role not in ["admin", "team_lead"]:
             return {
                 "tipo": "error",
                 "mensaje": "❌ No tienes permisos para crear usuarios. Solo administradores y jefes de equipo pueden realizar esta acción."
@@ -1179,7 +1257,7 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
             # Obtener equipo del usuario actual si es team_lead
             team = None
             current_user_id = user_context.get("id")
-            if user_context.get("role", "").lower() in ["team_lead", "team_leader"]:
+            if user_context.get("role", "").lower() == "team_lead":
                 current_user = User.objects.get(id=current_user_id)
                 if hasattr(current_user, 'hps_profile') and current_user.hps_profile.team:
                     team = current_user.hps_profile.team
@@ -1310,7 +1388,7 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
         team_name = parametros.get("equipo") or parametros.get("team")
         
         # Verificar permisos
-        if user_role not in ["admin", "team_lead", "team_leader"]:
+        if user_role not in ["admin", "team_lead"]:
             return {
                 "tipo": "error",
                 "mensaje": "❌ No tienes permisos para asignar usuarios a equipos."
@@ -1351,7 +1429,7 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
             
             # Verificar permisos: team_lead solo puede asignar a su equipo
             user_role = user_context.get("role", "").lower()
-            if user_role in ["team_lead", "team_leader"]:
+            if user_role == "team_lead":
                 current_user_id = user_context.get("id")
                 current_user = User.objects.get(id=current_user_id)
                 if hasattr(current_user, 'hps_profile') and current_user.hps_profile.team:
@@ -1537,8 +1615,8 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
         user_role = user_context.get("role", "").lower()
         email = parametros.get("email")
         
-        # Verificar permisos (jefe_seguridad no puede aprobar/rechazar por chat)
-        allowed_roles = ["admin", "crypto", "team_lead", "team_leader"]
+        # Verificar permisos (jefe_seguridad y crypto no pueden aprobar/rechazar por chat)
+        allowed_roles = ["admin", "team_lead"]
         if user_role not in allowed_roles:
             return {
                 "tipo": "error",
@@ -1592,7 +1670,7 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
             
             # Verificar permisos según el rol
             user_role = user_context.get("role", "").lower()
-            if user_role in ["team_lead", "team_leader"]:
+            if user_role == "team_lead":
                 # Team leads solo pueden aprobar HPS de su equipo
                 if hasattr(approver, 'hps_profile') and approver.hps_profile.team:
                     if not hasattr(user, 'hps_profile') or user.hps_profile.team != approver.hps_profile.team:
@@ -1628,8 +1706,8 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
         email = parametros.get("email")
         notes = parametros.get("notas") or parametros.get("notes", "")
         
-        # Verificar permisos (jefe_seguridad no puede aprobar/rechazar por chat)
-        allowed_roles = ["admin", "crypto", "team_lead", "team_leader"]
+        # Verificar permisos (jefe_seguridad y crypto no pueden aprobar/rechazar por chat)
+        allowed_roles = ["admin", "team_lead"]
         if user_role not in allowed_roles:
             return {
                 "tipo": "error",
@@ -1683,7 +1761,7 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
             
             # Verificar permisos según el rol
             user_role = user_context.get("role", "").lower()
-            if user_role in ["team_lead", "team_leader"]:
+            if user_role == "team_lead":
                 # Team leads solo pueden rechazar HPS de su equipo
                 if hasattr(approver, 'hps_profile') and approver.hps_profile.team:
                     if not hasattr(user, 'hps_profile') or user.hps_profile.team != approver.hps_profile.team:

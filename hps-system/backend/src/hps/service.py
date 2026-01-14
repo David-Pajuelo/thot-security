@@ -128,7 +128,7 @@ class HPSService:
         if current_user.role.name in ["admin", "jefe_seguridad", "security_chief"]:
             # Admin y jefes de seguridad pueden ver todas las solicitudes
             pass
-        elif current_user.role.name == "team_leader":
+        elif current_user.role.name == "team_lead":
             # Team leader puede ver solicitudes de su equipo
             query = query.join(User, HPSRequest.user_id == User.id).filter(
                 User.team_id == current_user.team_id
@@ -167,7 +167,7 @@ class HPSService:
         if current_user.role.name in ["admin", "jefe_seguridad", "security_chief"]:
             # Admin y jefes de seguridad pueden ver todas las solicitudes
             pass
-        elif current_user.role.name == "team_leader":
+        elif current_user.role.name == "team_lead":
             # Team leader puede ver solicitudes de su equipo
             query = query.join(User, HPSRequest.user_id == User.id).filter(
                 User.team_id == current_user.team_id
@@ -230,7 +230,7 @@ class HPSService:
         Actualizar una solicitud HPS (solo admin o team leader)
         """
         # Solo admin y team leader pueden actualizar solicitudes
-        if current_user.role.name not in ["admin", "team_leader"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise ValueError("No tienes permisos para actualizar solicitudes HPS")
 
         try:
@@ -242,7 +242,7 @@ class HPSService:
         query = db.query(HPSRequest).filter(HPSRequest.id == request_uuid)
         
         # Control de acceso para team leader
-        if current_user.role.name == "team_leader":
+        if current_user.role.name == "team_lead":
             query = query.join(User, HPSRequest.user_id == User.id).filter(
                 User.team_id == current_user.team_id
             )
@@ -330,7 +330,7 @@ class HPSService:
         if current_user.role.name in ["admin", "jefe_seguridad", "security_chief"]:
             # Admin y jefes de seguridad pueden ver estadísticas de todas las solicitudes
             pass
-        elif current_user.role.name == "team_leader":
+        elif current_user.role.name == "team_lead":
             # Team leader puede ver estadísticas de su equipo
             base_query = base_query.join(User, HPSRequest.user_id == User.id).filter(
                 User.team_id == current_user.team_id
@@ -447,7 +447,7 @@ class HPSService:
         """
         Obtener todas las solicitudes pendientes de envío (solo admin o team leader)
         """
-        if current_user.role.name not in ["admin", "team_leader"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise ValueError("No tienes permisos para ver solicitudes pendientes de envío")
 
         query = db.query(HPSRequest).options(
@@ -457,7 +457,7 @@ class HPSService:
         ).filter(HPSRequest.status == HPSStatus.PENDING)
 
         # Control de acceso para team leader
-        if current_user.role.name == "team_leader":
+        if current_user.role.name == "team_lead":
             query = query.join(User, HPSRequest.user_id == User.id).filter(
                 User.team_id == current_user.team_id
             )
@@ -476,7 +476,7 @@ class HPSService:
         """
         Obtener todas las solicitudes enviadas esperando respuesta (solo admin o team leader)
         """
-        if current_user.role.name not in ["admin", "team_leader"]:
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise ValueError("No tienes permisos para ver solicitudes enviadas")
 
         query = db.query(HPSRequest).options(
@@ -486,7 +486,7 @@ class HPSService:
         ).filter(HPSRequest.status == HPSStatus.SUBMITTED)
 
         # Control de acceso para team leader
-        if current_user.role.name == "team_leader":
+        if current_user.role.name == "team_lead":
             query = query.join(User, HPSRequest.user_id == User.id).filter(
                 User.team_id == current_user.team_id
             )
@@ -554,7 +554,7 @@ class HPSService:
             if target_user:
                 # Obtener el usuario que está solicitando el HPS
                 submitted_by_user = db.query(User).filter(User.id == submitted_by_user_id).first()
-                if submitted_by_user and submitted_by_user.role.name in ["team_leader", "team_lead"]:
+                if submitted_by_user and submitted_by_user.role.name == "team_lead":
                     # Si es jefe de equipo y el usuario objetivo no está en su equipo, moverlo
                     if target_user.team_id != submitted_by_user.team_id:
                         print(f"🔍 DEBUG: Moviendo usuario {target_user.email} al equipo del jefe: {submitted_by_user.team_id}")
@@ -571,7 +571,7 @@ class HPSService:
                 
                 # Determinar el team_id según el rol del usuario que solicita
                 target_team_id = None
-                if submitted_by_user.role.name in ["team_leader", "team_lead"]:
+                if submitted_by_user.role.name == "team_lead":
                     # Si es jefe de equipo, usar su team_id
                     target_team_id = submitted_by_user.team_id
                     print(f"🔍 DEBUG: Jefe de equipo solicitando HPS, asignando al equipo: {target_team_id}")
@@ -882,7 +882,7 @@ class HPSService:
         # Control de acceso
         if current_user.role.name == "admin":
             pass
-        elif current_user.role.name == "team_leader":
+        elif current_user.role.name == "team_lead":
             query = query.join(User, HPSRequest.user_id == User.id).filter(
                 User.team_id == current_user.team_id
             )
@@ -979,7 +979,7 @@ class HPSService:
         # Control de acceso según el rol del usuario
         if current_user.role.name == "admin":
             pass
-        elif current_user.role.name == "team_leader":
+        elif current_user.role.name == "team_lead":
             query = query.join(User, HPSRequest.user_id == User.id).filter(
                 User.team_id == current_user.team_id
             )

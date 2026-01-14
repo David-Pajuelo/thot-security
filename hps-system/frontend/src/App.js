@@ -246,7 +246,7 @@ function App() {
           <Route 
             path="/team" 
             element={
-              <PrivateRoute requiredRole="team_leader">
+              <PrivateRoute requiredRole="team_lead">
                 <TeamManagement />
               </PrivateRoute>
             } 

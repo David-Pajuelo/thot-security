@@ -324,14 +324,14 @@ class TeamService:
 
     def get_available_team_leaders(self, current_team_id: Optional[UUID] = None) -> List[TeamMember]:
         """Obtener usuarios disponibles para ser líderes de equipo (DEPRECATED - usar get_team_members_for_leadership)"""
-        # Buscar usuarios con rol team_leader o admin que no sean líderes de otro equipo
+        # Buscar usuarios con rol team_lead o admin que no sean líderes de otro equipo
         from sqlalchemy import or_
         
         # Construir la consulta base
         query = self.db.query(User).join(User.role).filter(
             and_(
                 User.is_active == True,
-                or_(User.role.has(name='team_leader'), User.role.has(name='admin'))
+                or_(User.role.has(name='team_lead'), User.role.has(name='admin'))
             )
         )
         

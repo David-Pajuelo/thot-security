@@ -46,14 +46,14 @@ class UserService:
         from sqlalchemy.orm import joinedload
         
         # Verificar permisos
-        if current_user.role.name not in ['admin', 'team_leader', 'team_lead']:
+        if current_user.role.name not in ['admin', 'team_lead']:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No tienes permisos para acceder a equipos"
             )
         
-        # Si es team_leader o team_lead, solo puede acceder a su propio equipo
-        if current_user.role.name in ['team_leader', 'team_lead'] and str(current_user.team_id) != str(team_id):
+        # Si es team_lead, solo puede acceder a su propio equipo
+        if current_user.role.name == 'team_lead' and str(current_user.team_id) != str(team_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Solo puedes acceder a tu propio equipo"

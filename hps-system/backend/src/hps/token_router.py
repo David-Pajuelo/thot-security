@@ -30,8 +30,8 @@ async def create_hps_token(
     no autenticados completen formularios HPS.
     """
     try:
-        # Verificar permisos (admin, team_leader o team_lead)
-        if current_user.role.name not in ["admin", "team_leader", "team_lead"]:
+        # Verificar permisos (admin o team_lead)
+        if current_user.role.name not in ["admin", "team_lead"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Solo administradores y líderes de equipo pueden crear tokens HPS"

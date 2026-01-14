@@ -6,23 +6,19 @@ import {
   PlusIcon, 
   PencilIcon, 
   TrashIcon,
-  UserGroupIcon,
-  DocumentTextIcon,
-  ChartBarIcon
+  UserGroupIcon
 } from '@heroicons/react/24/outline';
 import useAuthStore from '../store/authStore';
 import { userService } from '../services/apiService';
-import hpsService from '../services/hpsService';
 import { formatErrorForDisplay } from '../utils/errorHandler';
 
 const TeamManagement = () => {
   const navigate = useNavigate();
   const { user, isTeamLeader } = useAuthStore();
   const [teamMembers, setTeamMembers] = useState([]);
-  const [teamHps, setTeamHps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState('members');
+  const [roleFilter, setRoleFilter] = useState('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -56,16 +52,6 @@ const TeamManagement = () => {
         setTeamMembers(membersResult.data);
       } else {
         setError('Error cargando miembros: ' + membersResult.error);
-      }
-
-      // Cargar HPS del equipo
-      console.log('Cargando HPS del equipo:', user.team_id);
-      const hpsResult = await hpsService.getTeamHps(user.team_id);
-      console.log('Resultado HPS:', hpsResult);
-      if (hpsResult.success) {
-        setTeamHps(hpsResult.data);
-      } else {
-        setError('Error cargando HPS: ' + hpsResult.error);
       }
     } catch (err) {
       console.error('Error cargando datos del equipo:', err);
@@ -131,23 +117,56 @@ const TeamManagement = () => {
     }
   };
 
-  const getStatusColor = (status) => {
-    const colors = {
-      'pending': 'bg-yellow-100 text-yellow-800',
-      'submitted': 'bg-blue-100 text-blue-800',
-      'approved': 'bg-green-100 text-green-800',
-      'rejected': 'bg-red-100 text-red-800'
+  // Función helper para obtener colores de roles (consistente con UserManagement)
+  const getRoleColors = (role) => {
+    const roleColors = {
+      'admin': 'bg-red-100 text-red-800',
+      'jefe_seguridad': 'bg-orange-100 text-orange-800',
+      'jefe_seguridad_suplente': 'bg-orange-100 text-orange-800',
+      'crypto': 'bg-yellow-100 text-yellow-800',
+      'team_lead': 'bg-blue-100 text-blue-800',
+      'member': 'bg-green-100 text-green-800'
     };
-    return colors[status] || 'bg-gray-100 text-gray-800';
+    return roleColors[role] || 'bg-gray-100 text-gray-800';
   };
 
-  const getRoleColor = (role) => {
-    const colors = {
-      'admin': 'bg-red-100 text-red-800',
-      'team_leader': 'bg-purple-100 text-purple-800',
-      'member': 'bg-blue-100 text-blue-800'
+  // Función helper para obtener etiquetas de roles
+  const getRoleLabel = (role) => {
+    const roleLabels = {
+      'admin': 'Admin',
+      'jefe_seguridad': 'Jefe Seguridad',
+      'jefe_seguridad_suplente': 'Jefe Seguridad Suplente',
+      'crypto': 'Crypto',
+      'team_lead': 'Líder Equipo',
+      'member': 'Miembro'
     };
-    return colors[role] || 'bg-gray-100 text-gray-800';
+    return roleLabels[role] || role?.replace('_', ' ');
+  };
+
+  // Función helper para ordenar usuarios por jerarquía de roles
+  const sortUsersByRole = (users) => {
+    const roleOrder = {
+      'admin': 1,
+      'jefe_seguridad': 2,
+      'jefe_seguridad_suplente': 3,
+      'crypto': 4,
+      'team_lead': 5,
+      'member': 6
+    };
+    
+    return users.sort((a, b) => {
+      const roleA = roleOrder[a.role] || 999;
+      const roleB = roleOrder[b.role] || 999;
+      
+      // Si tienen el mismo rol, ordenar alfabéticamente por nombre
+      if (roleA === roleB) {
+        const nameA = (a.first_name + ' ' + a.last_name).trim() || a.email || '';
+        const nameB = (b.first_name + ' ' + b.last_name).trim() || b.email || '';
+        return nameA.localeCompare(nameB);
+      }
+      
+      return roleA - roleB;
+    });
   };
 
   if (loading) {
@@ -169,7 +188,7 @@ const TeamManagement = () => {
                 Gestión de Mi Equipo
               </h1>
               <p className="text-sm text-gray-600">
-                Administrar miembros y HPS de tu equipo
+                Administrar miembros de tu equipo
               </p>
             </div>
             
@@ -197,7 +216,7 @@ const TeamManagement = () => {
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
         {/* Estadísticas del Equipo */}
         <div className="mb-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
             <div className="bg-white overflow-hidden shadow rounded-lg">
               <div className="p-5">
                 <div className="flex items-center">
@@ -217,84 +236,33 @@ const TeamManagement = () => {
                 </div>
               </div>
             </div>
-
-            <div className="bg-white overflow-hidden shadow rounded-lg">
-              <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <DocumentTextIcon className="h-6 w-6 text-gray-400" />
-                  </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">
-                        HPS del Equipo
-                      </dt>
-                      <dd className="text-lg font-medium text-gray-900">
-                        {teamHps.length}
-                      </dd>
-                    </dl>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white overflow-hidden shadow rounded-lg">
-              <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <ChartBarIcon className="h-6 w-6 text-gray-400" />
-                  </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">
-                        HPS Pendientes
-                      </dt>
-                      <dd className="text-lg font-medium text-gray-900">
-                        {teamHps.filter(hps => hps.status === 'pending').length}
-                      </dd>
-                    </dl>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Pestañas de navegación */}
-        <div className="bg-white rounded-lg shadow mb-6">
-          <div className="border-b border-gray-200">
-            <nav className="-mb-px flex space-x-8 px-6">
-              <button
-                onClick={() => setActiveTab('members')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'members'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                👥 Miembros del Equipo
-              </button>
-              <button
-                onClick={() => setActiveTab('hps')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'hps'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                📋 HPS del Equipo
-              </button>
-            </nav>
           </div>
         </div>
 
         {/* Contenido de Miembros */}
-        {activeTab === 'members' && (
-          <div className="bg-white shadow rounded-lg">
-            <div className="px-6 py-4 border-b border-gray-200">
+        <div className="bg-white shadow rounded-lg">
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-lg font-medium text-gray-900">
                 Miembros del Equipo ({teamMembers.length})
               </h3>
+              <div className="flex items-center space-x-4">
+                <label className="text-sm font-medium text-gray-700">
+                  Filtrar por rol:
+                </label>
+                <select
+                  value={roleFilter}
+                  onChange={(e) => setRoleFilter(e.target.value)}
+                  className="border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="all">Todos los roles</option>
+                  <option value="admin">Administradores</option>
+                  <option value="jefe_seguridad">Jefe de Seguridad</option>
+                  <option value="jefe_seguridad_suplente">Jefe de Seguridad Suplente</option>
+                  <option value="crypto">Crypto</option>
+                  <option value="team_lead">Líder Equipo</option>
+                  <option value="member">Miembros</option>
+                </select>
+              </div>
             </div>
             
             <div className="overflow-x-auto">
@@ -303,9 +271,6 @@ const TeamManagement = () => {
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Usuario
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Email
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Rol
@@ -313,63 +278,73 @@ const TeamManagement = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Estado
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Acciones
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {teamMembers.map((member) => (
-                    <tr key={member.id}>
+                  {sortUsersByRole([...teamMembers].filter(member => {
+                    return roleFilter === 'all' || member.role === roleFilter;
+                  })).map((member) => (
+                    <tr key={member.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          <div className="h-10 w-10 flex-shrink-0">
-                            <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
-                              <span className="text-sm font-medium text-gray-700">
-                                {member.first_name?.charAt(0) || member.email?.charAt(0)}
-                              </span>
-                            </div>
+                          <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center">
+                            <span className="text-white font-medium text-sm">
+                              {(() => {
+                                const fullName = `${member.first_name || ''} ${member.last_name || ''}`.trim();
+                                if (fullName) {
+                                  return fullName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+                                }
+                                return (member.email?.charAt(0) || 'U').toUpperCase();
+                              })()}
+                            </span>
                           </div>
                           <div className="ml-4">
                             <div className="text-sm font-medium text-gray-900">
-                              {member.first_name} {member.last_name}
+                              {member.first_name && member.last_name 
+                                ? `${member.first_name} ${member.last_name}`
+                                : member.full_name || 'Sin nombre'}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {member.email}
                             </div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {member.email}
-                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleColor(member.role)}`}>
-                          {member.role?.replace('_', ' ')}
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleColors(member.role)}`}>
+                          {getRoleLabel(member.role)}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(member.status || 'active')}`}>
-                          {member.status || 'Activo'}
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          member.is_active !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                        }`}>
+                          {member.is_active !== false ? 'Activo' : 'Inactivo'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => {
-                              setSelectedUser(member);
-                              setShowEditModal(true);
-                            }}
-                            className="text-blue-600 hover:text-blue-900"
-                          >
-                            <PencilIcon className="h-4 w-4" />
-                          </button>
-                          {member.role !== 'admin' && (
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        {member.role === 'member' && (
+                          <div className="flex justify-end space-x-2">
+                            <button
+                              onClick={() => {
+                                setSelectedUser(member);
+                                setShowEditModal(true);
+                              }}
+                              className="text-blue-600 hover:text-blue-900"
+                            >
+                              <PencilIcon className="h-4 w-4" />
+                            </button>
                             <button
                               onClick={() => handleDeleteUser(member.id)}
                               className="text-red-600 hover:text-red-900"
                             >
                               <TrashIcon className="h-4 w-4" />
                             </button>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -377,77 +352,6 @@ const TeamManagement = () => {
               </table>
             </div>
           </div>
-        )}
-
-        {/* Contenido de HPS */}
-        {activeTab === 'hps' && (
-          <div className="bg-white shadow rounded-lg">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-medium text-gray-900">
-                HPS del Equipo ({teamHps.length})
-              </h3>
-            </div>
-            
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Usuario
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Tipo
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Estado
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Fecha
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Acciones
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {teamHps.map((hps) => (
-                    <tr key={hps.id}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {hps.first_name} {hps.first_last_name}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {hps.email}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {hps.request_type === 'new' ? 'Nueva' : 
-                         hps.request_type === 'renewal' ? 'Renovación' : 
-                         hps.request_type === 'transfer' ? 'Traspaso' : hps.request_type}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(hps.status)}`}>
-                          {hps.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {new Date(hps.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <button
-                          onClick={() => navigate(`/hps/${hps.id}`)}
-                          className="text-blue-600 hover:text-blue-900"
-                        >
-                          Ver Detalles
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
 
         {/* Modales */}
         {showCreateModal && (
@@ -558,7 +462,7 @@ const CreateUserModal = ({ onClose, onSubmit, teamId }) => {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="member">Miembro</option>
-                <option value="team_leader">Líder de Equipo</option>
+                <option value="team_lead">Líder de Equipo</option>
               </select>
             </div>
             <div className="flex justify-end space-x-3">
@@ -651,7 +555,7 @@ const EditUserModal = ({ user, onClose, onSubmit }) => {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="member">Miembro</option>
-                <option value="team_leader">Líder de Equipo</option>
+                <option value="team_lead">Líder de Equipo</option>
               </select>
             </div>
             <div className="flex justify-end space-x-3">

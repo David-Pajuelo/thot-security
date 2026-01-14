@@ -19,7 +19,7 @@ import re
 
 
 ADMIN_ROLES = {"admin", "jefe_seguridad", "security_chief"}
-TEAM_ROLES = {"team_lead", "team_leader", "jefe_seguridad_suplente"}
+TEAM_ROLES = {"team_lead", "jefe_seguridad_suplente"}
 
 
 def is_user_team_lead(user):

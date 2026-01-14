@@ -36,19 +36,9 @@ class RoleConfig:
         ],
         "crypto": [
             "¿Qué comandos puedes ejecutar?",
-            "Estado de mi equipo",
-            "Solicitar HPS para un miembro",
-            "¿Hay HPS pendientes en mi equipo?",
-            "Renovar HPS de un miembro"
+            "¿Cuál es el estado de mi HPS?"
         ],
         "team_lead": [
-            "¿Qué comandos puedes ejecutar?",
-            "Estado de mi equipo",
-            "Solicitar HPS para un miembro",
-            "¿Hay HPS pendientes en mi equipo?",
-            "Renovar HPS de un miembro"
-        ],
-        "team_leader": [
             "¿Qué comandos puedes ejecutar?",
             "Estado de mi equipo",
             "Solicitar HPS para un miembro",
@@ -62,9 +52,8 @@ class RoleConfig:
         "admin": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como administrador, puedes gestionar usuarios, equipos y HPS del sistema.",
         "jefe_seguridad": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como jefe de seguridad, puedes gestionar HPS y supervisar la seguridad del sistema.",
         "jefe_seguridad_suplente": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como jefe de seguridad suplente, puedes gestionar HPS y supervisar la seguridad del sistema.",
-        "crypto": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como especialista en crypto, puedes gestionar HPS y operaciones criptográficas.",
+        "crypto": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como especialista en crypto, puedes consultar información sobre tu propia HPS.",
         "team_lead": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como jefe de equipo, puedes gestionar tu equipo y sus HPS.",
-        "team_leader": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como jefe de equipo, puedes gestionar tu equipo y sus HPS.",
         "member": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Estoy aquí para ayudarte con todo lo relacionado con tu habilitación personal de seguridad."
     }
     
@@ -74,7 +63,7 @@ class RoleConfig:
         Obtener sugerencias según el rol del usuario.
         
         Args:
-            user_role: Rol del usuario (member, admin, team_lead, team_leader)
+            user_role: Rol del usuario (member, admin, team_lead)
             
         Returns:
             Lista de sugerencias para el rol o sugerencias por defecto (member)

@@ -77,14 +77,14 @@ async def get_team_hps(
     """
     try:
         # Verificar permisos
-        if current_user.role.name not in ['admin', 'team_leader', 'team_lead', 'jefe_seguridad', 'security_chief']:
+        if current_user.role.name not in ['admin', 'team_lead', 'jefe_seguridad', 'security_chief']:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No tienes permisos para acceder a equipos"
             )
         
-        # Si es team_leader o team_lead, solo puede acceder a su propio equipo
-        if current_user.role.name in ['team_leader', 'team_lead'] and str(current_user.team_id) != str(team_id):
+        # Si es team_lead, solo puede acceder a su propio equipo
+        if current_user.role.name == 'team_lead' and str(current_user.team_id) != str(team_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Solo puedes acceder a tu propio equipo"
@@ -809,7 +809,7 @@ async def edit_filled_pdf(
         # Control de acceso
         if current_user.role.name == "admin":
             pass  # Admin puede editar cualquier PDF
-        elif current_user.role.name == "team_leader":
+        elif current_user.role.name == "team_lead":
             # Team leader puede editar PDFs de su equipo
             if hps_request.user.team_id != current_user.team_id:
                 raise HTTPException(
@@ -888,7 +888,7 @@ async def extract_pdf_fields(
         # Control de acceso
         if current_user.role.name == "admin":
             pass  # Admin puede extraer campos de cualquier PDF
-        elif current_user.role.name == "team_leader":
+        elif current_user.role.name == "team_lead":
             # Team leader puede extraer campos de PDFs de su equipo
             if hps_request.user.team_id != current_user.team_id:
                 raise HTTPException(

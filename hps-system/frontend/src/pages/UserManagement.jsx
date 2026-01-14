@@ -1845,7 +1845,6 @@ const UserManagement = () => {
                           // Ordenar miembros por rol: líder > admin > jefe seguridad > js suplente > crypto > miembro
                           const roleOrder = {
                             'team_lead': 1,
-                            'team_leader': 1,
                             'admin': 2,
                             'jefe_seguridad': 3,
                             'jefe_seguridad_suplente': 4,

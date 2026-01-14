@@ -58,8 +58,13 @@ export default function LineaTemporalTable({
                   if (producto.rango_serie) {
                     return producto.rango_serie;
                   }
-                  // Si hay inicio Y fin, mostrar "inicio - fin" (aunque sean iguales)
+                  // Si hay inicio Y fin
                   if (producto.numero_serie_inicio && producto.numero_serie_fin) {
+                    // Si son iguales, mostrar solo uno (una sola unidad)
+                    if (producto.numero_serie_inicio === producto.numero_serie_fin) {
+                      return producto.numero_serie_inicio;
+                    }
+                    // Si son diferentes, mostrar rango "inicio - fin"
                     return `${producto.numero_serie_inicio} - ${producto.numero_serie_fin}`;
                   }
                   // Si solo hay uno, mostrarlo

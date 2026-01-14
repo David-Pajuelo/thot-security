@@ -12,7 +12,6 @@ ADMIN_ROLES = {
 
 TEAM_LEADS = {
     "team_lead",
-    "team_leader",
     "jefe_seguridad_suplente",
 }
 
@@ -78,7 +77,7 @@ class IsHpsAdminOrTeamLead(permissions.BasePermission):
     """
     Permite acceso a administradores y líderes de equipo.
     Un usuario es considerado líder si:
-    - Tiene rol "team_lead", "team_leader" o "jefe_seguridad_suplente"
+    - Tiene rol "team_lead" o "jefe_seguridad_suplente"
     - O es líder de algún equipo activo (independientemente de su rol)
     """
 

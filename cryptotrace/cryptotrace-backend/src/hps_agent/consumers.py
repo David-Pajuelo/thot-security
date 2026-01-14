@@ -227,8 +227,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     'consultar_todas_hps', 'consultar_estado_hps', 'consultar_hps_equipo',
                     'listar_usuarios', 'listar_equipos', 'comandos_disponibles',
                     'solicitar_hps', 'trasladar_hps', 'renovar_hps',
-                    'aprobar_hps', 'rechazar_hps', 'crear_equipo',
-                    'asignar_usuario_equipo', 'dar_alta_jefe_equipo'
+                    'crear_equipo', 'asignar_usuario_equipo', 'dar_alta_jefe_equipo'
                 ]
                 
                 # Si el nuevo comando es diferente del flujo activo, cancelar el flujo

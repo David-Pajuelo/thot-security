@@ -25,26 +25,38 @@ export default function GestionLineaTemporal() {
   const [mensaje, setMensaje] = useState<string | null>(null);
   const router = useRouter();
 
-  useEffect(() => {
-    const cargarProductos = async () => {
-      try {
-        setLoading(true);
-        const response = await fetchProductosAgrupados();
-        setProductos(response.productos.map((prod: any) => ({
-          ...prod,
-          cantidad: prod.cantidad ?? 1,
-          tipo: prod.tipo && prod.tipo.trim() !== '' ? prod.tipo : 'NINGUNO'
-        })));
-        setTipos(response.tipos_disponibles);
-      } catch (error) {
-        console.error("❌ Error cargando productos:", error);
-        setError("Error cargando los productos");
-      } finally {
-        setLoading(false);
-      }
-    };
+  const cargarProductos = async () => {
+    try {
+      setLoading(true);
+      const response = await fetchProductosAgrupados();
+      setProductos(response.productos.map((prod: any) => ({
+        ...prod,
+        cantidad: prod.cantidad ?? 1,
+        tipo: prod.tipo && prod.tipo.trim() !== '' ? prod.tipo : 'NINGUNO'
+      })));
+      setTipos(response.tipos_disponibles);
+    } catch (error) {
+      console.error("❌ Error cargando productos:", error);
+      setError("Error cargando los productos");
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     cargarProductos();
+  }, []);
+
+  // Recargar productos cuando la ventana recibe foco (por si se procesó un nuevo AC21 en otra pestaña)
+  useEffect(() => {
+    const handleFocus = () => {
+      cargarProductos();
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   const handleGuardarTipo = async (codigoProducto: string, nuevoTipo: string) => {
@@ -85,9 +97,13 @@ export default function GestionLineaTemporal() {
     }
 
     try {
-      // El backend no requiere payload, procesa todos los productos temporales del usuario
+      // El backend procesa todos los productos temporales del mismo documento (numero_albaran)
       await procesarAlbaran();
       setMensaje('✅ Albarán procesado correctamente');
+      
+      // Recargar productos para reflejar los cambios (aunque luego se redirija)
+      await cargarProductos();
+      
       setTimeout(() => {
         router.push('/albaranes');
       }, 1000);
@@ -96,6 +112,9 @@ export default function GestionLineaTemporal() {
       const errorMessage = error?.message || error?.detail || 'Error desconocido';
       setMensaje(`❌ Error al procesar el albarán: ${errorMessage}`);
       setTimeout(() => setMensaje(null), 5000);
+      
+      // Recargar productos incluso si hubo error, por si se procesó parcialmente
+      cargarProductos();
     }
   };
 

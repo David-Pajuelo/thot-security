@@ -47,18 +47,13 @@ const PrivateRoute = ({
       return children;
     }
     
-    // Si es team_leader y el rol requerido es member, puede acceder
-    if (userRole === 'team_leader' && requiredRole === 'member') {
+    // Si es team_lead y el rol requerido es member, puede acceder
+    if (userRole === 'team_lead' && requiredRole === 'member') {
       return children;
     }
     
     // Si el rol coincide exactamente
     if (userRole === requiredRole) {
-      return children;
-    }
-    
-    // Si es team_lead y el rol requerido es team_leader, puede acceder
-    if (userRole === 'team_lead' && requiredRole === 'team_leader') {
       return children;
     }
     
@@ -101,7 +96,7 @@ export const ManagerRoute = ({ children }) => {
   const userRole = user?.role || user?.role_name;
   console.log('ManagerRoute - Rol del usuario:', userRole);
   
-  if (!user || (userRole !== 'admin' && userRole !== 'team_leader')) {
+  if (!user || (userRole !== 'admin' && userRole !== 'team_lead')) {
     console.log('ManagerRoute - Acceso denegado, redirigiendo a /unauthorized');
     return <Navigate to="/unauthorized" replace />;
   }

@@ -136,8 +136,8 @@ function UploadAC21PageContent() {
   // Estado de recorte manual (porcentaje 0..1 relativo a la imagen)
   const [cropTop, setCropTop] = useState(0.25);
   const [cropBottom, setCropBottom] = useState(0.98);
-  const [cropLeft, setCropLeft] = useState(0.03);
-  const [cropRight, setCropRight] = useState(0.97);
+  const [cropLeft, setCropLeft] = useState(0.0); // Cambiar a 0 para cubrir desde el borde izquierdo
+  const [cropRight, setCropRight] = useState(1.0); // Cambiar a 1.0 para cubrir hasta el borde derecho
 
   // Función para actualizar el tipo de un artículo
   const handleTipoChange = (index: number, tipo: string) => {
@@ -553,6 +553,11 @@ function UploadAC21PageContent() {
         // Mapeo cuidadoso de la respuesta a la estructura del estado
         // Si viene en formato { success, data }, usar response.data, sino usar response directamente
         const responseData = response.data || response;
+        
+        // Log para debugging: ver qué está devolviendo el OCR
+        console.log('📋 [AC21] Respuesta completa del OCR:', JSON.stringify(responseData, null, 2));
+        console.log('📋 [AC21] Cabecera del OCR:', JSON.stringify(responseData.cabecera, null, 2));
+        console.log('📋 [AC21] fecha_transaccion del OCR (raw):', responseData.cabecera?.fecha_transaccion);
         // --- LIMPIEZA Y SINCRONIZACIÓN DE CAMPOS ---
         let tipoTransaccion = responseData.cabecera?.tipo_transaccion;
         let numeroRegistroEntrada = responseData.cabecera?.numero_registro_entrada;
@@ -589,31 +594,8 @@ function UploadAC21PageContent() {
         // IMPORTANTE: No copiar valores de fecha_informe a fecha_transaccion ni de numero_registro_salida a numero_registro_entrada
         // Si están vacíos, deben quedarse vacíos
         const cleanCabecera = (cab: any) => {
-          // Limpiar numero_registro_entrada: si está vacío, null, undefined o 'String', dejarlo como ''
+          // numero_registro_entrada: solo limpieza básica, sin validaciones
           let numRegEntrada = cleanString(numeroRegistroEntrada);
-          
-          // Validar numero_registro_entrada: si parece ser un ODMC, limpiarlo
-          if (numRegEntrada) {
-            const numRegEntradaLower = numRegEntrada.toLowerCase();
-            // Si parece ser un ODMC (contiene "odmc", "acct", "emad", o es un código alfanumérico/número)
-            // Los ODMC pueden tener formato como "EMAD-004-E08", "EMAD - 004", "000303", "ODMC-123", etc.
-            const numRegEntradaTrimmed = numRegEntrada.trim();
-            const numRegEntradaCleaned = numRegEntradaTrimmed.replace(/\s*-\s*/g, '-');
-            const looksLikeODMC = numRegEntradaLower.includes('odmc') || 
-                                  numRegEntradaLower.includes('acct') || 
-                                  numRegEntradaLower.includes('emad') ||
-                                  /^[A-Za-z]+-\d+-[A-Za-z0-9]+$/.test(numRegEntradaCleaned) || // Formato EMAD-004-E08
-                                  /^[A-Za-z]+-\d+$/.test(numRegEntradaCleaned) || // Formato EMAD - 004
-                                  /^\d{4,10}$/.test(numRegEntradaTrimmed) || // Solo números como "000303"
-                                  (/^[A-Za-z0-9\-]{1,20}$/.test(numRegEntradaTrimmed) && 
-                                   /[A-Za-z]/.test(numRegEntrada) && 
-                                   /\d/.test(numRegEntrada) && 
-                                   !/^\d{4}-\d{2}-\d{2}$|^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(numRegEntrada)); // Código alfanumérico que no es fecha
-            if (looksLikeODMC) {
-              console.warn('⚠️ [AC21] numero_registro_entrada parece ser un número ODMC, limpiando:', numRegEntrada);
-              numRegEntrada = '';
-            }
-          }
           
           // Función para validar si un string es una fecha válida (formato YYYY-MM-DD o DD/MM/YYYY)
           const isValidDate = (str: string): boolean => {
@@ -667,6 +649,9 @@ function UploadAC21PageContent() {
           // Limpiar fechas - validación más estricta
           let fechaInforme = cleanString(cab?.fecha_informe);
           let fechaTransaccion = cleanString(cab?.fecha_transaccion);
+          
+          // Log para debugging
+          console.log('🔍 [AC21] fecha_transaccion del OCR:', fechaTransaccion, 'tipo:', typeof fechaTransaccion);
 
           // Si fecha_informe existe pero NO es una fecha válida, limpiarla
           if (fechaInforme) {
@@ -685,41 +670,21 @@ function UploadAC21PageContent() {
           }
 
           // Heurística: si el OCR ha rellenado fecha_transaccion con el MISMO valor que fecha_informe,
-          // y en el documento el campo venía vacío, preferimos dejarlo vacío para que en la UI
-          // se muestre el placeholder "dd/mm/yyyy" en lugar de una fecha inventada.
+          // SOLO limpiar si fecha_transaccion estaba originalmente vacío en el documento.
+          // Si ambas fechas son iguales PERO ambas son válidas y diferentes de fecha_informe original,
+          // mantener fecha_transaccion (puede ser que realmente sean la misma fecha).
+          // NOTA: Esta heurística puede ser demasiado agresiva. Si ambas fechas son iguales y válidas,
+          // podría ser que realmente sean la misma fecha en el documento. Solo limpiar si parece ser un error del OCR.
           if (fechaTransaccion && fechaInforme && fechaTransaccion === fechaInforme) {
-            fechaTransaccion = '';
+            // Solo limpiar si fecha_transaccion parece ser una copia incorrecta (mismo formato exacto)
+            // Si ambas son fechas válidas y diferentes, mantenerlas
+            console.log('⚠️ [AC21] fecha_transaccion es igual a fecha_informe, pero manteniendo si ambas son válidas');
+            // NO limpiar automáticamente - dejar que el usuario decida si son realmente iguales
+            // fechaTransaccion = '';
           }
           
-          // Validar numero_registro_salida: si parece ser una dirección o un ODMC, limpiarlo
+          // numero_registro_salida: solo limpieza básica, sin validaciones
           let numRegSalida = cleanString(cab?.numero_registro_salida);
-          if (numRegSalida) {
-            const numRegSalidaLower = numRegSalida.toLowerCase();
-            const palabrasDireccion = ['calle', 'avenida', 'avenida', 'plaza', 'paseo', 'carretera', 'km', 'número', 'nº', 'n°', 'cp', 'código postal', 'ciudad', 'provincia'];
-            // Si contiene palabras de dirección o es muy largo (más de 50 caracteres, probablemente es una dirección completa)
-            if (palabrasDireccion.some(palabra => numRegSalidaLower.includes(palabra)) || numRegSalida.length > 50) {
-              console.warn('⚠️ [AC21] numero_registro_salida parece ser una dirección, limpiando:', numRegSalida);
-              numRegSalida = '';
-            }
-            // Si parece ser un ODMC (contiene "odmc", "acct", "emad", o es un código alfanumérico/número)
-            // Los ODMC pueden tener formato como "EMAD-004-E08", "EMAD - 004", "000303", "ODMC-123", etc.
-            const numRegSalidaTrimmed = numRegSalida.trim();
-            const numRegSalidaCleaned = numRegSalidaTrimmed.replace(/\s*-\s*/g, '-');
-            const looksLikeODMC = numRegSalidaLower.includes('odmc') || 
-                                  numRegSalidaLower.includes('acct') || 
-                                  numRegSalidaLower.includes('emad') ||
-                                  /^[A-Za-z]+-\d+-[A-Za-z0-9]+$/.test(numRegSalidaCleaned) || // Formato EMAD-004-E08
-                                  /^[A-Za-z]+-\d+$/.test(numRegSalidaCleaned) || // Formato EMAD - 004
-                                  /^\d{4,10}$/.test(numRegSalidaTrimmed) || // Solo números como "000303"
-                                  (/^[A-Za-z0-9\-]{1,20}$/.test(numRegSalidaTrimmed) && 
-                                   /[A-Za-z]/.test(numRegSalida) && 
-                                   /\d/.test(numRegSalida) && 
-                                   !/^\d{4}-\d{2}-\d{2}$|^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(numRegSalida)); // Código alfanumérico que no es fecha
-            if (looksLikeODMC) {
-              console.warn('⚠️ [AC21] numero_registro_salida parece ser un número ODMC, limpiando:', numRegSalida);
-              numRegSalida = '';
-            }
-          }
           
           // Extraer y limpiar ODMC
           let odmcNumero = cleanString(cab?.odmc_numero);
@@ -731,13 +696,13 @@ function UploadAC21PageContent() {
             const strLower = str.toLowerCase();
             const strTrimmed = str.trim();
             
-            // Si contiene "odmc" explícitamente, extraer el número (puede incluir guiones)
+            // Si contiene "odmc" explícitamente, extraer el número (puede incluir guiones o puntos)
             if (strLower.includes('odmc')) {
-              // Buscar números/códigos cerca de "odmc" (pueden incluir guiones como "EMAD-004-E08")
-              const match = str.match(/odmc[:\s]*([A-Za-z0-9\-]+)/i);
+              // Buscar números/códigos cerca de "odmc" (pueden incluir guiones, puntos como "02.01.06.21", o alfanuméricos)
+              const match = str.match(/odmc[:\s]*([A-Za-z0-9.\-]+)/i);
               if (match && match[1]) return match[1].trim();
               // Si no hay número después, buscar antes
-              const match2 = str.match(/([A-Za-z0-9\-]+)[\s]*odmc/i);
+              const match2 = str.match(/([A-Za-z0-9.\-]+)[\s]*odmc/i);
               if (match2 && match2[1]) return match2[1].trim();
             }
             
@@ -755,10 +720,15 @@ function UploadAC21PageContent() {
               if (match2 && match2[1]) return match2[1].trim();
             }
             
-            // Si contiene "acct" (Account Number), extraer el código
+            // Si contiene "acct" (Account Number), extraer el código (puede incluir puntos como "02.01.06.21")
             if (strLower.includes('acct')) {
-              const match = str.match(/acct[.\s]*no[:\s]*([A-Za-z0-9\-]+)/i);
+              const match = str.match(/acct[.\s]*no[:\s]*([A-Za-z0-9.\-]+)/i);
               if (match && match[1]) return match[1].trim();
+            }
+            
+            // Si es un código con puntos (formato como "02.01.06.21", "12.34.56.78")
+            if (/^\d{2}\.\d{2}\.\d{2}\.\d{2}$/.test(strTrimmed)) {
+              return strTrimmed;
             }
             
             // Si es un código alfanumérico con guiones (formato ODMC típico como "EMAD-004-E08" o "EMAD - 004")
@@ -778,11 +748,10 @@ function UploadAC21PageContent() {
               return strTrimmed;
             }
             
-            // Si es un código alfanumérico con o sin guiones (probablemente ODMC)
-            // Acepta: "EMAD-004", "EMAD004", "ABC123", "ODMC-123", etc.
-            if (/^[A-Za-z0-9\-]{1,20}$/.test(strTrimmed) && 
-                /[A-Za-z]/.test(strTrimmed) && 
-                /\d/.test(strTrimmed) && 
+            // Si es un código alfanumérico con o sin guiones/puntos (probablemente ODMC)
+            // Acepta: "EMAD-004", "EMAD004", "ABC123", "ODMC-123", "02.01.06.21", etc.
+            if (/^[A-Za-z0-9.\-]{1,20}$/.test(strTrimmed) && 
+                (/\d/.test(strTrimmed) || /[A-Za-z]/.test(strTrimmed)) && 
                 !isValidDate(strTrimmed)) {
               return cleaned;
             }
@@ -816,7 +785,7 @@ function UploadAC21PageContent() {
             }
           }
           
-          return {
+          const cabeceraResult = {
             numero_registro_salida: numRegSalida,
             fecha_transaccion: fechaTransaccion, // Mantener vacío si viene vacío (o sospechosamente copiado) del OCR
             numero_registro_entrada: numRegEntrada, // Mantener vacío si viene vacío del OCR
@@ -824,6 +793,9 @@ function UploadAC21PageContent() {
             odmc_numero: odmcNumero,
             tipo_transaccion: cleanString(tipoTransaccion),
           };
+          
+          console.log('🔍 [AC21] cleanCabecera retorna:', JSON.stringify(cabeceraResult, null, 2));
+          return cabeceraResult;
         };
         // Limpiar empresas
         const cleanEmpresa = (emp: any) => {
@@ -845,16 +817,49 @@ function UploadAC21PageContent() {
             id: emp?.id || undefined
           };
         };
+
+        // Limpiar estado del material: convertir booleanos del OCR a valores string del frontend
+        const cleanEstadoMaterial = (estado: any): string | null => {
+          if (!estado || typeof estado !== 'object') return null;
+          
+          // El OCR devuelve: { recibido: true/false, inventariado: true/false, destruido: true/false }
+          // El frontend espera: 'RECIBIDO', 'INVENTARIADO', 'DESTRUIDO' o null
+          
+          if (estado.destruido === true) {
+            return 'DESTRUIDO';
+          } else if (estado.inventariado === true) {
+            return 'INVENTARIADO';
+          } else if (estado.recibido === true) {
+            return 'RECIBIDO';
+          }
+          
+          return null;
+        };
+
+        // Limpiar checks de TESTIGO y OTRO: convertir booleanos del OCR
+        const cleanTestigoOtro = (data: any) => {
+          return {
+            testigo: data?.testigo === true || false,
+            otro: data?.otro === true || false,
+          };
+        };
         // Construir nuevo objeto de datos, asegurando que sobrescriba completamente el estado anterior
         // IMPORTANTE: Esto evita que valores previos persistan cuando el OCR devuelve campos vacíos
+        const testigoOtro = cleanTestigoOtro(responseData);
+        const cabeceraLimpia = cleanCabecera(responseData.cabecera || {});
+        console.log('🔍 [AC21] Cabecera limpia antes de setProcessedData:', JSON.stringify(cabeceraLimpia, null, 2));
+        
         const newFormData: any = {
-          cabecera: cleanCabecera(responseData.cabecera || {}),
+          cabecera: cabeceraLimpia,
           empresa_origen: cleanEmpresa(responseData.empresa_origen || {}),
           empresa_destino: cleanEmpresa(responseData.empresa_destino || {}),
           articulos: responseData.articulos || [],
           accesorios: responseData.accesorios || [],
           equipos_prueba: responseData.equipos_prueba || [],
           observaciones: cleanString(responseData.observaciones),
+          estado_material: cleanEstadoMaterial(responseData.estado_material),
+          testigo: testigoOtro.testigo,
+          otro: testigoOtro.otro,
           firmas: cleanFirmas(responseData.firmas || {
             firma_a: { nombre: null, cargo: null, empleo_rango: null },
             firma_b: { nombre: null, cargo: null, empleo_rango: null },
@@ -863,6 +868,8 @@ function UploadAC21PageContent() {
 
         // IMPORTANTE: Usar setProcessedData con el objeto completo para sobrescribir completamente el estado anterior
         // Esto evita que valores previos persistan cuando el OCR devuelve campos vacíos (null/undefined)
+        console.log('🔍 [AC21] newFormData completo antes de setProcessedData:', JSON.stringify(newFormData, null, 2));
+        console.log('🔍 [AC21] numero_registro_salida en newFormData.cabecera:', newFormData.cabecera?.numero_registro_salida);
         setProcessedData(newFormData);
         
         // Intentar auto-match de empresas después de procesar el OCR
@@ -1010,6 +1017,12 @@ function UploadAC21PageContent() {
       const nuevosArticulos = [...articulosPrev];
       // Insertar en la posición indicada (por ejemplo, encima de la fila actual)
       nuevosArticulos.splice(insertIndex, 0, nuevaLinea);
+      
+      // Actualizar todos los indice_fila para que vayan en orden secuencial (1, 2, 3, ...)
+      nuevosArticulos.forEach((articulo: any, index: number) => {
+        articulo.indice_fila = index + 1;
+      });
+      
       return {
         ...prev,
         articulos: nuevosArticulos,
@@ -1607,7 +1620,7 @@ function UploadAC21PageContent() {
   };
 
   // Función para manejar el cambio de estado del material
-  const handleEstadoMaterialChange = (estado: string) => {
+  const handleEstadoMaterialChange = (estado: string | null) => {
     setProcessedData((prev: any) => ({
       ...prev,
       estado_material: estado
@@ -2329,12 +2342,40 @@ function UploadAC21PageContent() {
                               wrapperClass="!w-full !h-[650px]" 
                               contentClass="!w-full !h-full flex items-center justify-center"
                             >
-                              <div className="relative inline-block">
+                              <div 
+                                className="relative" 
+                                style={{ display: 'inline-block' }}
+                                ref={(el) => {
+                                  // Asegurar que el contenedor tenga el tamaño de la imagen
+                                  if (el) {
+                                    const img = el.querySelector('img');
+                                    if (img && img.complete && img.naturalWidth > 0) {
+                                      // Esperar un frame para que el layout se estabilice
+                                      requestAnimationFrame(() => {
+                                        el.style.width = `${img.offsetWidth}px`;
+                                        el.style.height = `${img.offsetHeight}px`;
+                                      });
+                                    }
+                                  }
+                                }}
+                              >
                                 <img
                                   src={previewImages[currentPage]}
                                   alt={`Preview ${currentPage + 1}`}
                                   className="max-w-full max-h-full object-contain"
-                                  style={{ transform: `rotate(${rotations[currentPage] || 0}deg)` }}
+                                  style={{ transform: `rotate(${rotations[currentPage] || 0}deg)`, display: 'block' }}
+                                  onLoad={(e) => {
+                                    // Asegurar que el contenedor tenga exactamente el tamaño de la imagen
+                                    const img = e.currentTarget;
+                                    const container = img.parentElement;
+                                    if (container && img.offsetWidth > 0 && img.offsetHeight > 0) {
+                                      // El contenedor debe tener el tamaño exacto de la imagen para que el recuadro se posicione correctamente
+                                      requestAnimationFrame(() => {
+                                        container.style.width = `${img.offsetWidth}px`;
+                                        container.style.height = `${img.offsetHeight}px`;
+                                      });
+                                    }
+                                  }}
                                 />
                                 {/* Recuadro visual de recorte (dentro del TransformComponent para que se mueva con la imagen) */}
                                 {usarRecorte && (
@@ -2342,11 +2383,12 @@ function UploadAC21PageContent() {
                                     className="pointer-events-none absolute border-2 border-red-500/80 bg-red-500/10"
                                     style={{
                                       // Posicionar el recuadro respecto a la imagen usando porcentajes
-                                      // El contenedor tiene el tamaño de la imagen debido a inline-block
+                                      // El contenedor tiene el tamaño exacto de la imagen
                                       top: `${cropTop * 100}%`,
                                       left: `${cropLeft * 100}%`,
                                       width: `${(cropRight - cropLeft) * 100}%`,
                                       height: `${(cropBottom - cropTop) * 100}%`,
+                                      boxSizing: 'border-box',
                                     }}
                                   />
                                 )}
@@ -2601,45 +2643,135 @@ function UploadAC21PageContent() {
                       <div className="bg-white p-3 rounded-md shadow-sm">
                         <div className="flex justify-between items-start mb-2">
                           <h4 className="text-sm font-medium text-gray-600">De:</h4>
-                          {processedData.empresa_origen?.es_nueva && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="bg-blue-50 text-blue-600 hover:bg-blue-100 border-blue-200"
-                              onClick={() => handleOpenEmpresaModal(processedData.empresa_origen, 'origen')}
-                            >
-                              Dar de alta
-                            </Button>
-                          )}
+                          <Button
+                            variant="default"
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                            onClick={async () => {
+                              const empresaData = processedData.empresa_origen;
+                              if (!empresaData) return;
+                              
+                              try {
+                                setIsSavingEmpresa(true);
+                                const requiredFields = ['nombre', 'direccion', 'ciudad', 'codigo_postal', 'provincia'];
+                                const missingFields = requiredFields.filter(field => !empresaData[field] || empresaData[field].trim() === '');
+                                
+                                if (missingFields.length > 0) {
+                                  toast.error(`Faltan campos requeridos: ${missingFields.join(', ')}`);
+                                  return;
+                                }
+                                
+                                const dataToSave: any = {
+                                  nombre: (empresaData.nombre || '').trim(),
+                                  direccion: (empresaData.direccion || '').trim(),
+                                  ciudad: (empresaData.ciudad || '').trim(),
+                                  codigo_postal: (empresaData.codigo_postal || '').trim(),
+                                  provincia: (empresaData.provincia || '').trim(),
+                                  activa: true
+                                };
+                                
+                                if (empresaData.numero_odmc && empresaData.numero_odmc.trim() !== '') {
+                                  dataToSave.numero_odmc = empresaData.numero_odmc.trim();
+                                }
+                                
+                                const nuevaEmpresa = await createEmpresa(dataToSave);
+                                setProcessedData((prev: any) => ({
+                                  ...prev,
+                                  empresa_origen: { ...nuevaEmpresa, es_nueva: false }
+                                }));
+                                setNewCompaniesCount(prev => Math.max(0, prev - 1));
+                                toast.success("Empresa guardada correctamente");
+                                const empresasActualizadas = await fetchEmpresas();
+                                setEmpresas(empresasActualizadas);
+                              } catch (error: any) {
+                                console.error("Error guardando empresa:", error);
+                                toast.error(error.message || "Error al guardar la empresa");
+                              } finally {
+                                setIsSavingEmpresa(false);
+                              }
+                            }}
+                            disabled={isSavingEmpresa}
+                          >
+                            {isSavingEmpresa ? 'Guardando...' : 'Guardar'}
+                          </Button>
                         </div>
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Nombre:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_origen?.nombre || '-'}</span>
+                        <div className="space-y-2">
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Número ODMC:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_origen?.numero_odmc || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_origen: { ...prev.empresa_origen, numero_odmc: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Dirección:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_origen?.direccion || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Nombre:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_origen?.nombre || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_origen: { ...prev.empresa_origen, nombre: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Código Postal:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_origen?.codigo_postal || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Dirección:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_origen?.direccion || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_origen: { ...prev.empresa_origen, direccion: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Ciudad:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_origen?.ciudad || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Código Postal:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_origen?.codigo_postal || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_origen: { ...prev.empresa_origen, codigo_postal: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Provincia:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_origen?.provincia || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Ciudad:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_origen?.ciudad || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_origen: { ...prev.empresa_origen, ciudad: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">País:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_origen?.pais || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Provincia:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_origen?.provincia || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_origen: { ...prev.empresa_origen, provincia: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Número ODMC:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_origen?.numero_odmc || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">País:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_origen?.pais || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_origen: { ...prev.empresa_origen, pais: e.target.value }
+                              }))}
+                            />
                           </div>
                         </div>
                       </div>
@@ -2648,45 +2780,135 @@ function UploadAC21PageContent() {
                       <div className="bg-white p-3 rounded-md shadow-sm">
                         <div className="flex justify-between items-start mb-2">
                           <h4 className="text-sm font-medium text-gray-600">Para:</h4>
-                          {processedData.empresa_destino?.es_nueva && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="bg-blue-50 text-blue-600 hover:bg-blue-100 border-blue-200"
-                              onClick={() => handleOpenEmpresaModal(processedData.empresa_destino, 'destino')}
-                            >
-                              Dar de alta
-                            </Button>
-                          )}
+                          <Button
+                            variant="default"
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                            onClick={async () => {
+                              const empresaData = processedData.empresa_destino;
+                              if (!empresaData) return;
+                              
+                              try {
+                                setIsSavingEmpresa(true);
+                                const requiredFields = ['nombre', 'direccion', 'ciudad', 'codigo_postal', 'provincia'];
+                                const missingFields = requiredFields.filter(field => !empresaData[field] || empresaData[field].trim() === '');
+                                
+                                if (missingFields.length > 0) {
+                                  toast.error(`Faltan campos requeridos: ${missingFields.join(', ')}`);
+                                  return;
+                                }
+                                
+                                const dataToSave: any = {
+                                  nombre: (empresaData.nombre || '').trim(),
+                                  direccion: (empresaData.direccion || '').trim(),
+                                  ciudad: (empresaData.ciudad || '').trim(),
+                                  codigo_postal: (empresaData.codigo_postal || '').trim(),
+                                  provincia: (empresaData.provincia || '').trim(),
+                                  activa: true
+                                };
+                                
+                                if (empresaData.numero_odmc && empresaData.numero_odmc.trim() !== '') {
+                                  dataToSave.numero_odmc = empresaData.numero_odmc.trim();
+                                }
+                                
+                                const nuevaEmpresa = await createEmpresa(dataToSave);
+                                setProcessedData((prev: any) => ({
+                                  ...prev,
+                                  empresa_destino: { ...nuevaEmpresa, es_nueva: false }
+                                }));
+                                setNewCompaniesCount(prev => Math.max(0, prev - 1));
+                                toast.success("Empresa guardada correctamente");
+                                const empresasActualizadas = await fetchEmpresas();
+                                setEmpresas(empresasActualizadas);
+                              } catch (error: any) {
+                                console.error("Error guardando empresa:", error);
+                                toast.error(error.message || "Error al guardar la empresa");
+                              } finally {
+                                setIsSavingEmpresa(false);
+                              }
+                            }}
+                            disabled={isSavingEmpresa}
+                          >
+                            {isSavingEmpresa ? 'Guardando...' : 'Guardar'}
+                          </Button>
                         </div>
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Nombre:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_destino?.nombre || '-'}</span>
+                        <div className="space-y-2">
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Número ODMC:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_destino?.numero_odmc || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_destino: { ...prev.empresa_destino, numero_odmc: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Dirección:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_destino?.direccion || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Nombre:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_destino?.nombre || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_destino: { ...prev.empresa_destino, nombre: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Código Postal:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_destino?.codigo_postal || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Dirección:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_destino?.direccion || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_destino: { ...prev.empresa_destino, direccion: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Ciudad:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_destino?.ciudad || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Código Postal:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_destino?.codigo_postal || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_destino: { ...prev.empresa_destino, codigo_postal: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Provincia:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_destino?.provincia || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Ciudad:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_destino?.ciudad || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_destino: { ...prev.empresa_destino, ciudad: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">País:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_destino?.pais || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">Provincia:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_destino?.provincia || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_destino: { ...prev.empresa_destino, provincia: e.target.value }
+                              }))}
+                            />
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">Número ODMC:</span>
-                            <span className="text-sm text-gray-600">{processedData.empresa_destino?.numero_odmc || '-'}</span>
+                          <div>
+                            <Label className="text-xs font-semibold text-gray-700">País:</Label>
+                            <Input
+                              className="text-sm h-8"
+                              value={processedData.empresa_destino?.pais || ''}
+                              onChange={e => setProcessedData((prev: any) => ({
+                                ...prev,
+                                empresa_destino: { ...prev.empresa_destino, pais: e.target.value }
+                              }))}
+                            />
                           </div>
                         </div>
                       </div>
@@ -3042,21 +3264,54 @@ function UploadAC21PageContent() {
 
               {/* Sección inferior: Estado del material, firmas y observaciones */}
               <div className="mt-4 border border-gray-300 rounded bg-white p-4">
-                {/* Fila 1: El material ha sido (radios) */}
+                {/* Fila 1: El material ha sido (checkboxes) */}
                 <div className="grid grid-cols-1 md:grid-cols-4 items-center gap-x-4 gap-y-2 mb-4">
                   <div className="md:col-span-1 text-sm font-semibold text-gray-700">
                     14. EL MATERIAL HA SIDO:
                   </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="radio" name="estado_material" value="RECIBIDO" checked={processedData.estado_material === 'RECIBIDO'} onChange={() => handleEstadoMaterialChange('RECIBIDO')} className="form-radio"/>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={processedData.estado_material === 'RECIBIDO'} 
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          handleEstadoMaterialChange('RECIBIDO');
+                        } else {
+                          handleEstadoMaterialChange(null);
+                        }
+                      }} 
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
                     RECIBIDO
                   </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="radio" name="estado_material" value="INVENTARIADO" checked={processedData.estado_material === 'INVENTARIADO'} onChange={() => handleEstadoMaterialChange('INVENTARIADO')} className="form-radio"/>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={processedData.estado_material === 'INVENTARIADO'} 
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          handleEstadoMaterialChange('INVENTARIADO');
+                        } else {
+                          handleEstadoMaterialChange(null);
+                        }
+                      }} 
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
                     INVENTARIADO
                   </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="radio" name="estado_material" value="DESTRUIDO" checked={processedData.estado_material === 'DESTRUIDO'} onChange={() => handleEstadoMaterialChange('DESTRUCCION')} className="form-radio"/>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={processedData.estado_material === 'DESTRUIDO'} 
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          handleEstadoMaterialChange('DESTRUIDO');
+                        } else {
+                          handleEstadoMaterialChange(null);
+                        }
+                      }} 
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
                     DESTRUIDO
                   </label>
                 </div>
