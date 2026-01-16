@@ -31,13 +31,13 @@ DEFAULT_JSON_TEMPLATE = {
         "fecha_transaccion": None,
         "numero_registro_entrada": None,
         "fecha_informe": None,
-        "odmc_numero": None
+        "tipo_transaccion": "transferencia"  # Valores posibles: "transferencia", "inventario", "destruccion", "recibo_en_mano", "otro"
     },
     "empresa_origen": {
-        "nombre": None, "direccion": None, "codigo_postal": None, "ciudad": None, "provincia": None, "pais": None, "codigo_odmc": None, "codigo_emad": None, "nif": None, "telefono": None, "email": None
+        "nombre": None, "direccion": None, "codigo_postal": None, "ciudad": None, "provincia": None, "numero_odmc": None
     },
     "empresa_destino": {
-        "nombre": None, "direccion": None, "codigo_postal": None, "ciudad": None, "provincia": None, "pais": None, "codigo_odmc": None, "codigo_emad": None, "nif": None, "telefono": None, "email": None
+        "nombre": None, "direccion": None, "codigo_postal": None, "ciudad": None, "provincia": None, "numero_odmc": None
     },
     "articulos": [],  # Cada artículo tiene: codigo_producto (TÍTULO CORTO/EDICIÓN), descripcion (OBSERVACIONES), cantidad, numero_serie_inicio, numero_serie_fin, cc
     "accesorios": [],
@@ -375,10 +375,13 @@ class AC21Processor:
             except (ValueError, TypeError):
                 sanitized_article["cantidad"] = 1
             
-            try:
-                sanitized_article["cc"] = int(article.get("cc") or 0)
-            except (ValueError, TypeError):
-                sanitized_article["cc"] = 0
+            # CC puede ser cualquier valor o estar vacío
+            cc_value = article.get("cc")
+            if cc_value is None:
+                sanitized_article["cc"] = ""
+            else:
+                # Mantener como string para permitir cualquier valor
+                sanitized_article["cc"] = str(cc_value).strip()
             
             sanitized.append(sanitized_article)
                 
@@ -504,6 +507,27 @@ class AC21Processor:
             print("================== PARSED JSON DATA (HEADER) =====================")
             print(json.dumps(header_data, indent=2))
             print("==================================================================")
+            
+            # Log específico para empresas (codigo_postal, ciudad, provincia)
+            if 'empresa_origen' in header_data:
+                emp_origen = header_data['empresa_origen']
+                print("🔍 [DEBUG EMPRESA ORIGEN]")
+                print(f"   nombre: {emp_origen.get('nombre', 'N/A')}")
+                print(f"   direccion: {emp_origen.get('direccion', 'N/A')}")
+                print(f"   codigo_postal: {emp_origen.get('codigo_postal', 'N/A')} (tipo: {type(emp_origen.get('codigo_postal')).__name__})")
+                print(f"   ciudad: {emp_origen.get('ciudad', 'N/A')} (tipo: {type(emp_origen.get('ciudad')).__name__})")
+                print(f"   provincia: {emp_origen.get('provincia', 'N/A')} (tipo: {type(emp_origen.get('provincia')).__name__})")
+                print(f"   numero_odmc: {emp_origen.get('numero_odmc', 'N/A')}")
+            
+            if 'empresa_destino' in header_data:
+                emp_destino = header_data['empresa_destino']
+                print("🔍 [DEBUG EMPRESA DESTINO]")
+                print(f"   nombre: {emp_destino.get('nombre', 'N/A')}")
+                print(f"   direccion: {emp_destino.get('direccion', 'N/A')}")
+                print(f"   codigo_postal: {emp_destino.get('codigo_postal', 'N/A')} (tipo: {type(emp_destino.get('codigo_postal')).__name__})")
+                print(f"   ciudad: {emp_destino.get('ciudad', 'N/A')} (tipo: {type(emp_destino.get('ciudad')).__name__})")
+                print(f"   provincia: {emp_destino.get('provincia', 'N/A')} (tipo: {type(emp_destino.get('provincia')).__name__})")
+                print(f"   numero_odmc: {emp_destino.get('numero_odmc', 'N/A')}")
 
             # 3. Segunda llamada: SOLO artículos / accesorios / equipos de prueba (una sola pasada)
             print("🔄 [PASO 2] Preparando llamada a OpenAI para ARTÍCULOS/ACCESORIOS/EQUIPOS...")
@@ -546,6 +570,10 @@ class AC21Processor:
             print("================== RAW DATA COMBINADO ============================")
             print(json.dumps(raw_data, indent=2))
             print("==================================================================")
+            
+            # Guardar datos RAW para debug (antes del post-procesamiento)
+            raw_empresa_origen = raw_data.get('empresa_origen', {})
+            raw_empresa_destino = raw_data.get('empresa_destino', {})
 
             # 5. Post-procesar los datos para corregir errores y mapear
             print("🔄 Post-procesando datos combinados...")
@@ -567,6 +595,29 @@ class AC21Processor:
             print("=========================================================")
             print(f"📊 Resumen: {len(result.get('articulos', []))} artículos, {len(result.get('accesorios', []))} accesorios")
 
+            # Añadir información de debug para el frontend
+            debug_info = {
+                "empresa_origen_final": {
+                    "nombre": result.get('empresa_origen', {}).get('nombre'),
+                    "direccion": result.get('empresa_origen', {}).get('direccion'),
+                    "codigo_postal": result.get('empresa_origen', {}).get('codigo_postal'),
+                    "ciudad": result.get('empresa_origen', {}).get('ciudad'),
+                    "provincia": result.get('empresa_origen', {}).get('provincia'),
+                    "numero_odmc": result.get('empresa_origen', {}).get('numero_odmc'),
+                },
+                "empresa_destino_final": {
+                    "nombre": result.get('empresa_destino', {}).get('nombre'),
+                    "direccion": result.get('empresa_destino', {}).get('direccion'),
+                    "codigo_postal": result.get('empresa_destino', {}).get('codigo_postal'),
+                    "ciudad": result.get('empresa_destino', {}).get('ciudad'),
+                    "provincia": result.get('empresa_destino', {}).get('provincia'),
+                    "numero_odmc": result.get('empresa_destino', {}).get('numero_odmc'),
+                },
+                "empresa_origen_raw_ocr": raw_empresa_origen if 'raw_empresa_origen' in locals() else {},
+                "empresa_destino_raw_ocr": raw_empresa_destino if 'raw_empresa_destino' in locals() else {},
+            }
+            result["_debug"] = debug_info
+
             return result
 
         except Exception as e:
@@ -585,10 +636,13 @@ class AC21Processor:
                         "text": """
                         Analiza la imagen de este documento AC-21 y extrae la información estructurada en formato JSON. Presta especial atención a los siguientes puntos:
                         
+                        **FORMATO JSON IMPORTANTE**: Todos los campos de texto (strings) deben ser cadenas de texto. Si un campo está vacío o no se encuentra, usa una cadena vacía "" (NO uses null, None, ni ningún otro valor). Ejemplos: `"codigo_postal": ""`, `"ciudad": ""`, `"provincia": ""`, `"numero_registro_entrada": ""`. Solo los campos booleanos pueden ser `false` o `true`, y las listas pueden estar vacías `[]`.
+                        
                         1.  **Cabecera**: Extrae los campos de la parte superior:
-                            - `numero_registro_salida`: **CRÍTICO** - Número de registro de salida. Este es un NÚMERO o CÓDIGO alfanumérico (ej: "SA2024-0001", "12345", etc.), NO es una dirección física. Busca etiquetas como "Nº Registro de Salida", "Número Registro Salida", "Registro Salida", etc. en la parte superior del documento. Si encuentras una dirección completa (con calle, número, ciudad), NO la uses aquí. Si no encuentras un número de registro de salida, usa una cadena vacía "".
+                            - `tipo_transaccion`: **CRÍTICO** - Tipo de transacción. **BUSCA ESPECÍFICAMENTE EL PUNTO 1**: Busca "1." seguido de las opciones: "TRANSFER", "INVENTORY", "DESTRUCTION", "HAND RECEIPT", "OTHER" (INGLÉS) o "TRANSFERENCIA", "INVENTARIO", "DESTRUCCION", "RECIBO EN MANO", "OTRO" (ESPAÑOL). Detecta qué casilla está marcada (✓, X, o cualquier marca visible) en el punto 1. **IMPORTANTE**: Solo una casilla debe estar marcada. Si ninguna está marcada o no puedes detectarlo, devuelve `"transferencia"` como valor por defecto. Devuelve el valor como string: `"transferencia"`, `"inventario"`, `"destruccion"`, `"recibo_en_mano"`, o `"otro"`. Si no encuentras ninguna marca, usa `"transferencia"` como valor por defecto.
+                            - `numero_registro_salida`: **CRÍTICO** - Número de registro de salida. Este es un NÚMERO o CÓDIGO alfanumérico (ej: "SA2024-0001", "12345", etc.), **NO es una FECHA, NO es "DATE OF REPORT", NO es "DATE OF TRANSACTION"**. **BUSCA ESPECÍFICAMENTE EL PUNTO 4**: Busca "4." seguido de "Nº Registro de Salida" (ESPAÑOL) o "Outgoing Number" (INGLÉS). Etiquetas en ESPAÑOL: "4. Nº Registro de Salida", "Nº Registro de Salida", "Número Registro Salida", "Registro Salida". Etiquetas en INGLÉS: "4. Outgoing Number", "Outgoing No.", "Exit Registration Number", "Registration Number", "Exit Reg. No.", "Reg. No.". **⚠️⚠️⚠️ CRÍTICO - NO CONFUNDAS CON FECHAS**: Si encuentras una fecha (formato YYYY-MM-DD, DD/MM/YYYY, o similar) en el punto 4, NO la uses. Las fechas pertenecen a los puntos 3 (DATE OF REPORT) y 5 (DATE OF TRANSACTION), NO al punto 4. **IMPORTANTE**: Si en el punto 4 no encuentras ningún valor o el campo está vacío, usa una cadena vacía "". NO inventes valores. Si encuentras una fecha, NO la uses aquí. Si encuentras una dirección completa (con calle, número, ciudad), NO la uses aquí. Si no encuentras un número de registro de salida en el punto 4, usa una cadena vacía "".
                             - `fecha_informe`: **CRÍTICO** - Fecha del informe. **BUSCA ESPECÍFICAMENTE EL PUNTO 3**: Busca "3." seguido de "DATE OF REPORT" o "Fecha del Informe". Etiquetas en ESPAÑOL: "3. Fecha del Informe", "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Etiquetas en INGLÉS: "3. DATE OF REPORT", "3. Report Date", "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15"). NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha. Si no encuentras una fecha en el punto 3, usa una cadena vacía "".
-                            - `numero_registro_entrada`: **CRÍTICO** - Número de registro de entrada. Este es un NÚMERO o CÓDIGO alfanumérico, NO es un número ODMC, NO es "ACCT. NO". Busca etiquetas en ESPAÑOL: "Nº Registro de Entrada", "Registro Entrada". Busca etiquetas en INGLÉS: "Incoming Number", "Incoming No.", "Entry Registration Number", "Entry Reg. No.". **IMPORTANTE**: Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si no encuentras un número de registro de entrada, usa una cadena vacía "".
+                            - `numero_registro_entrada`: **CRÍTICO** - Número de registro de entrada. Este es un NÚMERO o CÓDIGO alfanumérico, **NO es una FECHA, NO es "DATE OF REPORT", NO es "DATE OF TRANSACTION", NO es un número ODMC, NO es "ACCT. NO", NO es el número ODMC de ninguna empresa**. **BUSCA ESPECÍFICAMENTE EL PUNTO 6**: Busca "6." seguido de "Nº Registro de Entrada" (ESPAÑOL) o "Incoming Number" (INGLÉS). Etiquetas en ESPAÑOL: "6. Nº Registro de Entrada", "Nº Registro de Entrada", "Registro Entrada". Etiquetas en INGLÉS: "6. Incoming Number", "Incoming No.", "Entry Registration Number", "Entry Reg. No.". **⚠️⚠️⚠️ CRÍTICO - NO CONFUNDAS CON FECHAS**: Si encuentras una fecha (formato YYYY-MM-DD, DD/MM/YYYY, o similar) en el punto 6, NO la uses. Las fechas pertenecen a los puntos 3 (DATE OF REPORT) y 5 (DATE OF TRANSACTION), NO al punto 6. **⚠️⚠️⚠️ CRÍTICO - NO CONFUNDAS CON ODMC**: Si encuentras un número que está en la sección de empresas (junto a "ACCT. NO" o "ODMC"), ese número pertenece a `numero_odmc` de la empresa, NO a `numero_registro_entrada`. Ejemplos de números ODMC que NO debes usar aquí: "000303", "EMAD-004-E08", "02.01.06.21", etc. **IMPORTANTE**: Si en el punto 6 no encuentras ningún valor o el campo está vacío, usa una cadena vacía "". NO inventes valores. Si encuentras una fecha, NO la uses aquí. Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si no encuentras un número de registro de entrada en el punto 6, usa una cadena vacía "".
                             - `fecha_transaccion`: **🔥 CRÍTICO - ESTE CAMPO ES PRIORITARIO** - Fecha de la transacción. **⚠️⚠️⚠️ ATENCIÓN: Este campo es DIFERENTE de "Fecha del Informe" / "Date of Report". NO los confundas. ⚠️⚠️⚠️** 
                           
                           **INSTRUCCIONES ESPECÍFICAS PARA EXTRAER `fecha_transaccion`:**
@@ -603,7 +657,6 @@ class AC21Processor:
                           7. NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha.
                           8. **SI ENCUENTRAS una fecha en el punto 5 (junto a "5." y "Transaction"/"Transacción"/"Trasaction"), esa es `fecha_transaccion`.**
                           9. Si NO encuentras ninguna fecha en el punto 5, usa una cadena vacía "" en lugar de inventar una fecha.
-                            - `odmc_numero`: **CRÍTICO** - Número ODMC. Busca etiquetas en ESPAÑOL: "ODMC", "ODMC Nº", "ODMC Number", "ODMC No.". Busca etiquetas en INGLÉS: "ODMC", "ODMC Number", "ODMC No.", "ACCT. NO" (Account Number - el número que aparece debajo de "ACCT. NO" es el ODMC). El formato del ODMC puede variar mucho: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004", "ODMC-123"), con puntos (ej: "02.01.06.21", "12.34.56.78"), solo números (ej: "000303", "123456"), o códigos alfanuméricos sin guiones (ej: "EMAD004", "ABC123"). **IMPORTANTE**: Si encuentras cualquier código o número junto a las etiquetas "ODMC", "ACCT. NO", o "EMAD", ese es el ODMC. Este es un código/número específico, NO es una fecha. NO lo pongas en campos de fecha.
                         2.  **Empresas**: 
                             - Busca dos secciones de empresa en el documento. Identifícalas por posición visual:
                               * La sección que está ARRIBA (parte superior del documento) → `empresa_origen`
@@ -615,11 +668,44 @@ class AC21Processor:
                               * **`numero_odmc`**: Busca "ACCT. NO" o "ODMC" y extrae el número/código que aparece debajo o junto a esa etiqueta. Formato ODMC puede ser: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004"), con puntos (ej: "02.01.06.21"), solo números (ej: "000303", "2010622"), o códigos alfanuméricos sin guiones (ej: "EMAD004").
                               * **`nombre`**: El nombre completo de la empresa/organización. Está después del número ODMC, ANTES de las líneas de dirección/ciudad. Las letras sueltas (T, R, F, OM, etc.) son parte de "TO" o "FROM" escritas en VERTICAL, NO son etiquetas. Ignora esas letras verticales. El nombre puede ser una línea completa o múltiples líneas si forman parte del nombre de la empresa. **NO uses ciudades o direcciones como nombre**.
                               * **`direccion`**: La dirección física completa (calle, número, etc.). Aparece después del nombre. Si es una calle con número, es `direccion`. Si es solo un nombre de lugar/ciudad sin calle, puede ser `ciudad` o `direccion` según el contexto. Si solo aparece una ciudad sin calle, déjala en `ciudad` y `direccion` vacío.
-                              * **`codigo_postal`**: Código postal numérico (5 dígitos típicamente). Si no está visible, usa "".
-                              * **`ciudad`**: Nombre de la ciudad. Aparece después de la dirección. Si aparece "Madrid", "San Agustin de Guadalix", etc., es `ciudad`. NO confundas ciudades con nombres de empresa.
-                              * **`provincia`**: Nombre de la provincia/región. Si no está visible, usa "".
-                              * **`pais`**: Nombre del país. Si no está visible, usa "".
-                            - **ORDEN TÍPICO DE INFORMACIÓN** (puede haber saltos): Número ODMC → Nombre → Dirección → Código Postal → Ciudad → Provincia → País
+                              * **`codigo_postal`**: **🔥🔥🔥 CRÍTICO - BUSCA ACTIVAMENTE ESTE CAMPO** - Código postal numérico (típicamente 5 dígitos en España). **ESTE CAMPO SIEMPRE ESTÁ PRESENTE EN LA INFORMACIÓN DE LA EMPRESA, DESPUÉS DE LA DIRECCIÓN**. **FORMATOS COMUNES**:
+                                - **Formato con guión y paréntesis**: "28300-ARANJUEZ (MADRID)" → codigo_postal: "28300", ciudad: "ARANJUEZ", provincia: "MADRID"
+                                - **Formato con guión y paréntesis**: "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → codigo_postal: "28703", ciudad: "SAN SEBASTIAN DE LOS REYES", provincia: "MADRID"
+                                - **Formato con guión**: "28071 – Madrid" → codigo_postal: "28071", ciudad: "Madrid"
+                                - **Formato separado por espacio**: "28071 Madrid" → codigo_postal: "28071", ciudad: "Madrid"
+                                - **Formato separado por coma**: "28071, Madrid" → codigo_postal: "28071", ciudad: "Madrid"
+                                - **Formato en línea separada**: Dirección en una línea, código postal y ciudad en la siguiente línea
+                                - **PATRÓN CLAVE**: Busca un número de 5 dígitos (ej: "28071", "28300", "28703", "08001", "41001") que aparece DESPUÉS de la dirección y ANTES o JUNTO a la ciudad
+                                - **EJEMPLOS REALES DE DOCUMENTOS**:
+                                  * "C/ JOAQUIN RODRIGO, 11\n28300-ARANJUEZ (MADRID)" → codigo_postal: "28300"
+                                  * "AV.SOMOSIERRA,12\n28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → codigo_postal: "28703"
+                                  * "C/ Vitruvio, 1\n28071 – Madrid" → codigo_postal: "28071"
+                                - Si no encuentras un código postal (5 dígitos numéricos), usa "".
+                              * **`ciudad`**: **🔥🔥🔥 CRÍTICO - BUSCA ACTIVAMENTE ESTE CAMPO** - Nombre de la ciudad. **ESTE CAMPO SIEMPRE ESTÁ PRESENTE EN LA INFORMACIÓN DE LA EMPRESA, DESPUÉS DEL CÓDIGO POSTAL**. **FORMATOS COMUNES**:
+                                - **Formato con guión y paréntesis**: "28300-ARANJUEZ (MADRID)" → ciudad: "ARANJUEZ"
+                                - **Formato con guión y paréntesis**: "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → ciudad: "SAN SEBASTIAN DE LOS REYES"
+                                - **Formato con guión**: "28071 – Madrid" → ciudad: "Madrid"
+                                - **Formato separado por espacio**: "28071 Madrid" → ciudad: "Madrid"
+                                - **PATRÓN CLAVE**: Busca el nombre de la ciudad que aparece DESPUÉS del código postal (separado por guión "-" o espacio). La ciudad está ANTES de la provincia (que puede estar entre paréntesis).
+                                - **EJEMPLOS REALES DE DOCUMENTOS**:
+                                  * "28300-ARANJUEZ (MADRID)" → ciudad: "ARANJUEZ"
+                                  * "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → ciudad: "SAN SEBASTIAN DE LOS REYES"
+                                  * "28071 – Madrid" → ciudad: "Madrid"
+                                - Ejemplos comunes: "Madrid", "ARANJUEZ", "SAN SEBASTIAN DE LOS REYES", "Barcelona", "Valencia", "Sevilla", etc.
+                                - **NO confundas ciudades con nombres de empresa**. Si aparece "Madrid", "ARANJUEZ", "SAN SEBASTIAN DE LOS REYES", etc., es `ciudad`, NO es nombre de empresa.
+                                - Si no encuentras una ciudad claramente identificable, usa "".
+                              * **`provincia`**: **🔥🔥🔥 CRÍTICO - BUSCA ACTIVAMENTE ESTE CAMPO** - Nombre de la provincia/región. **ESTE CAMPO PUEDE ESTAR ENTRE PARÉNTESIS DESPUÉS DE LA CIUDAD**. **FORMATOS COMUNES**:
+                                - **Formato entre paréntesis**: "28300-ARANJUEZ (MADRID)" → provincia: "MADRID"
+                                - **Formato entre paréntesis**: "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → provincia: "MADRID"
+                                - **Formato implícito**: "28071 – Madrid" → provincia: "Madrid" (cuando la ciudad y provincia tienen el mismo nombre)
+                                - **PATRÓN CLAVE**: Busca texto entre paréntesis "(...)" después de la ciudad. Ese texto suele ser la provincia. Si no hay paréntesis pero la ciudad es una capital (ej: "Madrid", "Barcelona"), la provincia suele ser la misma que la ciudad.
+                                - **EJEMPLOS REALES DE DOCUMENTOS**:
+                                  * "28300-ARANJUEZ (MADRID)" → provincia: "MADRID"
+                                  * "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → provincia: "MADRID"
+                                  * "28071 – Madrid" → provincia: "Madrid" (mismo nombre que la ciudad)
+                                - Ejemplos comunes: "MADRID", "Madrid", "Barcelona", "Valencia", "Sevilla", etc.
+                                - Si no encuentras una provincia claramente identificable, usa "".
+                            - **ORDEN TÍPICO DE INFORMACIÓN** (puede haber saltos): Número ODMC → Nombre → Dirección → Código Postal → Ciudad → Provincia
                             - **NOTA**: Las letras sueltas (T, R, F, OM) son parte de "TO"/"FROM" escritas verticalmente. Ignóralas al extraer datos.
                             - **NO confundas**: El nombre de la empresa NO es una ciudad. "San Agustin de Guadalix" es ciudad, NO nombre de empresa. "EMPRESA AICOX" es nombre de empresa.
                             - **NO inviertas**: ARRIBA = origen, ABAJO = destino.
@@ -637,7 +723,12 @@ class AC21Processor:
                               * `cantidad`: El número de la columna "CANTIDAD" (debe ser un número entero)
                               * `numero_serie_inicio`: El valor de la columna "NÚMERO DE SERIE - INICIO"
                               * `numero_serie_fin`: El valor de la columna "NÚMERO DE SERIE - FIN"
-                              * `cc`: El valor de la columna "CC" (código de contabilidad)
+                              * `cc`: El valor de la columna "CC" o "ALC" (código de contabilidad / Accounting Legend Code). **BUSCA ESPECÍFICAMENTE LA COLUMNA 12**: Busca "12. ALC" (INGLÉS) o "12. CC" (ESPAÑOL) en la cabecera de la tabla. Esta columna puede estar etiquetada como "ALC", "CC", "12. ALC", o "12. CC". Los valores más comunes son 1, 2 o 3:
+                                - **1**: Contabilizable por número de serie (Accountable by serial number)
+                                - **2**: Contabilizable por cantidad (Accountable by quantity)
+                                - **3**: Acuse de recibo inicial (Initial receipt required)
+                                **IMPORTANTE**: Extrae el valor numérico que aparece en la celda de la columna 12 (ALC/CC). Puede aparecer solo el número (ej: "1"), o con marcas (ej: "1 ☑", "1 #", "1✓"). Extrae SOLO el número, ignorando las marcas. Si la celda está vacía, usa una cadena vacía "". Si encuentras cualquier otro valor numérico, extrae ese valor tal como aparece.
+                                Devuelve el valor como string (puede ser "1", "2", "3", otro valor numérico, o "" si está vacío).
                             - Es CRÍTICO que no omitas ningún artículo, aunque dos filas sean idénticas o casi idénticas. Si hay 30 filas en la tabla, debe haber 30 elementos en `articulos`, con `indice_fila` de 1 a 30 sin huecos.
                             - **IMPORTANTE**: 
                               - "TÍTULO CORTO / EDICIÓN" (ESPAÑOL) o "SHORT TITLE / EDITION" (INGLÉS) va a `codigo_producto`.
@@ -663,7 +754,6 @@ class AC21Processor:
                               * Si "INVENTARIADO" (ESPAÑOL) o "INVENTORIED" (INGLÉS) está marcado → `estado_material.inventariado = true`, los demás `false`
                               * Si "DESTRUIDO" (ESPAÑOL) o "DESTROYED" (INGLÉS) está marcado → `estado_material.destruido = true`, los demás `false`
                             - **IMPORTANTE**: Solo una casilla debe estar marcada. Si ninguna está marcada, todos los campos deben ser `false`.
-                            - También detecta el estado de las casillas en la parte superior (TRANSFERENCIA, INVENTARIO, etc.) para `tipo_transaccion`.
                         8.  **Casillas de verificación - Sección 16 (CRÍTICO)**:
                             - Busca la sección "16." en el documento, cerca de las firmas.
                             - Detecta qué casillas están marcadas (✓, X, o cualquier marca visible):
@@ -681,17 +771,16 @@ class AC21Processor:
                         El JSON final debe tener esta estructura exacta. No incluyas texto o caracteres fuera del objeto JSON.
                         {
                           "cabecera": {
-                            "tipo_transaccion": "String",
+                            "tipo_transaccion": "String (valores posibles: 'transferencia', 'inventario', 'destruccion', 'recibo_en_mano', 'otro')",
                             "numero_registro_salida": "String",
                             "fecha_informe": "String (YYYY-MM-DD)",
                             "numero_registro_entrada": "String",
                             "fecha_transaccion": "String (YYYY-MM-DD)",
-                            "odmc_numero": "String"
                           },
-                          "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "codigo_odmc": "String", "codigo_emad": "String", "numero_odmc": "String" },
-                          "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "codigo_odmc": "String", "numero_odmc": "String" },
+                          "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
+                          "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
                           "articulos": [
-                            { "indice_fila": "Int (número de fila en la tabla, empezando en 1)", "codigo_producto": "String (TÍTULO CORTO / EDICIÓN)", "descripcion": "String (OBSERVACIONES)", "cantidad": "Int", "numero_serie_inicio": "String", "numero_serie_fin": "String", "cc": "String" }
+                            { "indice_fila": "Int (número de fila en la tabla, empezando en 1)", "codigo_producto": "String (TÍTULO CORTO / EDICIÓN)", "descripcion": "String (OBSERVACIONES)", "cantidad": "Int", "numero_serie_inicio": "String", "numero_serie_fin": "String", "cc": "String (valores válidos: '1', '2' o '3')" }
                           ],
                           "accesorios": [
                             { "descripcion": "String", "cantidad": "Int" }
@@ -738,10 +827,10 @@ class AC21Processor:
                         "text": """
                         Analiza la imagen de este documento AC-21 y EXTRAe ÚNICAMENTE:
                         - La CABECERA:
-                          * `tipo_transaccion`: Tipo de transacción (TRANSFERENCIA, INVENTARIO, etc.)
-                          * `numero_registro_salida`: **CRÍTICO** - Número de registro de salida. Este es un NÚMERO o CÓDIGO alfanumérico (ej: "SA2024-0001", "12345", etc.), NO es una dirección física, NO es un número ODMC, NO es "ACCT. NO". Busca etiquetas en ESPAÑOL: "Nº Registro de Salida", "Número Registro Salida", "Registro Salida". Busca etiquetas en INGLÉS: "Outgoing Number", "Outgoing No.", "Exit Registration Number", "Registration Number", "Exit Reg. No.", "Reg. No.". **IMPORTANTE**: Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si encuentras una dirección completa (con calle, número, ciudad), NO la uses aquí. Si no encuentras un número de registro de salida, usa una cadena vacía "".
+                          * `tipo_transaccion`: **CRÍTICO** - Tipo de transacción. **BUSCA ESPECÍFICAMENTE EL PUNTO 1**: Busca "1." seguido de las opciones: "TRANSFER", "INVENTORY", "DESTRUCTION", "HAND RECEIPT", "OTHER" (INGLÉS) o "TRANSFERENCIA", "INVENTARIO", "DESTRUCCION", "RECIBO EN MANO", "OTRO" (ESPAÑOL). Detecta qué casilla está marcada (✓, X, o cualquier marca visible) en el punto 1. **IMPORTANTE**: Solo una casilla debe estar marcada. Si ninguna está marcada o no puedes detectarlo, devuelve `"transferencia"` como valor por defecto. Devuelve el valor como string: `"transferencia"`, `"inventario"`, `"destruccion"`, `"recibo_en_mano"`, o `"otro"`. Si no encuentras ninguna marca, usa `"transferencia"` como valor por defecto.
+                          * `numero_registro_salida`: **CRÍTICO** - Número de registro de salida. Este es un NÚMERO o CÓDIGO alfanumérico (ej: "SA2024-0001", "12345", etc.), **NO es una FECHA, NO es "DATE OF REPORT", NO es "DATE OF TRANSACTION", NO es una dirección física, NO es un número ODMC, NO es "ACCT. NO"**. **BUSCA ESPECÍFICAMENTE EL PUNTO 4**: Busca "4." seguido de "Nº Registro de Salida" (ESPAÑOL) o "Outgoing Number" (INGLÉS). Etiquetas en ESPAÑOL: "4. Nº Registro de Salida", "Nº Registro de Salida", "Número Registro Salida", "Registro Salida". Etiquetas en INGLÉS: "4. Outgoing Number", "Outgoing No.", "Exit Registration Number", "Registration Number", "Exit Reg. No.", "Reg. No.". **⚠️⚠️⚠️ CRÍTICO - NO CONFUNDAS CON FECHAS**: Si encuentras una fecha (formato YYYY-MM-DD, DD/MM/YYYY, o similar) en el punto 4, NO la uses. Las fechas pertenecen a los puntos 3 (DATE OF REPORT) y 5 (DATE OF TRANSACTION), NO al punto 4. **IMPORTANTE**: Si en el punto 4 no encuentras ningún valor o el campo está vacío, usa una cadena vacía "". NO inventes valores. Si encuentras una fecha, NO la uses aquí. Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si encuentras una dirección completa (con calle, número, ciudad), NO la uses aquí. Si no encuentras un número de registro de salida en el punto 4, usa una cadena vacía "".
                           * `fecha_informe`: **CRÍTICO** - Fecha del informe. **BUSCA ESPECÍFICAMENTE EL PUNTO 3**: Busca "3." seguido de "DATE OF REPORT" o "Fecha del Informe". Etiquetas en ESPAÑOL: "3. Fecha del Informe", "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Etiquetas en INGLÉS: "3. DATE OF REPORT", "3. Report Date", "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15"). NO uses números ODMC, códigos, "ACCT. NO", ni ningún otro valor que no sea una fecha. Si no encuentras una fecha en el punto 3, usa una cadena vacía "".
-                          * `numero_registro_entrada`: **CRÍTICO** - Número de registro de entrada. Este es un NÚMERO o CÓDIGO alfanumérico, NO es un número ODMC, NO es "ACCT. NO". Busca etiquetas en ESPAÑOL: "Nº Registro de Entrada", "Registro Entrada". Busca etiquetas en INGLÉS: "Incoming Number", "Incoming No.", "Entry Registration Number", "Entry Reg. No.". **IMPORTANTE**: Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si no encuentras un número de registro de entrada, usa una cadena vacía "".
+                          * `numero_registro_entrada`: **CRÍTICO** - Número de registro de entrada. Este es un NÚMERO o CÓDIGO alfanumérico, **NO es un número ODMC, NO es "ACCT. NO", NO es el número ODMC de ninguna empresa**. **BUSCA ESPECÍFICAMENTE EL PUNTO 6**: Busca "6." seguido de "Nº Registro de Entrada" (ESPAÑOL) o "Incoming Number" (INGLÉS). Etiquetas en ESPAÑOL: "6. Nº Registro de Entrada", "Nº Registro de Entrada", "Registro Entrada". Etiquetas en INGLÉS: "6. Incoming Number", "Incoming No.", "Entry Registration Number", "Entry Reg. No.". **⚠️⚠️⚠️ CRÍTICO - NO CONFUNDAS**: Si encuentras un número que está en la sección de empresas (junto a "ACCT. NO" o "ODMC"), ese número pertenece a `numero_odmc` de la empresa, NO a `numero_registro_entrada`. Ejemplos de números ODMC que NO debes usar aquí: "000303", "EMAD-004-E08", "02.01.06.21", etc. **IMPORTANTE**: Si en el punto 6 no encuentras ningún valor o el campo está vacío, usa una cadena vacía "". NO inventes valores. Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si no encuentras un número de registro de entrada en el punto 6, usa una cadena vacía "".
                           * `fecha_transaccion`: **🔥 CRÍTICO - ESTE CAMPO ES PRIORITARIO** - Fecha de la transacción. **⚠️⚠️⚠️ ATENCIÓN: Este campo es DIFERENTE de "Fecha del Informe" / "Date of Report". NO los confundas. ⚠️⚠️⚠️** 
                           
                           **INSTRUCCIONES ESPECÍFICAS PARA EXTRAER `fecha_transaccion`:**
@@ -760,7 +849,6 @@ class AC21Processor:
                           9. **SI ENCUENTRAS una fecha en el punto 5 (junto a "5." y "Transaction"/"Transacción"/"Trasaction"), esa es `fecha_transaccion`.**
                           10. **IMPORTANTE**: Si el punto 5 existe pero no tiene fecha visible o está vacío, busca en la misma área visual (misma fila o columna) cualquier fecha que pueda corresponder al punto 5.
                           11. Si NO encuentras ninguna fecha en el punto 5 o cerca del punto 5, usa una cadena vacía "".
-                          * `odmc_numero`: **CRÍTICO** - Número ODMC. Busca etiquetas en ESPAÑOL: "ODMC", "ODMC Nº", "ODMC Number", "ODMC No.". Busca etiquetas en INGLÉS: "ODMC", "ODMC Number", "ODMC No.", "ACCT. NO" (Account Number - el número que aparece debajo de "ACCT. NO" es el ODMC). El formato del ODMC puede variar mucho: alfanumérico con guiones (ej: "EMAD-004-E08", "EMAD - 004", "ODMC-123"), con puntos (ej: "02.01.06.21", "12.34.56.78"), solo números (ej: "000303", "123456"), o códigos alfanuméricos sin guiones (ej: "EMAD004", "ABC123"). **IMPORTANTE**: Si encuentras cualquier código o número junto a las etiquetas "ODMC", "ACCT. NO", o "EMAD", ese es el ODMC. Este es un código/número específico, NO es una fecha. NO lo pongas en campos de fecha.
                         - **Empresas**: 
                           * Busca dos secciones de empresa. Identifícalas por posición:
                             - ARRIBA (parte superior) → `empresa_origen`
@@ -772,11 +860,42 @@ class AC21Processor:
                             - **`numero_odmc`**: Busca "ACCT. NO" o "ODMC" y extrae el código. Formato: "EMAD-004-E08", "02.01.06.21", "000303", "2010622", etc.
                             - **`nombre`**: Nombre completo de la empresa/organización. Está después del número ODMC, ANTES de dirección/ciudad. Las letras sueltas (T, R, F, OM, etc.) son parte de "TO" o "FROM" escritas en VERTICAL, NO son etiquetas. Ignora esas letras verticales. El nombre puede ser múltiples líneas. **NO uses ciudades como nombre**.
                             - **`direccion`**: Dirección física (calle, número). Aparece después del nombre. Si solo hay ciudad sin calle, deja vacío.
-                            - **`codigo_postal`**: Código postal numérico (5 dígitos). Si no está, usa "".
-                            - **`ciudad`**: Nombre de la ciudad. Aparece después de la dirección. "Madrid", "San Agustin de Guadalix" son ciudades, NO nombres de empresa.
-                            - **`provincia`**: Nombre de la provincia. Si no está, usa "".
-                            - **`pais`**: Nombre del país. Si no está, usa "".
-                          * **ORDEN TÍPICO**: Número ODMC → Nombre → Dirección → Código Postal → Ciudad → Provincia → País
+                            - **`codigo_postal`**: **🔥🔥🔥 CRÍTICO - BUSCA ACTIVAMENTE ESTE CAMPO** - Código postal numérico (típicamente 5 dígitos en España). **ESTE CAMPO SIEMPRE ESTÁ PRESENTE EN LA INFORMACIÓN DE LA EMPRESA, DESPUÉS DE LA DIRECCIÓN**. **FORMATOS COMUNES**:
+                              - **Formato con guión y paréntesis**: "28300-ARANJUEZ (MADRID)" → codigo_postal: "28300", ciudad: "ARANJUEZ", provincia: "MADRID"
+                              - **Formato con guión y paréntesis**: "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → codigo_postal: "28703", ciudad: "SAN SEBASTIAN DE LOS REYES", provincia: "MADRID"
+                              - **Formato con guión**: "28071 – Madrid" → codigo_postal: "28071", ciudad: "Madrid"
+                              - **Formato separado por espacio**: "28071 Madrid" → codigo_postal: "28071", ciudad: "Madrid"
+                              - **PATRÓN CLAVE**: Busca un número de 5 dígitos (ej: "28071", "28300", "28703", "08001", "41001") que aparece DESPUÉS de la dirección y ANTES o JUNTO a la ciudad
+                              - **EJEMPLOS REALES DE DOCUMENTOS**:
+                                * "C/ JOAQUIN RODRIGO, 11\n28300-ARANJUEZ (MADRID)" → codigo_postal: "28300"
+                                * "AV.SOMOSIERRA,12\n28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → codigo_postal: "28703"
+                                * "C/ Vitruvio, 1\n28071 – Madrid" → codigo_postal: "28071"
+                              - Si no encuentras un código postal (5 dígitos numéricos), usa "".
+                            - **`ciudad`**: **🔥🔥🔥 CRÍTICO - BUSCA ACTIVAMENTE ESTE CAMPO** - Nombre de la ciudad. **ESTE CAMPO SIEMPRE ESTÁ PRESENTE EN LA INFORMACIÓN DE LA EMPRESA, DESPUÉS DEL CÓDIGO POSTAL**. **FORMATOS COMUNES**:
+                              - **Formato con guión y paréntesis**: "28300-ARANJUEZ (MADRID)" → ciudad: "ARANJUEZ"
+                              - **Formato con guión y paréntesis**: "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → ciudad: "SAN SEBASTIAN DE LOS REYES"
+                              - **Formato con guión**: "28071 – Madrid" → ciudad: "Madrid"
+                              - **Formato separado por espacio**: "28071 Madrid" → ciudad: "Madrid"
+                              - **PATRÓN CLAVE**: Busca el nombre de la ciudad que aparece DESPUÉS del código postal (separado por guión "-" o espacio). La ciudad está ANTES de la provincia (que puede estar entre paréntesis).
+                              - **EJEMPLOS REALES DE DOCUMENTOS**:
+                                * "28300-ARANJUEZ (MADRID)" → ciudad: "ARANJUEZ"
+                                * "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → ciudad: "SAN SEBASTIAN DE LOS REYES"
+                                * "28071 – Madrid" → ciudad: "Madrid"
+                              - Ejemplos comunes: "Madrid", "ARANJUEZ", "SAN SEBASTIAN DE LOS REYES", "Barcelona", "Valencia", "Sevilla", etc.
+                              - **NO confundas ciudades con nombres de empresa**. Si aparece "Madrid", "ARANJUEZ", "SAN SEBASTIAN DE LOS REYES", etc., es `ciudad`, NO es nombre de empresa.
+                              - Si no encuentras una ciudad claramente identificable, usa "".
+                            - **`provincia`**: **🔥🔥🔥 CRÍTICO - BUSCA ACTIVAMENTE ESTE CAMPO** - Nombre de la provincia/región. **ESTE CAMPO PUEDE ESTAR ENTRE PARÉNTESIS DESPUÉS DE LA CIUDAD**. **FORMATOS COMUNES**:
+                              - **Formato entre paréntesis**: "28300-ARANJUEZ (MADRID)" → provincia: "MADRID"
+                              - **Formato entre paréntesis**: "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → provincia: "MADRID"
+                              - **Formato implícito**: "28071 – Madrid" → provincia: "Madrid" (cuando la ciudad y provincia tienen el mismo nombre)
+                              - **PATRÓN CLAVE**: Busca texto entre paréntesis "(...)" después de la ciudad. Ese texto suele ser la provincia. Si no hay paréntesis pero la ciudad es una capital (ej: "Madrid", "Barcelona"), la provincia suele ser la misma que la ciudad.
+                              - **EJEMPLOS REALES DE DOCUMENTOS**:
+                                * "28300-ARANJUEZ (MADRID)" → provincia: "MADRID"
+                                * "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → provincia: "MADRID"
+                                * "28071 – Madrid" → provincia: "Madrid" (mismo nombre que la ciudad)
+                              - Ejemplos comunes: "MADRID", "Madrid", "Barcelona", "Valencia", "Sevilla", etc.
+                              - Si no encuentras una provincia claramente identificable, usa "".
+                          * **ORDEN TÍPICO**: Número ODMC → Nombre → Dirección → Código Postal → Ciudad → Provincia
                           * **NOTA**: Las letras sueltas (T, R, F, OM) son parte de "TO"/"FROM" escritas verticalmente. Ignóralas al extraer datos.
                           * **NO inviertas**: ARRIBA = origen, ABAJO = destino.
                         - El ESTADO DEL MATERIAL (sección "14. EL MATERIAL HA SIDO:" o "14. THE MATERIAL HAS BEEN:"):
@@ -802,15 +921,14 @@ class AC21Processor:
                         El JSON de salida debe tener al menos esta estructura:
                         {
                           "cabecera": {
-                            "tipo_transaccion": "String",
+                            "tipo_transaccion": "String (valores posibles: 'transferencia', 'inventario', 'destruccion', 'recibo_en_mano', 'otro')",
                             "numero_registro_salida": "String",
                             "fecha_informe": "String (YYYY-MM-DD)",
                             "numero_registro_entrada": "String",
                             "fecha_transaccion": "String (YYYY-MM-DD)",
-                            "odmc_numero": "String"
                           },
-                          "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_odmc": "String", "codigo_emad": "String" },
-                          "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_odmc": "String" },
+                          "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
+                          "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
                           "estado_material": {
                              "recibido": "Boolean",
                              "inventariado": "Boolean",
@@ -875,7 +993,12 @@ class AC21Processor:
                           * `cantidad` (CANTIDAD, entero)
                           * `numero_serie_inicio` (NÚMERO DE SERIE - INICIO)
                           * `numero_serie_fin` (NÚMERO DE SERIE - FIN)
-                          * `cc` (CC)
+                          * `cc`: **CRÍTICO** - El valor de la columna "CC" o "ALC" (código de contabilidad / Accounting Legend Code). **BUSCA ESPECÍFICAMENTE LA COLUMNA 12**: Busca "12. ALC" (INGLÉS) o "12. CC" (ESPAÑOL) en la cabecera de la tabla. Esta columna puede estar etiquetada como "ALC", "CC", "12. ALC", o "12. CC". Los valores más comunes son 1, 2 o 3:
+                            - **1**: Contabilizable por número de serie (Accountable by serial number)
+                            - **2**: Contabilizable por cantidad (Accountable by quantity)
+                            - **3**: Acuse de recibo inicial (Initial receipt required)
+                            **IMPORTANTE**: Extrae el valor numérico que aparece en la celda de la columna 12 (ALC/CC). Puede aparecer solo el número (ej: "1"), o con marcas (ej: "1 ☑", "1 #", "1✓", "1#"). Extrae SOLO el número, ignorando las marcas (☑, ✓, #, etc.). Si la celda está vacía, usa una cadena vacía "". Si encuentras cualquier otro valor numérico, extrae ese valor tal como aparece.
+                            Devuelve el valor como string (puede ser "1", "2", "3", otro valor numérico, o "" si está vacío).
 
                         Reglas para ACCESORIOS y EQUIPOS DE PRUEBA:
                         - `accesorios`: lista de objetos { "descripcion": "String", "cantidad": "Int" }
@@ -978,11 +1101,150 @@ class AC21Processor:
                 "equipos_prueba": []
             }
 
+    def _extract_postal_city_province_from_direccion(self, direccion: str) -> dict:
+        """
+        Intenta extraer código postal, ciudad y provincia de la dirección.
+        Formatos comunes:
+        - "28300-ARANJUEZ (MADRID)"
+        - "28703-SAN SEBASTIAN DE LOS REYES (MADRID)"
+        - "28071 – Madrid"
+        """
+        result = {"codigo_postal": None, "ciudad": None, "provincia": None}
+        
+        if not direccion or not isinstance(direccion, str):
+            return result
+        
+        direccion = direccion.strip()
+        print(f"🔍 [EXTRACT] Analizando dirección: '{direccion}'")
+        
+        # Patrón 1: "28300-ARANJUEZ (MADRID)" o "28703-SAN SEBASTIAN DE LOS REYES (MADRID)"
+        pattern1 = r'(\d{5})-([A-ZÁÉÍÓÚÑ\s]+)\s*\(([A-ZÁÉÍÓÚÑ\s]+)\)'
+        match1 = re.search(pattern1, direccion, re.IGNORECASE)
+        if match1:
+            result["codigo_postal"] = match1.group(1)
+            result["ciudad"] = match1.group(2).strip()
+            result["provincia"] = match1.group(3).strip()
+            print(f"✅ [EXTRACT] Patrón 1 encontrado: CP={result['codigo_postal']}, Ciudad={result['ciudad']}, Provincia={result['provincia']}")
+            return result
+        
+        # Patrón 2: "28071 – Madrid" o "28071 Madrid"
+        pattern2 = r'(\d{5})\s*[–-]?\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñ\s]+)'
+        match2 = re.search(pattern2, direccion, re.IGNORECASE)
+        if match2:
+            result["codigo_postal"] = match2.group(1)
+            result["ciudad"] = match2.group(2).strip()
+            # Si la ciudad es una capital común, la provincia es la misma
+            capitales = ["Madrid", "Barcelona", "Valencia", "Sevilla", "Bilbao", "Zaragoza"]
+            if result["ciudad"] in capitales:
+                result["provincia"] = result["ciudad"]
+            print(f"✅ [EXTRACT] Patrón 2 encontrado: CP={result['codigo_postal']}, Ciudad={result['ciudad']}, Provincia={result['provincia']}")
+            return result
+        
+        # Patrón 3: Buscar código postal de 5 dígitos en cualquier parte de la dirección
+        pattern3 = r'\b(\d{5})\b'
+        match3 = re.search(pattern3, direccion)
+        if match3:
+            result["codigo_postal"] = match3.group(1)
+            print(f"⚠️ [EXTRACT] Solo código postal encontrado: {result['codigo_postal']}")
+            
+            # Intentar extraer ciudad y provincia después del código postal
+            # Patrón: "28071 Madrid" o "28071, Madrid" o "28071 – Madrid"
+            pattern3b = r'\d{5}\s*[–,\s]+\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñ\s]+?)(?:\s*\(([A-ZÁÉÍÓÚÑ\s]+)\))?'
+            match3b = re.search(pattern3b, direccion, re.IGNORECASE)
+            if match3b:
+                if not result["ciudad"]:
+                    result["ciudad"] = match3b.group(1).strip()
+                if match3b.group(2) and not result["provincia"]:
+                    result["provincia"] = match3b.group(2).strip()
+                print(f"✅ [EXTRACT] Patrón 3b encontrado: CP={result['codigo_postal']}, Ciudad={result['ciudad']}, Provincia={result['provincia']}")
+                return result
+        
+        if not result["codigo_postal"] and not result["ciudad"] and not result["provincia"]:
+            print(f"❌ [EXTRACT] No se encontró patrón válido en: '{direccion}'")
+        return result
+
     def _post_process_data(self, data: dict) -> dict:
         """
         Realiza un post-procesamiento para normalizar y limpiar los datos,
         incluyendo una corrección robusta para la asignación de firmas.
         """
+        
+        # POST-PROCESAMIENTO DE EMPRESAS: Extraer codigo_postal, ciudad, provincia de la dirección
+        for empresa_key in ['empresa_origen', 'empresa_destino']:
+            if empresa_key in data:
+                empresa = data[empresa_key]
+                if isinstance(empresa, dict):
+                    direccion = empresa.get('direccion', '')
+                    codigo_postal = empresa.get('codigo_postal')
+                    ciudad = empresa.get('ciudad')
+                    provincia = empresa.get('provincia')
+                    
+                    print(f"🔍 [POST-PROCESS] {empresa_key}:")
+                    print(f"   Dirección: '{direccion}'")
+                    print(f"   CP actual: {codigo_postal} (tipo: {type(codigo_postal).__name__})")
+                    print(f"   Ciudad actual: {ciudad} (tipo: {type(ciudad).__name__})")
+                    print(f"   Provincia actual: {provincia} (tipo: {type(provincia).__name__})")
+                    
+                    # Si faltan campos, intentar extraerlos de la dirección
+                    # Intentar extraer si falta al menos uno de los campos
+                    if direccion and ((not codigo_postal or codigo_postal is None or codigo_postal == '') or 
+                                      (not ciudad or ciudad is None or ciudad == '') or 
+                                      (not provincia or provincia is None or provincia == '')):
+                        print(f"   ⚠️ Campos faltantes detectados, intentando extraer de dirección...")
+                        extracted = self._extract_postal_city_province_from_direccion(direccion)
+                        
+                        if extracted['codigo_postal'] and (not codigo_postal or codigo_postal is None or codigo_postal == ''):
+                            empresa['codigo_postal'] = extracted['codigo_postal']
+                            print(f"   ✅ CP extraído: {extracted['codigo_postal']}")
+                        
+                        if extracted['ciudad'] and (not ciudad or ciudad is None or ciudad == ''):
+                            empresa['ciudad'] = extracted['ciudad']
+                            print(f"   ✅ Ciudad extraída: {extracted['ciudad']}")
+                        
+                        if extracted['provincia'] and (not provincia or provincia is None or provincia == ''):
+                            empresa['provincia'] = extracted['provincia']
+                            print(f"   ✅ Provincia extraída: {extracted['provincia']}")
+                    
+                    # Convertir None a string vacío para campos de texto
+                    if empresa.get('codigo_postal') is None:
+                        empresa['codigo_postal'] = ""
+                    if empresa.get('ciudad') is None:
+                        empresa['ciudad'] = ""
+                    if empresa.get('provincia') is None:
+                        empresa['provincia'] = ""
+        
+        # POST-PROCESAMIENTO DE CABECERA: Validar que numero_registro_salida y numero_registro_entrada NO sean fechas
+        cabecera = data.get('cabecera', {})
+        if isinstance(cabecera, dict):
+            import re
+            
+            def is_date_format(value: str) -> bool:
+                """Detecta si un valor es una fecha en formato YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, etc."""
+                if not value or not isinstance(value, str):
+                    return False
+                value = value.strip()
+                # Patrón para YYYY-MM-DD
+                if re.match(r'^\d{4}-\d{2}-\d{2}$', value):
+                    return True
+                # Patrón para DD/MM/YYYY o DD-MM-YYYY
+                if re.match(r'^\d{2}[\/\-]\d{2}[\/\-]\d{4}$', value):
+                    return True
+                # Patrón para YYYY/MM/DD
+                if re.match(r'^\d{4}\/\d{2}\/\d{2}$', value):
+                    return True
+                return False
+            
+            # Validar numero_registro_salida
+            num_reg_salida = cabecera.get('numero_registro_salida', '')
+            if num_reg_salida and is_date_format(num_reg_salida):
+                print(f"⚠️ [POST-PROCESS] numero_registro_salida contiene una fecha ({num_reg_salida}), limpiando...")
+                cabecera['numero_registro_salida'] = ""
+            
+            # Validar numero_registro_entrada
+            num_reg_entrada = cabecera.get('numero_registro_entrada', '')
+            if num_reg_entrada and is_date_format(num_reg_entrada):
+                print(f"⚠️ [POST-PROCESS] numero_registro_entrada contiene una fecha ({num_reg_entrada}), limpiando...")
+                cabecera['numero_registro_entrada'] = ""
         
         firmas = data.get('firmas', {})
         destinatario_data = firmas.get('destinatario')

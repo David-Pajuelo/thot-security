@@ -1405,16 +1405,17 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             except (ValueError, TypeError):
                 cantidad = 1
             
-            # Extraer y validar CC del OCR
+            # Extraer CC del OCR (puede ser cualquier valor o estar vacío)
             cc_raw = articulo.get('cc')
-            try:
-                if cc_raw is None or cc_raw == '':
-                    cc = 1
-                else:
+            if cc_raw is None or cc_raw == '':
+                cc = None  # Permitir vacío (el modelo usará el default=1 si es necesario)
+            else:
+                try:
+                    # Intentar convertir a int si es numérico
                     cc = int(float(str(cc_raw)))
-                    cc = max(1, cc)  # Mínimo 1
-            except (ValueError, TypeError):
-                cc = 1
+                except (ValueError, TypeError):
+                    # Si no es numérico, intentar convertir a int con default 1, o usar None
+                    cc = None  # Permitir None, el modelo usará default=1
             
             # Preparar datos adicionales para el campo JSON (incluyendo números de serie completos y cantidad)
             datos_adicionales = {

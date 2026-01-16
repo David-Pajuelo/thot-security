@@ -79,7 +79,13 @@ function UploadAC21PageContent() {
       fecha_transaccion: null,
       numero_registro_entrada: null,
       fecha_informe: null,
-      odmc_numero: null,
+      tipo_transaccion: {
+        transferencia: true,  // Por defecto transferencia
+        inventario: false,
+        destruccion: false,
+        recibo_en_mano: false,
+        otro: false
+      }
     },
           empresa_origen: {
         nombre: null,
@@ -87,11 +93,7 @@ function UploadAC21PageContent() {
         codigo_postal: null,
         ciudad: null,
         provincia: null,
-        pais: null,
         numero_odmc: null,
-        nif: null,
-        telefono: null,
-        email: null,
       },
       empresa_destino: {
         nombre: null,
@@ -99,11 +101,7 @@ function UploadAC21PageContent() {
         codigo_postal: null,
         ciudad: null,
         provincia: null,
-        pais: null,
         numero_odmc: null,
-        nif: null,
-        telefono: null,
-        email: null,
       },
     articulos: [],
     accesorios: [],
@@ -303,7 +301,6 @@ function UploadAC21PageContent() {
         fecha_transaccion: null,
         numero_registro_entrada: null,
         fecha_informe: null,
-        odmc_numero: null,
       },
       empresa_origen: {
         nombre: null,
@@ -311,12 +308,7 @@ function UploadAC21PageContent() {
         codigo_postal: null,
         ciudad: null,
         provincia: null,
-        pais: null,
-        codigo_odmc: null,
-        codigo_emad: null,
-        nif: null,
-        telefono: null,
-        email: null,
+        numero_odmc: null,
       },
       empresa_destino: {
         nombre: null,
@@ -324,12 +316,7 @@ function UploadAC21PageContent() {
         codigo_postal: null,
         ciudad: null,
         provincia: null,
-        pais: null,
-        codigo_odmc: null,
         numero_odmc: null,
-        nif: null,
-        telefono: null,
-        email: null,
       },
       articulos: [],
       accesorios: [],
@@ -554,12 +541,66 @@ function UploadAC21PageContent() {
         // Si viene en formato { success, data }, usar response.data, sino usar response directamente
         const responseData = response.data || response;
         
-        // Log para debugging: ver qué está devolviendo el OCR
+        // Log de respuesta del OCR para ver qué datos extrae
         console.log('📋 [AC21] Respuesta completa del OCR:', JSON.stringify(responseData, null, 2));
-        console.log('📋 [AC21] Cabecera del OCR:', JSON.stringify(responseData.cabecera, null, 2));
-        console.log('📋 [AC21] fecha_transaccion del OCR (raw):', responseData.cabecera?.fecha_transaccion);
+        
+        // Log de información de debug del backend
+        if (responseData._debug) {
+          console.log('🔍 [DEBUG BACKEND] Información de debug del OCR:');
+          console.log('   📥 RAW OCR - Empresa Origen:', JSON.stringify(responseData._debug.empresa_origen_raw_ocr, null, 2));
+          console.log('   📥 RAW OCR - Empresa Destino:', JSON.stringify(responseData._debug.empresa_destino_raw_ocr, null, 2));
+          console.log('   📤 FINAL - Empresa Origen:', JSON.stringify(responseData._debug.empresa_origen_final, null, 2));
+          console.log('   📤 FINAL - Empresa Destino:', JSON.stringify(responseData._debug.empresa_destino_final, null, 2));
+        }
         // --- LIMPIEZA Y SINCRONIZACIÓN DE CAMPOS ---
-        let tipoTransaccion = responseData.cabecera?.tipo_transaccion;
+        // Procesar tipo_transaccion: puede venir como string (nuevo formato) o como objeto (legacy)
+        let tipoTransaccionObj = responseData.cabecera?.tipo_transaccion;
+        if (typeof tipoTransaccionObj === 'string') {
+          // Formato nuevo: convertir string a objeto con un solo true
+          const tipoStr = tipoTransaccionObj.toLowerCase().trim();
+          // Mapear valores posibles
+          const tipoMap: { [key: string]: string } = {
+            'transferencia': 'transferencia',
+            'transfer': 'transferencia',
+            'inventario': 'inventario',
+            'inventory': 'inventario',
+            'destruccion': 'destruccion',
+            'destruction': 'destruccion',
+            'recibo_en_mano': 'recibo_en_mano',
+            'recibo': 'recibo_en_mano',
+            'hand receipt': 'recibo_en_mano',
+            'otro': 'otro',
+            'other': 'otro'
+          };
+          const tipoSeleccionado = tipoMap[tipoStr] || 'transferencia'; // Por defecto transferencia
+          tipoTransaccionObj = {
+            transferencia: tipoSeleccionado === 'transferencia',
+            inventario: tipoSeleccionado === 'inventario',
+            destruccion: tipoSeleccionado === 'destruccion',
+            recibo_en_mano: tipoSeleccionado === 'recibo_en_mano',
+            otro: tipoSeleccionado === 'otro'
+          };
+        } else if (tipoTransaccionObj && typeof tipoTransaccionObj === 'object') {
+          // Formato legacy: ya viene como objeto, mantenerlo
+          // Asegurar que todos los campos existan
+          tipoTransaccionObj = {
+            transferencia: tipoTransaccionObj.transferencia || false,
+            inventario: tipoTransaccionObj.inventario || false,
+            destruccion: tipoTransaccionObj.destruccion || false,
+            recibo_en_mano: tipoTransaccionObj.recibo_en_mano || false,
+            otro: tipoTransaccionObj.otro || false
+          };
+        } else {
+          // Si no viene o no es válido, usar transferencia por defecto
+          tipoTransaccionObj = {
+            transferencia: true,
+            inventario: false,
+            destruccion: false,
+            recibo_en_mano: false,
+            otro: false
+          };
+        }
+        let tipoTransaccion = tipoTransaccionObj; // Mantener para compatibilidad con código existente
         let numeroRegistroEntrada = responseData.cabecera?.numero_registro_entrada;
         // Si el OCR devuelve 'String' literal, vacío, nulo o no existe, y hay numero_registro_salida, dejar en blanco
         if (!numeroRegistroEntrada || numeroRegistroEntrada === 'String' || numeroRegistroEntrada === tipoTransaccion) {
@@ -594,8 +635,19 @@ function UploadAC21PageContent() {
         // IMPORTANTE: No copiar valores de fecha_informe a fecha_transaccion ni de numero_registro_salida a numero_registro_entrada
         // Si están vacíos, deben quedarse vacíos
         const cleanCabecera = (cab: any) => {
-          // numero_registro_entrada: solo limpieza básica, sin validaciones
+          // numero_registro_entrada: limpieza y validación - NO debe ser una fecha
           let numRegEntrada = cleanString(numeroRegistroEntrada);
+          
+          // Validar que NO sea una fecha
+          if (numRegEntrada) {
+            const isDate = /^\d{4}-\d{2}-\d{2}$/.test(numRegEntrada) || 
+                          /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(numRegEntrada) ||
+                          /^\d{4}\/\d{2}\/\d{2}$/.test(numRegEntrada);
+            if (isDate) {
+              console.warn('⚠️ [AC21] numero_registro_entrada contiene una fecha, limpiando:', numRegEntrada);
+              numRegEntrada = '';
+            }
+          }
           
           // Función para validar si un string es una fecha válida (formato YYYY-MM-DD o DD/MM/YYYY)
           const isValidDate = (str: string): boolean => {
@@ -650,8 +702,6 @@ function UploadAC21PageContent() {
           let fechaInforme = cleanString(cab?.fecha_informe);
           let fechaTransaccion = cleanString(cab?.fecha_transaccion);
           
-          // Log para debugging
-          console.log('🔍 [AC21] fecha_transaccion del OCR:', fechaTransaccion, 'tipo:', typeof fechaTransaccion);
 
           // Si fecha_informe existe pero NO es una fecha válida, limpiarla
           if (fechaInforme) {
@@ -678,18 +728,28 @@ function UploadAC21PageContent() {
           if (fechaTransaccion && fechaInforme && fechaTransaccion === fechaInforme) {
             // Solo limpiar si fecha_transaccion parece ser una copia incorrecta (mismo formato exacto)
             // Si ambas son fechas válidas y diferentes, mantenerlas
-            console.log('⚠️ [AC21] fecha_transaccion es igual a fecha_informe, pero manteniendo si ambas son válidas');
             // NO limpiar automáticamente - dejar que el usuario decida si son realmente iguales
             // fechaTransaccion = '';
           }
           
-          // numero_registro_salida: solo limpieza básica, sin validaciones
+          // numero_registro_salida: limpieza y validación - NO debe ser una fecha
           let numRegSalida = cleanString(cab?.numero_registro_salida);
           
-          // Extraer y limpiar ODMC
-          let odmcNumero = cleanString(cab?.odmc_numero);
+          // Validar que NO sea una fecha
+          if (numRegSalida) {
+            const isDate = /^\d{4}-\d{2}-\d{2}$/.test(numRegSalida) || 
+                          /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(numRegSalida) ||
+                          /^\d{4}\/\d{2}\/\d{2}$/.test(numRegSalida);
+            if (isDate) {
+              console.warn('⚠️ [AC21] numero_registro_salida contiene una fecha, limpiando:', numRegSalida);
+              numRegSalida = '';
+            }
+          }
           
-          // Validación cruzada: si encontramos un número ODMC en las fechas, moverlo al campo odmc_numero
+          // Extraer y limpiar ODMC
+          // odmc_numero ya no existe en la cabecera, se extrae de las empresas
+          
+          // Validación cruzada: si encontramos un número ODMC en las fechas, limpiarlo (ya no hay odmc_numero en cabecera)
           // y limpiar las fechas
           const extractODMCFromString = (str: string): string | null => {
             if (!str) return null;
@@ -759,28 +819,20 @@ function UploadAC21PageContent() {
             return null;
           };
           
-          // Si fecha_informe contiene ODMC, extraerlo y limpiar la fecha
+          // Si fecha_informe contiene ODMC, limpiar la fecha (odmc_numero ya no existe en cabecera)
           if (fechaInforme && isNotADate(fechaInforme)) {
             const odmcFromFecha = extractODMCFromString(fechaInforme);
-            if (odmcFromFecha && !odmcNumero) {
-              console.log('✅ [AC21] Moviendo ODMC desde fecha_informe a odmc_numero:', odmcFromFecha);
-              odmcNumero = odmcFromFecha;
-              fechaInforme = '';
-            } else if (odmcFromFecha) {
-              console.warn('⚠️ [AC21] fecha_informe contiene ODMC pero odmc_numero ya tiene valor, limpiando fecha:', fechaInforme);
+            if (odmcFromFecha) {
+              console.log('⚠️ [AC21] fecha_informe contiene ODMC, limpiando fecha:', fechaInforme);
               fechaInforme = '';
             }
           }
           
-          // Si fecha_transaccion contiene ODMC, extraerlo y limpiar la fecha
+          // Si fecha_transaccion contiene ODMC, limpiar la fecha (odmc_numero ya no existe en cabecera)
           if (fechaTransaccion && isNotADate(fechaTransaccion)) {
             const odmcFromFecha = extractODMCFromString(fechaTransaccion);
-            if (odmcFromFecha && !odmcNumero) {
-              console.log('✅ [AC21] Moviendo ODMC desde fecha_transaccion a odmc_numero:', odmcFromFecha);
-              odmcNumero = odmcFromFecha;
-              fechaTransaccion = '';
-            } else if (odmcFromFecha) {
-              console.warn('⚠️ [AC21] fecha_transaccion contiene ODMC pero odmc_numero ya tiene valor, limpiando fecha:', fechaTransaccion);
+            if (odmcFromFecha) {
+              console.log('⚠️ [AC21] fecha_transaccion contiene ODMC, limpiando fecha:', fechaTransaccion);
               fechaTransaccion = '';
             }
           }
@@ -790,30 +842,92 @@ function UploadAC21PageContent() {
             fecha_transaccion: fechaTransaccion, // Mantener vacío si viene vacío (o sospechosamente copiado) del OCR
             numero_registro_entrada: numRegEntrada, // Mantener vacío si viene vacío del OCR
             fecha_informe: fechaInforme,
-            odmc_numero: odmcNumero,
-            tipo_transaccion: cleanString(tipoTransaccion),
+            tipo_transaccion: tipoTransaccionObj,
           };
           
-          console.log('🔍 [AC21] cleanCabecera retorna:', JSON.stringify(cabeceraResult, null, 2));
           return cabeceraResult;
         };
         // Limpiar empresas
+        const extractPostalCityProvince = (direccion: string): { codigo_postal: string, ciudad: string, provincia: string } => {
+          const result = { codigo_postal: '', ciudad: '', provincia: '' };
+          if (!direccion) return result;
+
+          // Patrón 1: "28300-ARANJUEZ (MADRID)" o "28703-SAN SEBASTIAN DE LOS REYES (MADRID)"
+          const pattern1 = /(\d{5})-([A-ZÁÉÍÓÚÑ\s]+)\s*\(([A-ZÁÉÍÓÚÑ\s]+)\)/i;
+          const match1 = direccion.match(pattern1);
+          if (match1) {
+            result.codigo_postal = match1[1];
+            result.ciudad = match1[2].trim();
+            result.provincia = match1[3].trim();
+            console.log(`✅ [EXTRACT] Patrón 1 encontrado en dirección: CP=${result.codigo_postal}, Ciudad=${result.ciudad}, Provincia=${result.provincia}`);
+            return result;
+          }
+
+          // Patrón 2: "28071 – Madrid" o "28071 Madrid"
+          const pattern2 = /(\d{5})\s*[–-]?\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñ\s]+)/i;
+          const match2 = direccion.match(pattern2);
+          if (match2) {
+            result.codigo_postal = match2[1];
+            result.ciudad = match2[2].trim();
+            // Si la ciudad es una capital común, la provincia es la misma
+            const capitales = ['Madrid', 'Barcelona', 'Valencia', 'Sevilla', 'Bilbao', 'Zaragoza'];
+            if (capitales.includes(result.ciudad)) {
+              result.provincia = result.ciudad;
+            }
+            console.log(`✅ [EXTRACT] Patrón 2 encontrado en dirección: CP=${result.codigo_postal}, Ciudad=${result.ciudad}, Provincia=${result.provincia}`);
+            return result;
+          }
+
+          // Buscar código postal de 5 dígitos al final
+          const pattern3 = /(\d{5})\s*$/;
+          const match3 = direccion.match(pattern3);
+          if (match3) {
+            result.codigo_postal = match3[1];
+            console.log(`⚠️ [EXTRACT] Solo código postal encontrado: ${result.codigo_postal}`);
+          }
+
+          return result;
+        };
+
         const cleanEmpresa = (emp: any) => {
-          // El OCR puede devolver codigo_odmc o numero_odmc, usar el que esté disponible
+          // El OCR puede devolver codigo_odmc o numero_odmc (normalizamos a numero_odmc)
           const odmc = cleanString(emp?.numero_odmc || emp?.codigo_odmc || '');
+          let direccion = cleanString(emp?.direccion);
+          let codigo_postal = cleanString(emp?.codigo_postal);
+          let ciudad = cleanString(emp?.ciudad);
+          let provincia = cleanString(emp?.provincia);
+
+          // Si faltan campos, intentar extraerlos de la dirección
+          // Intentar extraer si falta al menos uno de los campos
+          if (direccion && ((!codigo_postal || codigo_postal.trim() === '') || 
+                            (!ciudad || ciudad.trim() === '') || 
+                            (!provincia || provincia.trim() === ''))) {
+            console.log(`🔍 [CLEAN EMPRESA] Analizando dirección para extraer campos faltantes: "${direccion}"`);
+            console.log(`   CP actual: "${codigo_postal}", Ciudad actual: "${ciudad}", Provincia actual: "${provincia}"`);
+            
+            const extracted = extractPostalCityProvince(direccion);
+            
+            if (extracted.codigo_postal && (!codigo_postal || codigo_postal.trim() === '')) {
+              codigo_postal = extracted.codigo_postal;
+              console.log(`   ✅ CP extraído: "${codigo_postal}"`);
+            }
+            if (extracted.ciudad && (!ciudad || ciudad.trim() === '')) {
+              ciudad = extracted.ciudad;
+              console.log(`   ✅ Ciudad extraída: "${ciudad}"`);
+            }
+            if (extracted.provincia && (!provincia || provincia.trim() === '')) {
+              provincia = extracted.provincia;
+              console.log(`   ✅ Provincia extraída: "${provincia}"`);
+            }
+          }
           
           return {
             nombre: cleanString(emp?.nombre),
-            direccion: cleanString(emp?.direccion),
-            codigo_postal: cleanString(emp?.codigo_postal),
-            ciudad: cleanString(emp?.ciudad),
-            provincia: cleanString(emp?.provincia),
-            pais: cleanString(emp?.pais),
-            numero_odmc: odmc, // Usar numero_odmc o codigo_odmc del OCR
-            codigo_odmc: odmc, // Mantener también codigo_odmc por compatibilidad
-            nif: cleanString(emp?.nif),
-            telefono: cleanString(emp?.telefono),
-            email: cleanString(emp?.email),
+            direccion: direccion,
+            codigo_postal: codigo_postal,
+            ciudad: ciudad,
+            provincia: provincia,
+            numero_odmc: odmc,
             id: emp?.id || undefined
           };
         };
@@ -847,7 +961,10 @@ function UploadAC21PageContent() {
         // IMPORTANTE: Esto evita que valores previos persistan cuando el OCR devuelve campos vacíos
         const testigoOtro = cleanTestigoOtro(responseData);
         const cabeceraLimpia = cleanCabecera(responseData.cabecera || {});
-        console.log('🔍 [AC21] Cabecera limpia antes de setProcessedData:', JSON.stringify(cabeceraLimpia, null, 2));
+        
+        // Log detallado de empresas antes de limpiar
+        console.log('🔍 [AC21] Empresa origen RAW del OCR:', JSON.stringify(responseData.empresa_origen, null, 2));
+        console.log('🔍 [AC21] Empresa destino RAW del OCR:', JSON.stringify(responseData.empresa_destino, null, 2));
         
         const newFormData: any = {
           cabecera: cabeceraLimpia,
@@ -865,11 +982,6 @@ function UploadAC21PageContent() {
             firma_b: { nombre: null, cargo: null, empleo_rango: null },
           }),
         };
-
-        // IMPORTANTE: Usar setProcessedData con el objeto completo para sobrescribir completamente el estado anterior
-        // Esto evita que valores previos persistan cuando el OCR devuelve campos vacíos (null/undefined)
-        console.log('🔍 [AC21] newFormData completo antes de setProcessedData:', JSON.stringify(newFormData, null, 2));
-        console.log('🔍 [AC21] numero_registro_salida en newFormData.cabecera:', newFormData.cabecera?.numero_registro_salida);
         setProcessedData(newFormData);
         
         // Intentar auto-match de empresas después de procesar el OCR
@@ -1150,7 +1262,19 @@ function UploadAC21PageContent() {
         ...processedData, // Expande todos los datos procesados
         numero: processedData.cabecera?.numero_registro_salida || '',
         numero_registro_salida: processedData.cabecera?.numero_registro_salida || '',
-        tipo_documento: processedData.cabecera?.tipo_transaccion || '',
+        tipo_documento: (() => {
+          const tipo = processedData.cabecera?.tipo_transaccion;
+          if (!tipo) return '';
+          if (typeof tipo === 'string') return tipo; // Legacy format
+          // Convertir objeto a string: obtener el primer tipo marcado
+          const tipos = [];
+          if (tipo.transferencia) tipos.push('TRANSFERENCIA');
+          if (tipo.inventario) tipos.push('INVENTARIO');
+          if (tipo.destruccion) tipos.push('DESTRUCCION');
+          if (tipo.recibo_en_mano) tipos.push('RECIBO EN MANO');
+          if (tipo.otro) tipos.push('OTRO');
+          return tipos.join(', ') || '';
+        })(),
         direccion_transferencia: "ENTRADA", // Forzar ENTRADA para este flujo de AC21
         articulos: articulosAInsertar,
         // Incluir accesorios y equipos de prueba
@@ -1283,7 +1407,19 @@ function UploadAC21PageContent() {
       }
 
       // 2. Verificar si es un AC21 de ENTRADA que requiere tipificación
-      const tipoDocumento = processedData.cabecera?.tipo_transaccion || '';
+      const tipoDocumento = (() => {
+        const tipo = processedData.cabecera?.tipo_transaccion;
+        if (!tipo) return '';
+        if (typeof tipo === 'string') return tipo; // Legacy format
+        // Convertir objeto a string: obtener el primer tipo marcado
+        const tipos = [];
+        if (tipo.transferencia) tipos.push('TRANSFERENCIA');
+        if (tipo.inventario) tipos.push('INVENTARIO');
+        if (tipo.destruccion) tipos.push('DESTRUCCION');
+        if (tipo.recibo_en_mano) tipos.push('RECIBO EN MANO');
+        if (tipo.otro) tipos.push('OTRO');
+        return tipos.join(', ') || '';
+      })();
       const tipoDocumentoUpper = tipoDocumento.toUpperCase();
       const esAC21Entrada = tipoDocumentoUpper && 
         ['TRANSFERENCIA', 'RECIBO_MANO', 'DESTRUCCION', 'OTRO'].includes(tipoDocumentoUpper);
@@ -2427,23 +2563,35 @@ function UploadAC21PageContent() {
                       <div className="border border-gray-300 rounded overflow-hidden bg-white">
                         {/* Radios de tipo de transacción integrados */}
                         <div className="p-3 border-b-2 border-gray-300 flex flex-wrap gap-4 items-center justify-center">
-                          {['TRANSFERENCIA', 'INVENTARIO', 'DESTRUCCION', 'RECIBO EN MANO', 'OTRO'].map(tipo => (
-                            <label key={tipo} className="inline-flex items-center text-base font-semibold gap-2">
+                          {[
+                            { key: 'transferencia', label: 'TRANSFERENCIA' },
+                            { key: 'inventario', label: 'INVENTARIO' },
+                            { key: 'destruccion', label: 'DESTRUCCION' },
+                            { key: 'recibo_en_mano', label: 'RECIBO EN MANO' },
+                            { key: 'otro', label: 'OTRO' }
+                          ].map(tipo => (
+                            <label key={tipo.key} className="inline-flex items-center text-base font-semibold gap-2">
                               <input
                                 type="radio"
                                 name="tipoTransaccion"
-                                value={tipo}
-                                checked={processedData.cabecera?.tipo_transaccion === tipo}
+                                value={tipo.key}
+                                checked={processedData.cabecera?.tipo_transaccion?.[tipo.key] || false}
                                 onChange={() => setProcessedData((prev: any) => ({
                                   ...prev,
                                   cabecera: {
                                     ...prev.cabecera,
-                                    tipo_transaccion: tipo
+                                    tipo_transaccion: {
+                                      transferencia: tipo.key === 'transferencia',
+                                      inventario: tipo.key === 'inventario',
+                                      destruccion: tipo.key === 'destruccion',
+                                      recibo_en_mano: tipo.key === 'recibo_en_mano',
+                                      otro: tipo.key === 'otro'
+                                    }
                                   }
                                 }))}
                                 className="form-radio w-4 h-4 text-blue-600 border-2 border-gray-400"
                               />
-                              <span>{tipo}</span>
+                              <span>{tipo.label}</span>
                             </label>
                           ))}
                         </div>
@@ -2469,7 +2617,10 @@ function UploadAC21PageContent() {
                                     if (empresaSeleccionada) {
                                       setProcessedData((prev: any) => ({
                                         ...prev,
-                                        empresa_origen: { ...empresaSeleccionada }
+                                        empresa_origen: { 
+                                          ...empresaSeleccionada,
+                                          numero_odmc: empresaSeleccionada.numero_odmc || ''
+                                        }
                                       }));
                                     }
                                   }}
@@ -2521,7 +2672,10 @@ function UploadAC21PageContent() {
                                     if (empresaSeleccionada) {
                                       setProcessedData((prev: any) => ({
                                         ...prev,
-                                        empresa_destino: { ...empresaSeleccionada }
+                                        empresa_destino: { 
+                                          ...empresaSeleccionada,
+                                          numero_odmc: empresaSeleccionada.numero_odmc || ''
+                                        }
                                       }));
                                     }
                                   }}
@@ -2670,6 +2824,7 @@ function UploadAC21PageContent() {
                                   activa: true
                                 };
                                 
+                                // Incluir numero_odmc si existe
                                 if (empresaData.numero_odmc && empresaData.numero_odmc.trim() !== '') {
                                   dataToSave.numero_odmc = empresaData.numero_odmc.trim();
                                 }
@@ -2762,17 +2917,6 @@ function UploadAC21PageContent() {
                               }))}
                             />
                           </div>
-                          <div>
-                            <Label className="text-xs font-semibold text-gray-700">País:</Label>
-                            <Input
-                              className="text-sm h-8"
-                              value={processedData.empresa_origen?.pais || ''}
-                              onChange={e => setProcessedData((prev: any) => ({
-                                ...prev,
-                                empresa_origen: { ...prev.empresa_origen, pais: e.target.value }
-                              }))}
-                            />
-                          </div>
                         </div>
                       </div>
 
@@ -2807,6 +2951,7 @@ function UploadAC21PageContent() {
                                   activa: true
                                 };
                                 
+                                // Incluir numero_odmc si existe
                                 if (empresaData.numero_odmc && empresaData.numero_odmc.trim() !== '') {
                                   dataToSave.numero_odmc = empresaData.numero_odmc.trim();
                                 }
@@ -2896,17 +3041,6 @@ function UploadAC21PageContent() {
                               onChange={e => setProcessedData((prev: any) => ({
                                 ...prev,
                                 empresa_destino: { ...prev.empresa_destino, provincia: e.target.value }
-                              }))}
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-xs font-semibold text-gray-700">País:</Label>
-                            <Input
-                              className="text-sm h-8"
-                              value={processedData.empresa_destino?.pais || ''}
-                              onChange={e => setProcessedData((prev: any) => ({
-                                ...prev,
-                                empresa_destino: { ...prev.empresa_destino, pais: e.target.value }
                               }))}
                             />
                           </div>
@@ -3032,13 +3166,14 @@ function UploadAC21PageContent() {
                               <input
                                 type="text"
                                 className="w-10 border-none bg-transparent focus:ring-0 text-xs text-center"
-                                value={articulo.cc || articulosTipos[index] || ''}
+                                value={articulo.cc || ''}
                                 onChange={e => {
                                   const nuevos = [...processedData.articulos];
                                   nuevos[index].cc = e.target.value;
                                   setProcessedData((prev: any) => ({ ...prev, articulos: nuevos }));
                                 }}
                                 disabled={yaExiste}
+                                placeholder="-"
                               />
                             </td>
                             {/* Observaciones (descripcion) */}
