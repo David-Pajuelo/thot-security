@@ -951,20 +951,31 @@ class CommandProcessor:
             user_name = email.split("@")[0].replace(".", " ").title()
             email_sent = await self._send_hps_form_email(email, url, user_name)
             
+            # Mensaje según el tipo de solicitud y si se envió el correo
             if not email_sent:
-                logger.warning(f"Email no enviado para {email}, pero token creado")
-            
-            # Mensaje según el tipo de solicitud
-            if is_transfer:
-                message = f"✅ Se ha enviado la **solicitud de traspaso HPS** a {email}.\n\n📧 El correo contiene el formulario de traspaso que debe completar.\n\nEl enlace es válido por 72 horas."
-            elif is_renewal:
-                message = f"✅ Se ha enviado la **solicitud de renovación HPS** a {email}.\n\n📧 El correo contiene el formulario de renovación que debe completar.\n\nEl enlace es válido por 72 horas."
+                logger.warning(f"⚠️ Email NO enviado para {email}, pero token creado. Proporcionando enlace manual.")
+                
+                # Determinar tipo de solicitud para el mensaje
+                tipo_solicitud = "traspaso de HPS" if is_transfer else ("renovación de HPS" if is_renewal else "nueva HPS")
+                
+                message = f"⚠️ **No se pudo enviar el correo electrónico** a {email}.\n\n"
+                message += f"📋 Se ha creado la solicitud de **{tipo_solicitud}** y el token está disponible.\n\n"
+                message += f"🔗 **Por favor, comparte este enlace manualmente con el usuario:**\n\n"
+                message += f"**{url}**\n\n"
+                message += f"⏰ El enlace es válido por 72 horas.\n\n"
+                message += f"📧 **Instrucciones:** Copia el enlace de arriba y envíalo al usuario {email} por el método que prefieras (email manual, mensaje, etc.)."
             else:
-                # Solicitud de nueva HPS
-                if user_role == "team_lead":
-                    message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\n📋 **Si el usuario no existe, se registrará automáticamente en tu equipo** cuando complete el formulario.\n\nEl enlace es válido por 72 horas."
+                # Email enviado correctamente
+                if is_transfer:
+                    message = f"✅ Se ha enviado la **solicitud de traspaso HPS** a {email}.\n\n📧 El correo contiene el formulario de traspaso que debe completar.\n\nEl enlace es válido por 72 horas."
+                elif is_renewal:
+                    message = f"✅ Se ha enviado la **solicitud de renovación HPS** a {email}.\n\n📧 El correo contiene el formulario de renovación que debe completar.\n\nEl enlace es válido por 72 horas."
                 else:
-                    message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\nEl enlace es válido por 72 horas."
+                    # Solicitud de nueva HPS
+                    if user_role == "team_lead":
+                        message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\n📋 **Si el usuario no existe, se registrará automáticamente en tu equipo** cuando complete el formulario.\n\nEl enlace es válido por 72 horas."
+                    else:
+                        message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\nEl enlace es válido por 72 horas."
             
             return {
                 "tipo": "exito",
