@@ -160,6 +160,66 @@ services:
       - cryptotrace-network
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
 
+  # Celery Worker para tareas asíncronas (envío de emails, etc.)
+  celery-worker:
+    build:
+      context: ./cryptotrace-backend
+      dockerfile: docker/Dockerfile.prod
+    container_name: cryptotrace-celery-worker
+    restart: unless-stopped
+    command: celery -A cryptotrace_backend worker --loglevel=info --queues=email,analysis,default
+    volumes:
+      - ./cryptotrace-backend/src/albaranes/documentos:/app/albaranes/documentos
+      - ./cryptotrace-backend/src/temp_documentos:/app/temp_documentos
+      - backend_static:/app/staticfiles
+      - backend_media:/app/media
+    env_file:
+      - ./cryptotrace-backend/.env.prod
+    environment:
+      - DJANGO_SETTINGS_MODULE=cryptotrace_backend.settings_prod
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_TIMEZONE=UTC
+    depends_on:
+      - db
+      - redis
+      - backend
+    networks:
+      - cryptotrace-network
+
+  # Celery Beat para tareas periódicas (monitorización de emails, verificación de expiración HPS, etc.)
+  celery-beat:
+    build:
+      context: ./cryptotrace-backend
+      dockerfile: docker/Dockerfile.prod
+    container_name: cryptotrace-celery-beat
+    restart: unless-stopped
+    command: celery -A cryptotrace_backend beat --loglevel=info
+    volumes:
+      - ./cryptotrace-backend/src/albaranes/documentos:/app/albaranes/documentos
+      - ./cryptotrace-backend/src/temp_documentos:/app/temp_documentos
+      - backend_static:/app/staticfiles
+      - backend_media:/app/media
+    env_file:
+      - ./cryptotrace-backend/.env.prod
+    environment:
+      - DJANGO_SETTINGS_MODULE=cryptotrace_backend.settings_prod
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_TIMEZONE=UTC
+    depends_on:
+      - db
+      - redis
+      - backend
+    networks:
+      - cryptotrace-network
+
 volumes:
   postgres_data:
     driver: local
