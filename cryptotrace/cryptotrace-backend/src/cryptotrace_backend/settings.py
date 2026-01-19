@@ -239,6 +239,21 @@ LOGGING = {
             'level': 'INFO',
             'propagate': True,
         },
+        'hps_agent': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'hps_core': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'celery': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
     },
 }
 
@@ -271,7 +286,12 @@ SMTP_REPLY_TO = os.getenv('SMTP_REPLY_TO', os.getenv('EMAIL_HOST_USER', ''))
 if SMTP_FROM_EMAIL:
     DEFAULT_FROM_EMAIL = SMTP_FROM_EMAIL
 elif EMAIL_HOST_USER:
-    DEFAULT_FROM_EMAIL = f"{SMTP_FROM_NAME} <{EMAIL_HOST_USER}>"
+    # Validar que EMAIL_HOST_USER sea un email válido antes de usarlo
+    if '@' in EMAIL_HOST_USER:
+        DEFAULT_FROM_EMAIL = f"{SMTP_FROM_NAME} <{EMAIL_HOST_USER}>"
+    else:
+        # Si no es un email válido, usar solo el nombre
+        DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 else:
     DEFAULT_FROM_EMAIL = "CryptoTrace (AICOX) <noreply@cryptotrace.local>"
 

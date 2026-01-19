@@ -26,6 +26,15 @@ class HpsEmailService:
         self.from_email = getattr(settings, 'SMTP_FROM_EMAIL', None) or getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@cryptotrace.local')
         self.from_name = getattr(settings, 'SMTP_FROM_NAME', 'CryptoTrace HPS')
         self.reply_to = getattr(settings, 'SMTP_REPLY_TO', getattr(settings, 'EMAIL_HOST_USER', ''))
+        
+        # Validar configuración de email
+        email_host_user = getattr(settings, 'EMAIL_HOST_USER', '')
+        email_host_password = getattr(settings, 'EMAIL_HOST_PASSWORD', '')
+        
+        if not email_host_user or not email_host_password:
+            logger.warning(f"⚠️ Configuración SMTP incompleta: EMAIL_HOST_USER={bool(email_host_user)}, EMAIL_HOST_PASSWORD={bool(email_host_password)}")
+        
+        logger.info(f"📧 HpsEmailService inicializado: from_email={self.from_email}, reply_to={self.reply_to}")
     
     def send_hps_confirmation_email(self, hps_request: HpsRequest) -> bool:
         """
@@ -74,11 +83,13 @@ class HpsEmailService:
                 email.attach_alternative(html_message, "text/html")
             
             email.send()
-            logger.info(f"Email de confirmación enviado para HPS {hps_request.id} a {user.email}")
+            logger.info(f"✅ Email de confirmación enviado para HPS {hps_request.id} a {user.email}")
             return True
             
         except Exception as e:
-            logger.error(f"Error enviando correo de confirmación HPS {hps_request.id}: {str(e)}")
+            logger.error(f"❌ Error enviando correo de confirmación HPS {hps_request.id}: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     def send_hps_status_update_email(
@@ -154,11 +165,13 @@ class HpsEmailService:
                 email.attach_alternative(html_message, "text/html")
             
             email.send()
-            logger.info(f"Email de actualización enviado para HPS {hps_request.id} a {user.email}")
+            logger.info(f"✅ Email de actualización enviado para HPS {hps_request.id} a {user.email}")
             return True
             
         except Exception as e:
-            logger.error(f"Error enviando correo de actualización HPS {hps_request.id}: {str(e)}")
+            logger.error(f"❌ Error enviando correo de actualización HPS {hps_request.id}: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     def send_user_credentials_email(
@@ -214,11 +227,13 @@ class HpsEmailService:
                 email_msg.attach_alternative(html_message, "text/html")
             
             email_msg.send()
-            logger.info(f"Email de credenciales enviado a {email}")
+            logger.info(f"✅ Email de credenciales enviado a {email}")
             return True
             
         except Exception as e:
-            logger.error(f"Error enviando correo de credenciales a {email}: {str(e)}")
+            logger.error(f"❌ Error enviando correo de credenciales a {email}: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     def send_hps_form_email(self, email: str, form_url: str, user_name: str = "") -> bool:
@@ -291,11 +306,23 @@ Equipo CryptoTrace HPS
             if html_message:
                 email_msg.attach_alternative(html_message, "text/html")
             
+            # Validar configuración antes de enviar
+            from django.conf import settings
+            email_host_user = getattr(settings, 'EMAIL_HOST_USER', '')
+            email_host_password = getattr(settings, 'EMAIL_HOST_PASSWORD', '')
+            
+            if not email_host_user or not email_host_password:
+                logger.error(f"❌ Configuración SMTP incompleta: EMAIL_HOST_USER={bool(email_host_user)}, EMAIL_HOST_PASSWORD={bool(email_host_password)}")
+                return False
+            
+            logger.info(f"📧 Intentando enviar email a {email} desde {self.from_email}")
             email_msg.send()
-            logger.info(f"Email con formulario HPS enviado a {email}")
+            logger.info(f"✅ Email con formulario HPS enviado a {email}")
             return True
             
         except Exception as e:
-            logger.error(f"Error enviando correo con formulario HPS a {email}: {str(e)}")
+            logger.error(f"❌ Error enviando correo con formulario HPS a {email}: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 

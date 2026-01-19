@@ -256,12 +256,16 @@ def check_hps_expiration_task(self):
         }
 
 
-@shared_task(bind=True)
+@shared_task(bind=True, name="hps_core.tasks.send_hps_form_email_task")
 def send_hps_form_email_task(self, email: str, form_url: str, user_name: str = ""):
     """
     Tarea Celery para envío de email con formulario HPS.
     """
     try:
+        logger.info(f"📧 [CELERY] Iniciando envío de email HPS a {email}")
+        logger.info(f"📧 [CELERY] Form URL: {form_url[:50]}...")
+        logger.info(f"📧 [CELERY] User name: {user_name}")
+        
         success = email_service.send_hps_form_email(
             email=email,
             form_url=form_url,
@@ -269,15 +273,17 @@ def send_hps_form_email_task(self, email: str, form_url: str, user_name: str = "
         )
         
         if success:
-            logger.info("Email con formulario HPS enviado exitosamente a %s", email)
+            logger.info(f"✅ [CELERY] Email con formulario HPS enviado exitosamente a {email}")
             return {"status": "sent", "email": email}
         else:
-            logger.error("Error enviando email con formulario HPS a %s", email)
-            return {"status": "error", "email": email, "message": "Error enviando email"}
+            logger.error(f"❌ [CELERY] Error enviando email con formulario HPS a {email} (send_hps_form_email retornó False)")
+            return {"status": "error", "email": email, "message": "Error enviando email - send_hps_form_email retornó False"}
             
     except Exception as e:
-        logger.exception("Excepción en tarea de formulario HPS: %s", str(e))
-        return {"status": "error", "message": str(e)}
+        logger.exception(f"❌ [CELERY] Excepción en tarea de formulario HPS para {email}: {str(e)}")
+        import traceback
+        logger.error(f"❌ [CELERY] Traceback completo: {traceback.format_exc()}")
+        return {"status": "error", "email": email, "message": str(e)}
 
 
 @shared_task(bind=True, name="hps_core.send_generic_email")
