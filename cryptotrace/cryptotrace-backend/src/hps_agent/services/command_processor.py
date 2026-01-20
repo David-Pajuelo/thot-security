@@ -8,6 +8,7 @@ import re
 from typing import Dict, Any, Optional
 from datetime import datetime
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from channels.db import database_sync_to_async
 from hps_core.models import HpsUserProfile, HpsTeam, HpsRequest, HpsRole
 
@@ -29,11 +30,11 @@ class CommandProcessor:
     
     def __init__(self):
         """Inicializar procesador de comandos"""
-        # Sin fallbacks - deben venir de variables de entorno
-        self.frontend_url = os.getenv("FRONTEND_URL")
-        self.hps_system_url = os.getenv("HPS_SYSTEM_URL")
+        # Usar Django settings para tener acceso a fallbacks de desarrollo
+        self.frontend_url = getattr(settings, 'FRONTEND_URL', None)
+        self.hps_system_url = getattr(settings, 'HPS_SYSTEM_URL', None)
         self.backend_url = os.getenv("BACKEND_URL", "http://cryptotrace-backend:8080")  # URL interna Docker OK
-        logger.info(f"CommandProcessor inicializado - Backend: {self.backend_url}, HPS System: {self.hps_system_url}")
+        logger.info(f"CommandProcessor inicializado - Backend: {self.backend_url}, Frontend: {self.frontend_url}, HPS System: {self.hps_system_url}")
         
         # Flujos conversacionales activos por usuario
         self.conversation_flows = {}
