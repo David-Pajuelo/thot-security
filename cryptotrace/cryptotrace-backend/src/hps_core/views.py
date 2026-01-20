@@ -1157,6 +1157,12 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
         # Según el requerimiento: todos los usuarios deben aparecer en la gestión
         return qs
     
+    def get_serializer_context(self):
+        """Añadir request al contexto para que el serializer pueda acceder al usuario actual"""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+    
     def get_permissions(self):
         """
         Solo admins pueden crear, actualizar, desactivar y eliminar usuarios

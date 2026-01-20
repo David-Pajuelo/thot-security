@@ -73,7 +73,45 @@ const sortUsersByRole = (users) => {
 
 const UserManagement = () => {
   const navigate = useNavigate();
-  const { canManageUsers } = useAuthStore();
+  const { canManageUsers, user: currentUser, getUserRole } = useAuthStore();
+  
+  // Función para obtener los roles disponibles según el usuario actual
+  const getAvailableRoles = () => {
+    const currentRole = getUserRole();
+    
+    // Jefes de seguridad solo pueden asignar crypto y member
+    if (currentRole === 'jefe_seguridad' || currentRole === 'jefe_seguridad_suplente') {
+      return [
+        { value: 'crypto', label: 'Crypto' },
+        { value: 'member', label: 'Miembro' }
+      ];
+    }
+    
+    // Administradores pueden asignar todos los roles excepto team_lead
+    if (currentRole === 'admin') {
+      return [
+        { value: 'admin', label: 'Administrador' },
+        { value: 'jefe_seguridad', label: 'Jefe de Seguridad' },
+        { value: 'jefe_seguridad_suplente', label: 'Jefe de Seguridad Suplente' },
+        { value: 'crypto', label: 'Crypto' },
+        { value: 'member', label: 'Miembro' }
+      ];
+    }
+    
+    // Líderes de equipo no pueden cambiar roles
+    if (currentRole === 'team_lead') {
+      return [];
+    }
+    
+    // Por defecto, no permitir cambiar roles
+    return [];
+  };
+  
+  // Verificar si el usuario actual puede cambiar roles
+  const canChangeRole = () => {
+    const currentRole = getUserRole();
+    return currentRole === 'admin' || currentRole === 'jefe_seguridad' || currentRole === 'jefe_seguridad_suplente';
+  };
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -252,9 +290,13 @@ const UserManagement = () => {
       const updateData = {
         full_name: formData.full_name.trim(),  // Siempre enviar nombre (es required)
         email: formData.email.trim(),  // Siempre enviar email (es required)
-        role: roleValue,  // Siempre enviar rol
         team_id: formData.team_id || null  // Enviar team_id (puede ser null)
       };
+      
+      // Solo enviar role si el usuario tiene permisos para cambiarlo
+      if (canChangeRole()) {
+        updateData.role = roleValue;
+      }
       
       // Solo incluir password si se proporcionó uno nuevo
       if (formData.password && formData.password.trim() !== '') {
@@ -274,12 +316,42 @@ const UserManagement = () => {
       loadUsers();
     } catch (error) {
       console.error('Error actualizando usuario:', error);
-      const errorMessage = error.response?.data?.detail || 
-                          error.response?.data?.message || 
-                          (error.response?.data?.role ? error.response.data.role[0] : null) ||
-                          (error.response?.data?.team_id ? error.response.data.team_id[0] : null) ||
-                          error.message || 
-                          'Error desconocido al actualizar usuario';
+      console.error('Error response data:', error.response?.data);
+      
+      // Extraer mensaje de error de diferentes formatos posibles
+      let errorMessage = null;
+      
+      if (error.response?.data) {
+        const data = error.response.data;
+        
+        // Intentar obtener el mensaje de diferentes campos
+        if (data.detail) {
+          errorMessage = Array.isArray(data.detail) ? data.detail[0] : data.detail;
+        } else if (data.message) {
+          errorMessage = Array.isArray(data.message) ? data.message[0] : data.message;
+        } else if (data.role) {
+          errorMessage = Array.isArray(data.role) ? data.role[0] : data.role;
+        } else if (data.team_id) {
+          errorMessage = Array.isArray(data.team_id) ? data.team_id[0] : data.team_id;
+        } else if (data.non_field_errors) {
+          errorMessage = Array.isArray(data.non_field_errors) ? data.non_field_errors[0] : data.non_field_errors;
+        } else {
+          // Si hay múltiples campos con errores, combinarlos
+          const errorFields = Object.keys(data).filter(key => Array.isArray(data[key]) && data[key].length > 0);
+          if (errorFields.length > 0) {
+            errorMessage = errorFields.map(field => {
+              const fieldError = Array.isArray(data[field]) ? data[field][0] : data[field];
+              return `${field}: ${fieldError}`;
+            }).join(', ');
+          }
+        }
+      }
+      
+      // Fallback a error.message si no se encontró nada
+      if (!errorMessage) {
+        errorMessage = error.message || 'Error desconocido al actualizar usuario';
+      }
+      
       alert('Error al actualizar usuario: ' + errorMessage);
     }
   };
@@ -1207,21 +1279,37 @@ const UserManagement = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Rol
                 </label>
-                <select
-                  value={formData.role}
-                  onChange={(e) => setFormData({...formData, role: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
-                  style={{ color: '#111827' }}
-                >
-                  <option value="admin">Administrador</option>
-                  <option value="jefe_seguridad">Jefe de Seguridad</option>
-                  <option value="jefe_seguridad_suplente">Jefe de Seguridad Suplente</option>
-                  <option value="crypto">Crypto</option>
-                  <option value="member">Miembro</option>
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  Nota: Los líderes de equipo se asignan desde la gestión de equipos, no desde aquí.
-                </p>
+                {canChangeRole() ? (
+                  <>
+                    <select
+                      value={formData.role}
+                      onChange={(e) => setFormData({...formData, role: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
+                      style={{ color: '#111827' }}
+                    >
+                      {getAvailableRoles().map(role => (
+                        <option key={role.value} value={role.value}>{role.label}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {getUserRole() === 'admin' 
+                        ? 'Nota: Los líderes de equipo se asignan desde la gestión de equipos, no desde aquí.'
+                        : 'Solo puedes asignar roles de crypto o miembro.'}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={getRoleLabel(formData.role)}
+                      disabled
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 text-gray-500 cursor-not-allowed"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      No tienes permisos para cambiar roles de usuarios.
+                    </p>
+                  </>
+                )}
               </div>
               
               <div>
@@ -1310,21 +1398,37 @@ const UserManagement = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Rol
                 </label>
-                <select
-                  value={formData.role}
-                  onChange={(e) => setFormData({...formData, role: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
-                  style={{ color: '#111827' }}
-                >
-                  <option value="admin">Administrador</option>
-                  <option value="jefe_seguridad">Jefe de Seguridad</option>
-                  <option value="jefe_seguridad_suplente">Jefe de Seguridad Suplente</option>
-                  <option value="crypto">Crypto</option>
-                  <option value="member">Miembro</option>
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  Nota: Los líderes de equipo se asignan desde la gestión de equipos, no desde aquí.
-                </p>
+                {canChangeRole() ? (
+                  <>
+                    <select
+                      value={formData.role}
+                      onChange={(e) => setFormData({...formData, role: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
+                      style={{ color: '#111827' }}
+                    >
+                      {getAvailableRoles().map(role => (
+                        <option key={role.value} value={role.value}>{role.label}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {getUserRole() === 'admin' 
+                        ? 'Nota: Los líderes de equipo se asignan desde la gestión de equipos, no desde aquí.'
+                        : 'Solo puedes asignar roles de crypto o miembro.'}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={getRoleLabel(formData.role)}
+                      disabled
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 text-gray-500 cursor-not-allowed"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      No tienes permisos para cambiar roles de usuarios.
+                    </p>
+                  </>
+                )}
               </div>
               
               <div>
@@ -1682,7 +1786,7 @@ const UserManagement = () => {
                   <option value="">Sin líder asignado</option>
                   {availableLeaders.map((leader) => (
                     <option key={leader.id} value={leader.id}>
-                      {leader.full_name} ({leader.email}) - Rol: {leader.role}
+                      {leader.full_name} ({leader.email})
                     </option>
                   ))}
                 </select>
@@ -1753,7 +1857,7 @@ const UserManagement = () => {
                   <option value="">Sin líder asignado</option>
                   {availableLeaders.map((leader) => (
                     <option key={leader.id} value={leader.id}>
-                      {leader.full_name} ({leader.email}) - Rol: {leader.role}
+                      {leader.full_name} ({leader.email})
                     </option>
                   ))}
                 </select>
