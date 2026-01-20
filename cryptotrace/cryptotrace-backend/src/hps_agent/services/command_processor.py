@@ -31,8 +31,9 @@ class CommandProcessor:
         """Inicializar procesador de comandos"""
         # Sin fallbacks - deben venir de variables de entorno
         self.frontend_url = os.getenv("FRONTEND_URL")
+        self.hps_system_url = os.getenv("HPS_SYSTEM_URL")
         self.backend_url = os.getenv("BACKEND_URL", "http://cryptotrace-backend:8080")  # URL interna Docker OK
-        logger.info(f"CommandProcessor inicializado - Backend: {self.backend_url}")
+        logger.info(f"CommandProcessor inicializado - Backend: {self.backend_url}, HPS System: {self.hps_system_url}")
         
         # Flujos conversacionales activos por usuario
         self.conversation_flows = {}
@@ -944,8 +945,15 @@ class CommandProcessor:
                     "mensaje": "❌ Error generando token HPS. Por favor, intenta de nuevo."
                 }
             
-            # Generar URL del formulario
-            url = f"{self.frontend_url}/hps-form?token={token.token}&email={email}&type={form_type}"
+            # Generar URL del formulario (usar HPS_SYSTEM_URL ya que el formulario está en hps-system)
+            base_url = self.hps_system_url or self.frontend_url
+            if not base_url:
+                logger.error("❌ Ni HPS_SYSTEM_URL ni FRONTEND_URL están definidas")
+                return {
+                    "tipo": "error",
+                    "mensaje": "❌ Error de configuración: No se pudo generar la URL del formulario."
+                }
+            url = f"{base_url}/hps-form?token={token.token}&email={email}&type={form_type}"
             
             # Enviar email con formulario (no se verifica si el usuario existe)
             user_name = email.split("@")[0].replace(".", " ").title()
