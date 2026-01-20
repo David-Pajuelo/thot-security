@@ -337,8 +337,10 @@ class UserService:
         if user_data.full_name is not None:
             # Dividir full_name en first_name y last_name
             name_parts = user_data.full_name.strip().split()
-            user.first_name = name_parts[0] if name_parts else "Usuario"
-            user.last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+            new_first_name = name_parts[0] if name_parts else "Usuario"
+            new_last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+            user.first_name = new_first_name
+            user.last_name = new_last_name
         if user_data.role is not None:
             # Prevenir cambio directo a team_lead
             if user_data.role == "team_lead":
@@ -368,8 +370,23 @@ class UserService:
         if user_data.is_active is not None:
             user.is_active = user_data.is_active
         
-        self.db.commit()
-        self.db.refresh(user)
+        try:
+            self.db.commit()
+            # Refrescar el usuario y cargar relaciones
+            from sqlalchemy.orm import joinedload
+            self.db.refresh(user)
+            # Recargar con relaciones para asegurar que role y team estén disponibles
+            user = self.db.query(User).options(
+                joinedload(User.role),
+                joinedload(User.team)
+            ).filter(User.id == user.id).first()
+        except Exception as commit_error:
+            logger.error(f"Error al hacer commit: {commit_error}", exc_info=True)
+            self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error al guardar cambios: {str(commit_error)}"
+            )
         
         return user
     

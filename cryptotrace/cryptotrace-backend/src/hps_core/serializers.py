@@ -375,11 +375,11 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
     Incluye información del usuario, rol y equipo relacionados
     """
     user_id = serializers.IntegerField(source='user.id', read_only=True)
-    email = serializers.CharField(source='user.email', read_only=True)
+    email = serializers.CharField(source='user.email', read_only=False, required=False, allow_blank=True)
     username = serializers.CharField(source='user.username', read_only=True)
-    first_name = serializers.CharField(source='user.first_name', read_only=True)
-    last_name = serializers.CharField(source='user.last_name', read_only=True)
-    full_name = serializers.SerializerMethodField()
+    first_name = serializers.CharField(source='user.first_name', read_only=False, required=False, allow_blank=True)
+    last_name = serializers.CharField(source='user.last_name', read_only=False, required=False, allow_blank=True)
+    full_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     role = serializers.CharField(source='role.name', read_only=True)
     role_name = serializers.CharField(source='role.name', read_only=True)
     # Campo escribible para actualizar el rol (acepta el nombre del rol como string)
@@ -589,7 +589,33 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         return value
     
     def update(self, instance, validated_data):
-        """Actualizar el perfil, incluyendo el rol y el equipo si se proporcionan"""
+        """Actualizar el perfil, incluyendo el rol, equipo y datos del usuario si se proporcionan"""
+        # Extraer datos del usuario (con source='user.email', los datos vienen en validated_data['user'])
+        user_data = validated_data.pop('user', {})
+        email = user_data.get('email') if user_data else None
+        first_name = user_data.get('first_name') if user_data else None
+        last_name = user_data.get('last_name') if user_data else None
+        full_name = validated_data.pop('full_name', None)
+        
+        # Si se proporciona full_name, dividirlo en first_name y last_name
+        if full_name:
+            name_parts = full_name.strip().split(' ', 1)
+            first_name = name_parts[0] if len(name_parts) > 0 else first_name
+            last_name = name_parts[1] if len(name_parts) > 1 else last_name
+        
+        # Actualizar datos del usuario
+        user = instance.user
+        if email and email.strip() and email != user.email:
+            user.email = email
+        if first_name is not None and first_name.strip() != user.first_name:
+            user.first_name = first_name.strip() if first_name else ''
+        if last_name is not None and last_name.strip() != user.last_name:
+            user.last_name = last_name.strip() if last_name else ''
+        
+        # Guardar cambios del usuario
+        if email or first_name is not None or last_name is not None:
+            user.save()
+        
         # Manejar actualización del rol
         role_writable = validated_data.pop('role_writable', None)
         if role_writable:

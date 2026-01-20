@@ -247,12 +247,13 @@ const UserManagement = () => {
       // Asegurar que el rol siempre sea un string, no un objeto
       const roleValue = typeof formData.role === 'string' ? formData.role : (formData.role?.name || formData.role || 'member');
       
-      // Preparar datos para actualización - usar los campos que el backend espera
+      // Preparar datos para actualización - enviar siempre los valores del formulario
+      // Los campos required siempre tienen valor, así que los enviamos siempre
       const updateData = {
-        full_name: formData.full_name || null,  // Incluir nombre completo
-        email: formData.email || null,  // Incluir email
-        role: roleValue,  // Usar 'role' directamente (no role_writable)
-        team_id: formData.team_id || null  // Usar 'team_id' directamente (no team_id_writable)
+        full_name: formData.full_name.trim(),  // Siempre enviar nombre (es required)
+        email: formData.email.trim(),  // Siempre enviar email (es required)
+        role: roleValue,  // Siempre enviar rol
+        team_id: formData.team_id || null  // Enviar team_id (puede ser null)
       };
       
       // Solo incluir password si se proporcionó uno nuevo
@@ -261,8 +262,12 @@ const UserManagement = () => {
       }
       
       console.log('Actualizando usuario con datos:', updateData);
+      console.log('Usuario seleccionado:', selectedUser);
       
-      await userService.updateUser(selectedUser.id, updateData);
+      const response = await userService.updateUser(selectedUser.id, updateData);
+      console.log('✅ Respuesta del backend:', response);
+      console.log('✅ Usuario actualizado - nombre:', response.full_name || `${response.first_name} ${response.last_name}`);
+      
       setShowEditModal(false);
       setSelectedUser(null);
       setFormData({ email: '', full_name: '', password: '', role: 'member', team_id: 'd8574c01-851f-4716-9ac9-bbda45469bdf' });

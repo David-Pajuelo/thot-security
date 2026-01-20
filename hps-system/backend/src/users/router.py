@@ -189,10 +189,6 @@ async def update_user(
     - **Members**: Solo pueden actualizar su propio perfil (datos básicos)
     """
     try:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"Actualizando usuario {user_id} con datos: {user_data.dict()}")
-        
         user_service = UserService(db)
         
         # Convertir a esquema de auth
@@ -208,15 +204,18 @@ async def update_user(
             else:
                 role_str = str(user_data.role)
         
+        # Asegurar que los valores no sean strings vacíos
+        email_value = user_data.email if user_data.email and user_data.email.strip() else None
+        full_name_value = user_data.full_name if user_data.full_name and user_data.full_name.strip() else None
+        team_id_value = user_data.team_id if user_data.team_id else None
+        
         auth_user_data = UserUpdate(
-            email=user_data.email,
-            full_name=user_data.full_name,
+            email=email_value,
+            full_name=full_name_value,
             role=role_str,
-            team_id=user_data.team_id,
+            team_id=team_id_value,
             is_active=user_data.is_active
         )
-        
-        logger.info(f"Datos convertidos: {auth_user_data.dict()}")
         
         result = user_service.update_user(user_id, auth_user_data, current_user)
         return UserResponse.from_user(result)
