@@ -354,19 +354,22 @@ class UserService:
             role_record = self.db.query(Role).filter(Role.name == user_data.role).first()
             if role_record:
                 user.role_id = role_record.id
-        if user_data.team_id is not None:
-            # Convertir team_id string a UUID si es necesario
-            if user_data.team_id:
+        # Procesar team_id: puede venir como None, string vacío, o UUID válido
+        if hasattr(user_data, 'team_id') and user_data.team_id is not None:
+            team_id_str = str(user_data.team_id).strip()
+            if team_id_str:  # Si no está vacío
                 try:
                     import uuid
-                    user.team_id = uuid.UUID(user_data.team_id)
+                    user.team_id = uuid.UUID(team_id_str)
                 except ValueError:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="team_id debe ser un UUID válido"
                     )
             else:
+                # Si es string vacío, establecer a None (sin equipo)
                 user.team_id = None
+        # Si team_id no está presente en user_data, no hacer nada (mantener el valor actual)
         if user_data.is_active is not None:
             user.is_active = user_data.is_active
         

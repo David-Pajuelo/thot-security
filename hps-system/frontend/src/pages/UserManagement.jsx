@@ -290,7 +290,7 @@ const UserManagement = () => {
       const updateData = {
         full_name: formData.full_name.trim(),  // Siempre enviar nombre (es required)
         email: formData.email.trim(),  // Siempre enviar email (es required)
-        team_id: formData.team_id || null  // Enviar team_id (puede ser null)
+        team_id: formData.team_id && formData.team_id.trim() !== '' ? formData.team_id.trim() : null  // Enviar team_id (puede ser null o UUID)
       };
       
       // Solo enviar role si el usuario tiene permisos para cambiarlo
@@ -303,12 +303,7 @@ const UserManagement = () => {
         updateData.password = formData.password;
       }
       
-      console.log('Actualizando usuario con datos:', updateData);
-      console.log('Usuario seleccionado:', selectedUser);
-      
       const response = await userService.updateUser(selectedUser.id, updateData);
-      console.log('✅ Respuesta del backend:', response);
-      console.log('✅ Usuario actualizado - nombre:', response.full_name || `${response.first_name} ${response.last_name}`);
       
       setShowEditModal(false);
       setSelectedUser(null);

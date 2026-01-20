@@ -386,11 +386,18 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
     role_writable = serializers.CharField(write_only=True, required=False, allow_blank=True)
     
     def to_internal_value(self, data):
-        """Mapear 'role' del frontend a 'role_writable' para compatibilidad"""
+        """Mapear 'role' y 'team_id' del frontend a 'role_writable' y 'team_id_writable' para compatibilidad"""
+        # Crear copia para no modificar el original
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
+        
         # Si el frontend envía 'role' en lugar de 'role_writable', mapearlo
         if 'role' in data and 'role_writable' not in data:
-            data = data.copy()
             data['role_writable'] = data.get('role')
+        
+        # Si el frontend envía 'team_id' en lugar de 'team_id_writable', mapearlo
+        if 'team_id' in data and 'team_id_writable' not in data:
+            data['team_id_writable'] = data.get('team_id')
+        
         return super().to_internal_value(data)
     team_id = serializers.SerializerMethodField()
     team_name = serializers.CharField(source='team.name', read_only=True, allow_null=True)
@@ -626,6 +633,12 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
     
     def update(self, instance, validated_data):
         """Actualizar el perfil, incluyendo el rol, equipo y datos del usuario si se proporcionan"""
+        import logging
+        logger = logging.getLogger('hps_core')
+        logger.info(f"[UPDATE START] Iniciando actualización de perfil {instance.id}")
+        logger.info(f"[UPDATE START] validated_data recibido: {list(validated_data.keys())}")
+        logger.info(f"[UPDATE START] validated_data completo: {validated_data}")
+        
         # Extraer datos del usuario
         # DRF puede anidar los datos en 'user' si usamos source='user.email', 
         # pero el frontend envía los datos directamente, así que buscamos en ambos lugares
@@ -714,31 +727,35 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
             except models.HpsRole.DoesNotExist:
                 raise serializers.ValidationError({'role_writable': f'El rol "{role_name}" no existe'})
         
-        # Manejar actualización del equipo (aceptar tanto 'team_id' como 'team_id_writable' del frontend)
+        # Manejar actualización del equipo
+        # to_internal_value ya mapeó 'team_id' a 'team_id_writable'
         team_id_writable = validated_data.pop('team_id_writable', None)
-        if team_id_writable is None:
-            team_id_writable = validated_data.pop('team_id', None)
-        if team_id_writable is not None:  # Permite establecer a None explícitamente
-            if team_id_writable == '' or team_id_writable is None:
-                # Si se establece explícitamente a None, asignar al equipo AICOX por defecto
+        
+        if team_id_writable is not None:
+            # Procesar el team_id
+            team_id_str = str(team_id_writable).strip() if team_id_writable else ''
+            
+            if not team_id_str or team_id_str == 'None':
+                # Si es None, string vacío o 'None', asignar al equipo AICOX por defecto
                 instance.team = self._get_or_create_aicox_team()
             else:
                 try:
                     import uuid
-                    team_uuid = uuid.UUID(team_id_writable)
+                    team_uuid = uuid.UUID(team_id_str)
                     team = models.HpsTeam.objects.get(id=team_uuid)
                     instance.team = team
-                except (ValueError, models.HpsTeam.DoesNotExist):
-                    raise serializers.ValidationError({'team_id_writable': f'El equipo con ID "{team_id_writable}" no existe'})
-        else:
-            # Si no se especifica equipo y el usuario no tiene uno, asignar automáticamente al equipo AICOX
-            if not instance.team:
-                instance.team = self._get_or_create_aicox_team()
+                except (ValueError, models.HpsTeam.DoesNotExist) as e:
+                    raise serializers.ValidationError({'team_id': f'El equipo con ID "{team_id_str}" no existe'})
+        
+        # IMPORTANTE: Guardar el equipo explícitamente
+        if team_id_writable is not None:
+            instance.save(update_fields=['team'])
         
         # Actualizar otros campos del perfil
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         
+        # Guardar todos los cambios
         instance.save()
         return instance
 

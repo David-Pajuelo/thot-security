@@ -207,7 +207,9 @@ async def update_user(
         # Asegurar que los valores no sean strings vacíos
         email_value = user_data.email if user_data.email and user_data.email.strip() else None
         full_name_value = user_data.full_name if user_data.full_name and user_data.full_name.strip() else None
-        team_id_value = user_data.team_id if user_data.team_id else None
+        # team_id: mantener el valor tal cual (puede ser None, string vacío, o UUID)
+        # El servicio se encargará de procesarlo correctamente
+        team_id_value = user_data.team_id
         
         auth_user_data = UserUpdate(
             email=email_value,
