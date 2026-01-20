@@ -384,6 +384,14 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
     role_name = serializers.CharField(source='role.name', read_only=True)
     # Campo escribible para actualizar el rol (acepta el nombre del rol como string)
     role_writable = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    
+    def to_internal_value(self, data):
+        """Mapear 'role' del frontend a 'role_writable' para compatibilidad"""
+        # Si el frontend envía 'role' en lugar de 'role_writable', mapearlo
+        if 'role' in data and 'role_writable' not in data:
+            data = data.copy()
+            data['role_writable'] = data.get('role')
+        return super().to_internal_value(data)
     team_id = serializers.SerializerMethodField()
     team_name = serializers.CharField(source='team.name', read_only=True, allow_null=True)
     # Campo escribible para actualizar el equipo (acepta UUID como string)
@@ -620,9 +628,9 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         
         # Manejar actualización del rol (aceptar tanto 'role' como 'role_writable' del frontend)
         role_writable = validated_data.pop('role_writable', None) or validated_data.pop('role', None)
-        if role_writable:
+        if role_writable and role_writable.strip():
             try:
-                role = models.HpsRole.objects.get(name=role_writable)
+                role = models.HpsRole.objects.get(name=role_writable.strip())
                 instance.role = role
             except models.HpsRole.DoesNotExist:
                 raise serializers.ValidationError({'role_writable': f'El rol "{role_writable}" no existe'})
