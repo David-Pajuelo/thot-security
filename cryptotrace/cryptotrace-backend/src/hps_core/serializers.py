@@ -491,14 +491,38 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
             first_name = name_parts[0] if len(name_parts) > 0 else ''
             last_name = name_parts[1] if len(name_parts) > 1 else ''
         
-        # Manejar rol
-        role_writable = validated_data.pop('role_writable', None)
+        # Manejar rol (aceptar tanto 'role' como 'role_writable' del frontend)
+        role_writable = validated_data.pop('role_writable', None) or validated_data.pop('role', None)
         role = None
         if role_writable:
+            role_name = role_writable.strip() if isinstance(role_writable, str) else str(role_writable)
+            
+            # Validar permisos para asignar el rol según el rol del usuario actual
+            request = self.context.get('request')
+            if request and request.user:
+                current_user = request.user
+                current_profile = getattr(current_user, 'hps_profile', None)
+                current_role_name = current_profile.role.name if current_profile and current_profile.role else None
+                
+                # Administrador puede asignar cualquier rol
+                if current_role_name == 'admin':
+                    pass  # Permitir cualquier rol
+                # Jefe de seguridad y jefe seguridad suplente solo pueden asignar 'crypto' y 'member'
+                elif current_role_name in ['jefe_seguridad', 'jefe_seguridad_suplente']:
+                    allowed_roles = ['crypto', 'member']
+                    if role_name not in allowed_roles:
+                        raise serializers.ValidationError({
+                            'role': f'No tienes permisos para asignar el rol "{role_name}". Solo puedes asignar: {", ".join(allowed_roles)}'
+                        })
+                else:
+                    # Otros roles no pueden crear usuarios con roles específicos
+                    # Por defecto asignar 'member' o 'crypto'
+                    role_name = 'member'
+            
             try:
-                role = models.HpsRole.objects.get(name=role_writable)
+                role = models.HpsRole.objects.get(name=role_name)
             except models.HpsRole.DoesNotExist:
-                raise serializers.ValidationError({'role_writable': f'El rol "{role_writable}" no existe'})
+                raise serializers.ValidationError({'role_writable': f'El rol "{role_name}" no existe'})
         else:
             # Rol por defecto: "member"
             role = models.HpsRole.objects.filter(name="member").first()
@@ -629,11 +653,36 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         # Manejar actualización del rol (aceptar tanto 'role' como 'role_writable' del frontend)
         role_writable = validated_data.pop('role_writable', None) or validated_data.pop('role', None)
         if role_writable and role_writable.strip():
+            role_name = role_writable.strip()
+            
+            # Validar permisos para asignar el rol según el rol del usuario actual
+            request = self.context.get('request')
+            if request and request.user:
+                current_user = request.user
+                current_profile = getattr(current_user, 'hps_profile', None)
+                current_role_name = current_profile.role.name if current_profile and current_profile.role else None
+                
+                # Administrador puede asignar cualquier rol
+                if current_role_name == 'admin':
+                    pass  # Permitir cualquier rol
+                # Jefe de seguridad y jefe seguridad suplente solo pueden asignar 'crypto' y 'member'
+                elif current_role_name in ['jefe_seguridad', 'jefe_seguridad_suplente']:
+                    allowed_roles = ['crypto', 'member']
+                    if role_name not in allowed_roles:
+                        raise serializers.ValidationError({
+                            'role': f'No tienes permisos para asignar el rol "{role_name}". Solo puedes asignar: {", ".join(allowed_roles)}'
+                        })
+                else:
+                    # Otros roles no pueden cambiar roles
+                    raise serializers.ValidationError({
+                        'role': 'No tienes permisos para cambiar roles de usuarios'
+                    })
+            
             try:
-                role = models.HpsRole.objects.get(name=role_writable.strip())
+                role = models.HpsRole.objects.get(name=role_name)
                 instance.role = role
             except models.HpsRole.DoesNotExist:
-                raise serializers.ValidationError({'role_writable': f'El rol "{role_writable}" no existe'})
+                raise serializers.ValidationError({'role_writable': f'El rol "{role_name}" no existe'})
         
         # Manejar actualización del equipo (aceptar tanto 'team_id' como 'team_id_writable' del frontend)
         team_id_writable = validated_data.pop('team_id_writable', None)
