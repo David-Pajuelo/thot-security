@@ -23,6 +23,7 @@ class RoleConfig:
         "jefe_seguridad": [
             "¿Qué comandos puedes ejecutar?",
             "Dame un resumen de todas las HPS",
+            "Ver HPS pendientes",
             "Enviar solicitud HPS",
             "Enviar solicitud de traspaso HPS",
             "¿Hay HPS pendientes en mi equipo?"
@@ -30,6 +31,7 @@ class RoleConfig:
         "jefe_seguridad_suplente": [
             "¿Qué comandos puedes ejecutar?",
             "Dame un resumen de todas las HPS",
+            "Ver HPS pendientes",
             "Enviar solicitud HPS",
             "Enviar solicitud de traspaso HPS",
             "¿Hay HPS pendientes en mi equipo?"

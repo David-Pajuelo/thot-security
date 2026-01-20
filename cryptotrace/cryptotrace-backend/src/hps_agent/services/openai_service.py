@@ -189,10 +189,20 @@ RECONOCIMIENTO DE COMANDOS (IMPORTANTE: Reconoce variaciones y sinónimos):
 
 **Consultas HPS:**
 - "estado hps de [email]", "consultar hps de [email]", "ver estado hps de [email]" → acción: "consultar_estado_hps"
+- "mi hps", "estado de mi hps", "ver mi hps", "cuál es mi estado hps" → acción: "consultar_estado_hps" (sin email, usa el email del usuario actual)
 - "hps de mi equipo", "hps del equipo", "ver hps del equipo", "¿hay hps pendientes en mi equipo?", "hay hps pendientes en mi equipo", "hps pendientes en mi equipo" → acción: "consultar_hps_equipo"
 - "todas las hps", "todas las hps del sistema", "resumen de todas las hps", "dame un resumen de todas las hps", "estadísticas de hps", "resumen hps", "estadísticas globales" → acción: "consultar_todas_hps"
-- **CONSULTA GENÉRICA POR ESTADO**: "solicitudes [estado]", "hps [estado]", "ver solicitudes [estado]", "listar hps [estado]", "solicitudes pendientes", "hps enviadas", "solicitudes rechazadas", "hps aprobadas", "solicitudes expiradas", "hps esperando dps" donde [estado] puede ser: pendientes, enviadas, rechazadas, aprobadas, expiradas, esperando dps → acción: "consultar_hps_por_estado" con parámetro "estado": "[estado]"
-- **IMPORTANTE**: Si el usuario menciona "mi equipo" o "equipo", SIEMPRE usa "consultar_hps_equipo" en lugar de "consultar_hps_por_estado". Por ejemplo: "¿Hay HPS pendientes en mi equipo?" → acción: "consultar_hps_equipo"
+- **CONSULTA GENÉRICA POR ESTADO** (SOLO para admin, jefe_seguridad, jefe_seguridad_suplente): "solicitudes [estado]", "hps [estado]", "ver solicitudes [estado]", "ver hps [estado]", "listar hps [estado]", "solicitudes pendientes", "hps pendientes", "ver hps pendientes", "hps enviadas", "solicitudes rechazadas", "hps aprobadas", "solicitudes expiradas", "hps esperando dps" donde [estado] puede ser: pendientes, enviadas, rechazadas, aprobadas, expiradas, esperando dps → acción: "consultar_hps_por_estado" con parámetro "estado": "[estado]"
+- **IMPORTANTE - INTERPRETACIÓN SEGÚN ROL**:
+  * **Admin, Jefe de Seguridad, Jefe de Seguridad Suplente**: 
+    - Si dicen "HPS pendientes" o "ver HPS pendientes" SIN mencionar "equipo" o "mi equipo" → usar "consultar_hps_por_estado" con estado "pendientes" (muestra TODAS las HPS pendientes del sistema).
+    - Si mencionan "mi equipo" o "equipo" → usar "consultar_hps_equipo".
+  * **Jefe de Equipo**: 
+    - Si dicen "HPS pendientes" o "ver HPS pendientes" o "¿hay HPS pendientes?" → SIEMPRE usar "consultar_hps_equipo" (muestra solo las HPS de su equipo, incluyendo pendientes). NO usar "consultar_hps_por_estado".
+    - Si mencionan "mi equipo" explícitamente → usar "consultar_hps_equipo".
+  * **Miembro, Crypto**: 
+    - Si dicen "HPS pendientes", "mi HPS", "estado de mi HPS", "ver mi HPS", "cuál es mi estado" → usar "consultar_estado_hps" SIN email (muestra solo su propia HPS). NO pueden ver HPS de otros usuarios ni de equipos.
+    - Si dicen solo "HPS" o "mi HPS" sin más contexto → usar "consultar_estado_hps" sin email.
 
 **Solicitudes HPS:**
 - **NUEVA HPS**: "envío hps a", "enviar hps a", "solicitar hps para", "crear hps para", "generar hps para", "enviar solicitud hps" → acción: "solicitar_hps"

@@ -382,6 +382,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 logger.info(f"✅ Nueva conversación creada: {conversation_id}")
                 
                 if conversation_id:
+                    # Establecer conversation_id ANTES de enviar mensaje de bienvenida
+                    self.conversation_id = conversation_id
+                    
                     # Enviar conversation_id
                     await self.send(text_data=json.dumps({
                         'type': 'conversation_id',
@@ -390,15 +393,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     }))
                     logger.info(f"✅ conversation_id enviado: {conversation_id}")
                     
-                    # Enviar mensaje de bienvenida
+                    # Enviar mensaje de bienvenida (ahora conversation_id está establecido)
                     await self._send_welcome_message()
                 else:
                     logger.warning("⚠️ No se pudo crear conversación, continuando sin ella")
                     await self._send_welcome_message()
             else:
                 logger.info(f"✅ Reutilizando conversación activa: {conversation_id}")
-                # Cargar historial
+                # Establecer conversation_id antes de cargar historial
                 self.conversation_id = conversation_id
+                
+                # Enviar conversation_id
                 await self.send(text_data=json.dumps({
                     'type': 'conversation_id',
                     'conversation_id': conversation_id,
@@ -406,10 +411,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 }))
                 logger.info(f"✅ conversation_id enviado: {conversation_id}")
                 
-                # Cargar historial de mensajes
+                # Cargar historial de mensajes (si no hay mensajes, enviará bienvenida)
                 await self._load_conversation_history()
             
-            if conversation_id:
+            if conversation_id and not self.conversation_id:
+                # Fallback: asegurar que conversation_id esté establecido
                 self.conversation_id = conversation_id
                 logger.info(f"✅ Conversación inicializada: {conversation_id}")
             else:
@@ -426,7 +432,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 logger.error(f"❌ Error enviando mensaje de bienvenida de emergencia: {welcome_error}")
     
     async def _send_welcome_message(self):
-        """Enviar mensaje de bienvenida"""
+        """Enviar mensaje de bienvenida - SIEMPRE se envía al frontend, incluso si falla al guardar"""
         try:
             user_role = self.user_context.get('role', 'member')
             user_name = self.user_context.get('first_name', 'Usuario') or 'Usuario'
@@ -436,28 +442,49 @@ class ChatConsumer(AsyncWebsocketConsumer):
             
             welcome_message = f"{welcome_text}\n\n**¿En qué puedo ayudarte hoy?** 😊"
             
+            # CRÍTICO: Enviar mensaje al frontend PRIMERO (siempre debe llegar al usuario)
             await self.send(text_data=json.dumps({
                 'type': 'assistant',
                 'message': welcome_message,
                 'timestamp': datetime.now().isoformat(),
-                'suggestions': suggestions
+                'suggestions': suggestions,
+                'conversation_id': self.conversation_id
             }))
+            logger.info(f"✅ Mensaje de bienvenida enviado al frontend (conversation_id: {self.conversation_id})")
             
-            # Guardar mensaje de bienvenida en la base de datos
+            # Intentar guardar mensaje de bienvenida en la base de datos (no crítico si falla)
             if self.conversation_id:
-                await self.chat_service.log_assistant_message(
-                    self.conversation_id,
-                    welcome_message,
-                    tokens_used=0,
-                    response_time_ms=0,
-                    metadata={'type': 'welcome', 'suggestions': suggestions}
-                )
-                logger.info(f"✅ Mensaje de bienvenida guardado en conversación {self.conversation_id}")
+                try:
+                    await self.chat_service.log_assistant_message(
+                        self.conversation_id,
+                        welcome_message,
+                        tokens_used=0,
+                        response_time_ms=0,
+                        metadata={'type': 'welcome', 'suggestions': suggestions}
+                    )
+                    logger.info(f"✅ Mensaje de bienvenida guardado en conversación {self.conversation_id}")
+                except Exception as save_error:
+                    # No crítico: el mensaje ya se envió al frontend
+                    logger.warning(f"⚠️ No se pudo guardar mensaje de bienvenida en BD: {save_error}")
             else:
-                logger.warning("⚠️ No hay conversation_id, mensaje de bienvenida no guardado")
+                logger.warning("⚠️ No hay conversation_id, mensaje de bienvenida no guardado (pero enviado al frontend)")
             
         except Exception as e:
             logger.error(f"❌ Error enviando mensaje de bienvenida: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            # Intentar enviar un mensaje de bienvenida básico como fallback
+            try:
+                await self.send(text_data=json.dumps({
+                    'type': 'assistant',
+                    'message': '¡Hola! 👋 Soy tu asistente de HPS. ¿En qué puedo ayudarte hoy?',
+                    'timestamp': datetime.now().isoformat(),
+                    'suggestions': [],
+                    'conversation_id': self.conversation_id
+                }))
+                logger.info("✅ Mensaje de bienvenida de emergencia enviado")
+            except Exception as fallback_error:
+                logger.error(f"❌ Error crítico: no se pudo enviar mensaje de bienvenida de emergencia: {fallback_error}")
     
     async def _load_conversation_history(self):
         """Cargar historial de conversación"""

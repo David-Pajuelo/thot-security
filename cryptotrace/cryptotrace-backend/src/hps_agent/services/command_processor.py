@@ -292,8 +292,8 @@ class CommandProcessor:
                     "mensaje": f"❌ No se encontró ningún usuario con el email {email}."
                 }
             
-            # Verificar permisos: crypto solo puede consultar su propia HPS
-            if user_role == "crypto" and email.lower() != current_user_email.lower():
+            # Verificar permisos: crypto y member solo pueden consultar su propia HPS
+            if user_role in ["crypto", "member"] and email.lower() != current_user_email.lower():
                 return {
                     "tipo": "error",
                     "mensaje": "❌ Solo puedes consultar el estado de tu propia HPS."
@@ -383,8 +383,21 @@ class CommandProcessor:
             return None
     
     async def _consultar_hps_equipo(self, user_context: Dict[str, Any]) -> Dict[str, Any]:
-        """Consultar HPS del equipo del usuario"""
+        """Consultar HPS del equipo del usuario (solo para team_lead)"""
         user_id = user_context.get("id")
+        user_role = user_context.get("role", "").lower()
+        
+        # Obtener rol del perfil HPS si está disponible
+        hps_role = await self._get_user_hps_role(user_id)
+        if hps_role:
+            user_role = hps_role.lower()
+        
+        # Solo team_lead puede consultar HPS de su equipo
+        if user_role != "team_lead":
+            return {
+                "tipo": "error",
+                "mensaje": "❌ Solo los jefes de equipo pueden consultar las HPS de su equipo."
+            }
         
         try:
             hps_list = await self._get_team_hps(user_id)
