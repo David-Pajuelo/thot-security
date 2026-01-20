@@ -93,7 +93,7 @@ def is_team_leader(user: User) -> bool:
 
 def can_manage_users(user: User) -> bool:
     """Verificar si el usuario puede gestionar otros usuarios"""
-    return user.role.name in [UserRole.ADMIN.value, UserRole.TEAM_LEADER.value, "jefe_seguridad", "security_chief"]
+    return user.role.name in [UserRole.ADMIN.value, UserRole.TEAM_LEADER.value, "jefe_seguridad", "jefe_seguridad_suplente"]
 
 def can_access_team_data(user: User, team_id: Optional[str] = None) -> bool:
     """Verificar si el usuario puede acceder a datos de equipo"""

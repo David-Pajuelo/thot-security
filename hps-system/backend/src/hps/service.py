@@ -125,7 +125,7 @@ class HPSService:
         ).filter(HPSRequest.id == request_uuid)
 
         # Control de acceso según el rol del usuario
-        if current_user.role.name in ["admin", "jefe_seguridad", "security_chief"]:
+        if current_user.role.name in ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]:
             # Admin y jefes de seguridad pueden ver todas las solicitudes
             pass
         elif current_user.role.name == "team_lead":
@@ -164,7 +164,7 @@ class HPSService:
         )
 
         # Control de acceso según el rol del usuario
-        if current_user.role.name in ["admin", "jefe_seguridad", "security_chief"]:
+        if current_user.role.name in ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]:
             # Admin y jefes de seguridad pueden ver todas las solicitudes
             pass
         elif current_user.role.name == "team_lead":
@@ -327,7 +327,7 @@ class HPSService:
         base_query = db.query(HPSRequest)
 
         # Control de acceso según el rol del usuario
-        if current_user.role.name in ["admin", "jefe_seguridad", "security_chief"]:
+        if current_user.role.name in ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]:
             # Admin y jefes de seguridad pueden ver estadísticas de todas las solicitudes
             pass
         elif current_user.role.name == "team_lead":

@@ -494,7 +494,7 @@ const useAuthStore = create(
         const user = get().user;
         const role = user?.role || user?.role_name;
         console.log('isSecurityChief - User role:', role);
-        return role === 'jefe_seguridad' || role === 'jefe_seguridad_suplente' || role === 'security_chief';
+        return role === 'jefe_seguridad' || role === 'jefe_seguridad_suplente';
       },
 
       isCrypto: () => {
@@ -507,7 +507,7 @@ const useAuthStore = create(
       canManageUsers: () => {
         const user = get().user;
         const role = user?.role || user?.role_name;
-        return role === 'admin' || role === 'team_lead' || role === 'jefe_seguridad' || role === 'security_chief';
+        return role === 'admin' || role === 'team_lead' || role === 'jefe_seguridad' || role === 'jefe_seguridad_suplente';
       },
 
       getUserRole: () => {

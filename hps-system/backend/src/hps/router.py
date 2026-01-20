@@ -77,7 +77,7 @@ async def get_team_hps(
     """
     try:
         # Verificar permisos
-        if current_user.role.name not in ['admin', 'team_lead', 'jefe_seguridad', 'security_chief']:
+        if current_user.role.name not in ['admin', 'team_lead', 'jefe_seguridad', 'jefe_seguridad_suplente']:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No tienes permisos para acceder a equipos"

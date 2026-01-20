@@ -493,7 +493,7 @@ class CommandProcessor:
         logger.info(f"🔍 _consultar_todas_hps: user_role={user_role}, user_id={user_id}, hps_role={hps_role}")
         
         # Permitir acceso a admin, jefe_seguridad y jefe_seguridad_suplente
-        allowed_roles = ["admin", "jefe_seguridad", "jefe_seguridad_suplente", "security_chief"]
+        allowed_roles = ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]
         
         if user_role not in allowed_roles:
             logger.warning(f"❌ Acceso denegado: user_role={user_role} no está en {allowed_roles}")
@@ -595,7 +595,7 @@ class CommandProcessor:
             user_role = hps_role.lower()
         
         # Permitir acceso a admin, jefe_seguridad y jefe_seguridad_suplente
-        allowed_roles = ["admin", "jefe_seguridad", "jefe_seguridad_suplente", "security_chief"]
+        allowed_roles = ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]
         
         if user_role not in allowed_roles:
             return {

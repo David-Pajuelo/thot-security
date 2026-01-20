@@ -18,7 +18,7 @@ from django.http import FileResponse, Http404
 import re
 
 
-ADMIN_ROLES = {"admin", "jefe_seguridad", "security_chief"}
+ADMIN_ROLES = {"admin", "jefe_seguridad", "jefe_seguridad_suplente"}
 TEAM_ROLES = {"team_lead", "jefe_seguridad_suplente"}
 
 
