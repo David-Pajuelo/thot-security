@@ -512,7 +512,7 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
                     allowed_roles = ['crypto', 'member']
                     if role_name not in allowed_roles:
                         raise serializers.ValidationError({
-                            'role': f'No tienes permisos para asignar el rol "{role_name}". Solo puedes asignar: {", ".join(allowed_roles)}'
+                            'role': 'Solo puedes asignar roles de crypto o miembro'
                         })
                 else:
                     # Otros roles no pueden crear usuarios con roles específicos
@@ -670,7 +670,7 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
                     allowed_roles = ['crypto', 'member']
                     if role_name not in allowed_roles:
                         raise serializers.ValidationError({
-                            'role': f'No tienes permisos para asignar el rol "{role_name}". Solo puedes asignar: {", ".join(allowed_roles)}'
+                            'role': 'Solo puedes asignar roles de crypto o miembro'
                         })
                 else:
                     # Otros roles no pueden cambiar roles
