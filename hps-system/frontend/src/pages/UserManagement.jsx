@@ -207,15 +207,15 @@ const UserManagement = () => {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
-      // Preparar datos para creación usando los campos escribibles del backend
+      // Preparar datos para creación usando los campos que el backend espera
       const roleValue = typeof formData.role === 'string' ? formData.role : (formData.role?.name || formData.role || 'member');
       
       const userData = {
         email: formData.email,
         full_name: formData.full_name,
         password: formData.password,
-        role_writable: roleValue,  // Usar role_writable en lugar de role
-        team_id_writable: formData.team_id || null  // Usar team_id_writable en lugar de team_id
+        role: roleValue,  // Usar 'role' directamente (no role_writable)
+        team_id: formData.team_id || null  // Usar 'team_id' directamente (no team_id_writable)
       };
       
       console.log('Creando usuario con datos:', userData);
@@ -234,8 +234,8 @@ const UserManagement = () => {
       console.error('Error creando usuario:', error);
       const errorMessage = error.response?.data?.detail || 
                           error.response?.data?.message || 
-                          (error.response?.data?.role_writable ? error.response.data.role_writable[0] : null) ||
-                          (error.response?.data?.team_id_writable ? error.response.data.team_id_writable[0] : null) ||
+                          (error.response?.data?.role ? error.response.data.role[0] : null) ||
+                          (error.response?.data?.team_id ? error.response.data.team_id[0] : null) ||
                           formatErrorForDisplay(error.response?.data || error);
       alert('Error al crear usuario: ' + errorMessage);
     }
@@ -247,10 +247,12 @@ const UserManagement = () => {
       // Asegurar que el rol siempre sea un string, no un objeto
       const roleValue = typeof formData.role === 'string' ? formData.role : (formData.role?.name || formData.role || 'member');
       
-      // Preparar datos para actualización usando los campos escribibles del backend
+      // Preparar datos para actualización - usar los campos que el backend espera
       const updateData = {
-        role_writable: roleValue,  // Usar role_writable en lugar de role
-        team_id_writable: formData.team_id || null  // Usar team_id_writable en lugar de team_id
+        full_name: formData.full_name || null,  // Incluir nombre completo
+        email: formData.email || null,  // Incluir email
+        role: roleValue,  // Usar 'role' directamente (no role_writable)
+        team_id: formData.team_id || null  // Usar 'team_id' directamente (no team_id_writable)
       };
       
       // Solo incluir password si se proporcionó uno nuevo
@@ -269,8 +271,8 @@ const UserManagement = () => {
       console.error('Error actualizando usuario:', error);
       const errorMessage = error.response?.data?.detail || 
                           error.response?.data?.message || 
-                          (error.response?.data?.role_writable ? error.response.data.role_writable[0] : null) ||
-                          (error.response?.data?.team_id_writable ? error.response.data.team_id_writable[0] : null) ||
+                          (error.response?.data?.role ? error.response.data.role[0] : null) ||
+                          (error.response?.data?.team_id ? error.response.data.team_id[0] : null) ||
                           error.message || 
                           'Error desconocido al actualizar usuario';
       alert('Error al actualizar usuario: ' + errorMessage);

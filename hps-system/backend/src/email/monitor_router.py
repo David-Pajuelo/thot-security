@@ -262,7 +262,7 @@ async def test_hourly_monitoring(
     Solo para administradores y jefes de seguridad
     """
     # Verificar permisos
-    if current_user.role not in ["admin", "security_chief"]:
+        if current_user.role not in ["admin", "jefe_seguridad_suplente"]:
         raise HTTPException(
             status_code=403,
             detail="Solo administradores y jefes de seguridad pueden probar la monitorización"

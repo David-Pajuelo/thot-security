@@ -191,7 +191,7 @@ class HpsRequestService:
             # Determinar qué tipo de plantilla usar según el rol del solicitante
             # Si es admin o jefe_seguridad → usar plantilla de jefe_seguridad
             # Si es jefe_seguridad_suplente → usar plantilla de jefe_seguridad_suplente
-            if requested_by_role in ["admin", "jefe_seguridad", "security_chief"]:
+            if requested_by_role in ["admin", "jefe_seguridad", "jefe_seguridad_suplente"]:
                 # Buscar plantilla de jefe de seguridad
                 template = HpsTemplate.objects.filter(
                     active=True,

@@ -28,12 +28,12 @@ def test_can_manage_users_function():
     print("✅ Función canManageUsers encontrada:")
     print(f"   {function_code}")
     
-    # Verificar que incluya jefe_seguridad y security_chief
-    if 'jefe_seguridad' in function_code and 'security_chief' in function_code:
-        print("✅ La función incluye jefe_seguridad y security_chief")
+    # Verificar que incluya jefe_seguridad y jefe_seguridad_suplente
+    if 'jefe_seguridad' in function_code and 'jefe_seguridad_suplente' in function_code:
+        print("✅ La función incluye jefe_seguridad y jefe_seguridad_suplente")
         return True
     else:
-        print("❌ La función no incluye jefe_seguridad o security_chief")
+        print("❌ La función no incluye jefe_seguridad o jefe_seguridad_suplente")
         return False
 
 def show_expected_behavior():

@@ -272,7 +272,7 @@ const HPSList = ({ onStatsUpdate }) => {
   const canPerformAction = (request, action) => {
     const isAdmin = user.role === 'admin';
     const isTeamLeader = user.role === 'team_lead';
-    const isSecurityChief = user.role === 'jefe_seguridad' || user.role === 'security_chief';
+    const isSecurityChief = user.role === 'jefe_seguridad' || user.role === 'jefe_seguridad_suplente';
 
     switch (action) {
       case 'view':

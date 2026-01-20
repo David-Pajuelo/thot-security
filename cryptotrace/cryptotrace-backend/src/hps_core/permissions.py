@@ -7,7 +7,7 @@ from rest_framework import permissions
 ADMIN_ROLES = {
     "admin",
     "jefe_seguridad",
-    "security_chief",
+    "jefe_seguridad_suplente",
 }
 
 TEAM_LEADS = {
@@ -119,7 +119,7 @@ class IsHpsAdminOrSecurityChief(permissions.BasePermission):
             return True
         
         # Verificar si es jefe de seguridad o jefe de seguridad suplente
-        if ctx.role_name in {"jefe_seguridad", "jefe_seguridad_suplente", "security_chief"}:
+        if ctx.role_name in {"jefe_seguridad", "jefe_seguridad_suplente"}:
             return True
         
         return False
