@@ -8,6 +8,7 @@ import re
 from typing import Dict, Any, Optional
 from datetime import datetime
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from channels.db import database_sync_to_async
 from hps_core.models import HpsUserProfile, HpsTeam, HpsRequest, HpsRole
 
@@ -29,12 +30,11 @@ class CommandProcessor:
     
     def __init__(self):
         """Inicializar procesador de comandos"""
-        # Sin fallbacks - deben venir de variables de entorno
-        self.frontend_url = os.getenv("FRONTEND_URL")
-        # Para formularios HPS, usar HPS_SYSTEM_URL si está disponible, sino FRONTEND_URL
-        self.hps_system_url = os.getenv("HPS_SYSTEM_URL") or os.getenv("FRONTEND_URL")
+        # Usar Django settings para tener acceso a fallbacks de desarrollo
+        self.frontend_url = getattr(settings, 'FRONTEND_URL', None)
+        self.hps_system_url = getattr(settings, 'HPS_SYSTEM_URL', None)
         self.backend_url = os.getenv("BACKEND_URL", "http://cryptotrace-backend:8080")  # URL interna Docker OK
-        logger.info(f"CommandProcessor inicializado - Backend: {self.backend_url}, HPS System URL: {self.hps_system_url}")
+        logger.info(f"CommandProcessor inicializado - Backend: {self.backend_url}, Frontend: {self.frontend_url}, HPS System: {self.hps_system_url}")
         
         # Flujos conversacionales activos por usuario
         self.conversation_flows = {}
@@ -946,15 +946,35 @@ class CommandProcessor:
                     "mensaje": "❌ Error generando token HPS. Por favor, intenta de nuevo."
                 }
             
-            # Generar URL del formulario (usar HPS_SYSTEM_URL para formularios HPS)
-            url = f"{self.hps_system_url}/hps-form?token={token.token}&email={email}&type={form_type}"
+            # Generar URL del formulario (usar HPS_SYSTEM_URL ya que el formulario está en hps-system)
+            base_url = self.hps_system_url or self.frontend_url
+            if not base_url:
+                logger.error("❌ Ni HPS_SYSTEM_URL ni FRONTEND_URL están definidas")
+                return {
+                    "tipo": "error",
+                    "mensaje": "❌ Error de configuración: No se pudo generar la URL del formulario."
+                }
+            url = f"{base_url}/hps-form?token={token.token}&email={email}&type={form_type}"
             
             # Enviar email con formulario (no se verifica si el usuario existe)
             user_name = email.split("@")[0].replace(".", " ").title()
             email_sent = await self._send_hps_form_email(email, url, user_name)
             
-            # Mensaje según el tipo de solicitud Y si el correo se envió correctamente
-            if email_sent:
+            # Mensaje según el tipo de solicitud y si se envió el correo
+            if not email_sent:
+                logger.warning(f"⚠️ Email NO enviado para {email}, pero token creado. Proporcionando enlace manual.")
+                
+                # Determinar tipo de solicitud para el mensaje
+                tipo_solicitud = "traspaso de HPS" if is_transfer else ("renovación de HPS" if is_renewal else "nueva HPS")
+                
+                message = f"⚠️ **No se pudo enviar el correo electrónico** a {email}.\n\n"
+                message += f"📋 Se ha creado la solicitud de **{tipo_solicitud}** y el token está disponible.\n\n"
+                message += f"🔗 **Por favor, comparte este enlace manualmente con el usuario:**\n\n"
+                message += f"**{url}**\n\n"
+                message += f"⏰ El enlace es válido por 72 horas.\n\n"
+                message += f"📧 **Instrucciones:** Copia el enlace de arriba y envíalo al usuario {email} por el método que prefieras (email manual, mensaje, etc.)."
+            else:
+                # Email enviado correctamente
                 if is_transfer:
                     message = f"✅ Se ha enviado la **solicitud de traspaso HPS** a {email}.\n\n📧 El correo contiene el formulario de traspaso que debe completar.\n\nEl enlace es válido por 72 horas."
                 elif is_renewal:
@@ -965,18 +985,6 @@ class CommandProcessor:
                         message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\n📋 **Si el usuario no existe, se registrará automáticamente en tu equipo** cuando complete el formulario.\n\nEl enlace es válido por 72 horas."
                     else:
                         message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\nEl enlace es válido por 72 horas."
-            else:
-                # El correo NO se envió, pero el token se creó
-                logger.warning(f"⚠️ Email NO enviado para {email}, pero token creado")
-                if is_transfer:
-                    message = f"⚠️ **Problema al enviar el correo** para {email}.\n\n✅ Se ha creado el token de traspaso HPS, pero **no se pudo enviar el correo electrónico**.\n\n🔗 **Enlace del formulario:** {url}\n\n📋 **Por favor, comparte este enlace manualmente con el usuario.**\n\nEl enlace es válido por 72 horas."
-                elif is_renewal:
-                    message = f"⚠️ **Problema al enviar el correo** para {email}.\n\n✅ Se ha creado el token de renovación HPS, pero **no se pudo enviar el correo electrónico**.\n\n🔗 **Enlace del formulario:** {url}\n\n📋 **Por favor, comparte este enlace manualmente con el usuario.**\n\nEl enlace es válido por 72 horas."
-                else:
-                    if user_role == "team_lead":
-                        message = f"⚠️ **Problema al enviar el correo** para {email}.\n\n✅ Se ha creado el token de nueva HPS, pero **no se pudo enviar el correo electrónico**.\n\n🔗 **Enlace del formulario:** {url}\n\n📋 **Por favor, comparte este enlace manualmente con el usuario.**\n\n📋 **Si el usuario no existe, se registrará automáticamente en tu equipo** cuando complete el formulario.\n\nEl enlace es válido por 72 horas."
-                    else:
-                        message = f"⚠️ **Problema al enviar el correo** para {email}.\n\n✅ Se ha creado el token de nueva HPS, pero **no se pudo enviar el correo electrónico**.\n\n🔗 **Enlace del formulario:** {url}\n\n📋 **Por favor, comparte este enlace manualmente con el usuario.**\n\nEl enlace es válido por 72 horas."
             
             return {
                 "tipo": "exito",
@@ -1036,45 +1044,19 @@ class CommandProcessor:
     
     @database_sync_to_async
     def _send_hps_form_email(self, email: str, form_url: str, user_name: str) -> bool:
-        """Enviar email con formulario HPS usando Celery"""
+        """Enviar email con formulario HPS"""
         try:
-            logger.info(f"📧 Intentando enviar email HPS a {email} a través de Celery")
-            from hps_core.tasks import send_hps_form_email_task
-            
-            # Enviar tarea a Celery de forma síncrona para obtener resultado inmediato
-            # Usamos .apply() en lugar de .delay() para ejecutar de forma síncrona pero en el worker de Celery
-            result = send_hps_form_email_task.apply(args=[email, form_url, user_name])
-            
-            if result.successful():
-                task_result = result.get()
-                if task_result.get("status") == "sent":
-                    logger.info(f"✅ Email con formulario HPS enviado exitosamente a {email} (vía Celery)")
-                    return True
-                else:
-                    logger.error(f"❌ Email NO enviado a {email}: {task_result.get('message', 'Error desconocido')}")
-                    return False
+            from hps_core.email_service import HpsEmailService
+            email_service = HpsEmailService()
+            success = email_service.send_hps_form_email(email, form_url, user_name)
+            if success:
+                logger.info(f"✅ Email con formulario HPS enviado a {email}")
             else:
-                logger.error(f"❌ Tarea Celery falló para {email}: {result.info}")
-                return False
-                
+                logger.warning(f"⚠️ Email no enviado a {email}")
+            return success
         except Exception as e:
-            logger.error(f"❌ Excepción al enviar email HPS a {email}: {e}")
-            import traceback
-            logger.error(f"Traceback completo: {traceback.format_exc()}")
-            # Fallback: intentar envío directo si Celery falla
-            try:
-                logger.warning(f"⚠️ Intentando envío directo como fallback para {email}")
-                from hps_core.email_service import HpsEmailService
-                email_service = HpsEmailService()
-                success = email_service.send_hps_form_email(email, form_url, user_name)
-                if success:
-                    logger.info(f"✅ Email enviado exitosamente (fallback directo) a {email}")
-                else:
-                    logger.error(f"❌ Email NO enviado (fallback directo) a {email}")
-                return success
-            except Exception as fallback_error:
-                logger.error(f"❌ Fallback directo también falló para {email}: {fallback_error}")
-                return False
+            logger.error(f"Error enviando email HPS: {e}")
+            return False
     
     async def _mostrar_comandos_disponibles(self, user_context: Dict[str, Any]) -> Dict[str, Any]:
         """Mostrar comandos disponibles según el rol"""
