@@ -590,11 +590,13 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
     
     def update(self, instance, validated_data):
         """Actualizar el perfil, incluyendo el rol, equipo y datos del usuario si se proporcionan"""
-        # Extraer datos del usuario (con source='user.email', los datos vienen en validated_data['user'])
+        # Extraer datos del usuario
+        # DRF puede anidar los datos en 'user' si usamos source='user.email', 
+        # pero el frontend envía los datos directamente, así que buscamos en ambos lugares
         user_data = validated_data.pop('user', {})
-        email = user_data.get('email') if user_data else None
-        first_name = user_data.get('first_name') if user_data else None
-        last_name = user_data.get('last_name') if user_data else None
+        email = user_data.get('email') if user_data else validated_data.pop('email', None)
+        first_name = user_data.get('first_name') if user_data else validated_data.pop('first_name', None)
+        last_name = user_data.get('last_name') if user_data else validated_data.pop('last_name', None)
         full_name = validated_data.pop('full_name', None)
         
         # Si se proporciona full_name, dividirlo en first_name y last_name
@@ -616,8 +618,8 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         if email or first_name is not None or last_name is not None:
             user.save()
         
-        # Manejar actualización del rol
-        role_writable = validated_data.pop('role_writable', None)
+        # Manejar actualización del rol (aceptar tanto 'role' como 'role_writable' del frontend)
+        role_writable = validated_data.pop('role_writable', None) or validated_data.pop('role', None)
         if role_writable:
             try:
                 role = models.HpsRole.objects.get(name=role_writable)
@@ -625,8 +627,10 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
             except models.HpsRole.DoesNotExist:
                 raise serializers.ValidationError({'role_writable': f'El rol "{role_writable}" no existe'})
         
-        # Manejar actualización del equipo
+        # Manejar actualización del equipo (aceptar tanto 'team_id' como 'team_id_writable' del frontend)
         team_id_writable = validated_data.pop('team_id_writable', None)
+        if team_id_writable is None:
+            team_id_writable = validated_data.pop('team_id', None)
         if team_id_writable is not None:  # Permite establecer a None explícitamente
             if team_id_writable == '' or team_id_writable is None:
                 # Si se establece explícitamente a None, asignar al equipo AICOX por defecto
