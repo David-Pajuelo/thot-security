@@ -385,7 +385,14 @@ class Albaran(models.Model):
         Retorna la nueva página creada
         """
         doc_principal = self.obtener_documento_principal
-        siguiente_pagina = doc_principal.obtener_todas_las_paginas().count() + 1
+        # Obtener el máximo pagina_numero existente y sumar 1
+        # Esto asegura que no haya duplicados
+        max_pagina = doc_principal.obtener_todas_las_paginas().aggregate(
+            max_pagina=models.Max('pagina_numero')
+        )['max_pagina'] or 0
+        siguiente_pagina = max_pagina + 1
+        
+        print(f"[crear_pagina_adicional] Doc principal: {doc_principal.numero}, Max página: {max_pagina}, Siguiente: {siguiente_pagina}")
         
         # Crear nueva página con los datos base
         nueva_pagina = Albaran.objects.create(
@@ -403,6 +410,8 @@ class Albaran(models.Model):
         
         # Actualizar total de páginas en todo el documento
         doc_principal.actualizar_total_paginas()
+        
+        print(f"[crear_pagina_adicional] Página creada: {nueva_pagina.numero}, Total páginas actualizado: {doc_principal.total_paginas}")
         
         return nueva_pagina
 

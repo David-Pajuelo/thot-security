@@ -434,28 +434,6 @@ const Dashboard = () => {
           })}
         </div>
 
-        {/* Estado del sistema - Solo para administradores (al final) */}
-        {isAdmin() && (
-          <div className="mt-8 bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">
-              Estado del Sistema
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="flex items-center">
-                <div className="h-3 w-3 bg-green-400 rounded-full mr-3"></div>
-                <span className="text-sm text-gray-600">API Backend: Conectado</span>
-              </div>
-              <div className="flex items-center">
-                <div className="h-3 w-3 bg-green-400 rounded-full mr-3"></div>
-                <span className="text-sm text-gray-600">Base de Datos: Operativa</span>
-              </div>
-              <div className="flex items-center">
-                <div className="h-3 w-3 bg-yellow-400 rounded-full mr-3"></div>
-                <span className="text-sm text-gray-600">Agente IA: En desarrollo</span>
-              </div>
-            </div>
-          </div>
-        )}
 
       </main>
     </div>

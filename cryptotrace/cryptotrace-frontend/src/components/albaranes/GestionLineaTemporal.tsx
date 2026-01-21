@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { fetchProductosAgrupados, guardarTipoProducto, procesarAlbaran } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 import LineaTemporalTable from "./LineaTemporalTable";
 
 interface Producto {
@@ -16,7 +17,11 @@ interface Producto {
   rango_serie?: string;
 }
 
-export default function GestionLineaTemporal() {
+interface GestionLineaTemporalProps {
+  onClose?: () => void;
+}
+
+export default function GestionLineaTemporal({ onClose }: GestionLineaTemporalProps = {}) {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [tipos, setTipos] = useState<string[]>([]);
   const [tipoAlbaran, setTipoAlbaran] = useState<string>('inventario');
@@ -98,14 +103,20 @@ export default function GestionLineaTemporal() {
 
     try {
       // El backend procesa todos los productos temporales del mismo documento (numero_albaran)
-      await procesarAlbaran();
+      const result = await procesarAlbaran();
       setMensaje('✅ Albarán procesado correctamente');
       
       // Recargar productos para reflejar los cambios (aunque luego se redirija)
       await cargarProductos();
       
+      // Si hay callback onClose (modal), cerrar el modal
+      // Si no, redirigir a upload AC21
       setTimeout(() => {
-        router.push('/albaranes');
+        if (onClose) {
+          onClose();
+        } else {
+          router.push('/albaranes/upload-ac21');
+        }
       }, 1000);
     } catch (error: any) {
       console.error('❌ Error procesando el albarán:', error);
@@ -123,6 +134,20 @@ export default function GestionLineaTemporal() {
       {mensaje && (
         <div className="absolute top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-md transition-opacity duration-500">
           {mensaje}
+        </div>
+      )}
+
+      {/* Botón Volver - Solo mostrar si no está en modal (no hay onClose) */}
+      {!onClose && (
+        <div className="mb-4">
+          <Button
+            onClick={() => router.push('/albaranes/upload-ac21')}
+            variant="outline"
+            className="flex items-center gap-2"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Volver al procesamiento de AC21
+          </Button>
         </div>
       )}
 

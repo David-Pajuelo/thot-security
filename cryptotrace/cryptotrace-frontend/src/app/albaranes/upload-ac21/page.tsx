@@ -9,6 +9,7 @@ import { processAC21Image, saveAC21Data, processAC21Companies, createEmpresa, gu
 import { toast } from "sonner";
 import DocumentoExistenteModal from "@/components/albaranes/DocumentoExistenteModal";
 import AC21EntradaModal from "@/components/albaranes/AC21EntradaModal";
+import LineaTemporalModal from "@/components/albaranes/LineaTemporalModal";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -966,23 +967,36 @@ function UploadAC21PageContent() {
         console.log('🔍 [AC21] Empresa origen RAW del OCR:', JSON.stringify(responseData.empresa_origen, null, 2));
         console.log('🔍 [AC21] Empresa destino RAW del OCR:', JSON.stringify(responseData.empresa_destino, null, 2));
         
-        const newFormData: any = {
-          cabecera: cabeceraLimpia,
-          empresa_origen: cleanEmpresa(responseData.empresa_origen || {}),
-          empresa_destino: cleanEmpresa(responseData.empresa_destino || {}),
-          articulos: responseData.articulos || [],
-          accesorios: responseData.accesorios || [],
-          equipos_prueba: responseData.equipos_prueba || [],
-          observaciones: cleanString(responseData.observaciones),
-          estado_material: cleanEstadoMaterial(responseData.estado_material),
-          testigo: testigoOtro.testigo,
-          otro: testigoOtro.otro,
-          firmas: cleanFirmas(responseData.firmas || {
-            firma_a: { nombre: null, cargo: null, empleo_rango: null },
-            firma_b: { nombre: null, cargo: null, empleo_rango: null },
-          }),
-        };
-        setProcessedData(newFormData);
+        // Si usarRecorte está activado, solo actualizar artículos (inventario)
+        // Mantener el resto de campos (cabecera, empresas, firmas) sin cambios
+        if (usarRecorte) {
+          console.log('✂️ [RECORTE] Modo recorte activado: solo actualizando artículos (inventario)');
+          setProcessedData((prev: any) => ({
+            ...prev, // Mantener todo el estado anterior
+            articulos: responseData.articulos || [], // Solo actualizar artículos
+            accesorios: responseData.accesorios || [], // También actualizar accesorios y equipos
+            equipos_prueba: responseData.equipos_prueba || [],
+          }));
+        } else {
+          // Comportamiento normal: actualizar todos los campos
+          const newFormData: any = {
+            cabecera: cabeceraLimpia,
+            empresa_origen: cleanEmpresa(responseData.empresa_origen || {}),
+            empresa_destino: cleanEmpresa(responseData.empresa_destino || {}),
+            articulos: responseData.articulos || [],
+            accesorios: responseData.accesorios || [],
+            equipos_prueba: responseData.equipos_prueba || [],
+            observaciones: cleanString(responseData.observaciones),
+            estado_material: cleanEstadoMaterial(responseData.estado_material),
+            testigo: testigoOtro.testigo,
+            otro: testigoOtro.otro,
+            firmas: cleanFirmas(responseData.firmas || {
+              firma_a: { nombre: null, cargo: null, empleo_rango: null },
+              firma_b: { nombre: null, cargo: null, empleo_rango: null },
+            }),
+          };
+          setProcessedData(newFormData);
+        }
         
         // Intentar auto-match de empresas después de procesar el OCR
         // Esperar un tick para asegurar que las empresas están cargadas
@@ -1059,6 +1073,7 @@ function UploadAC21PageContent() {
   const [documentoExistente, setDocumentoExistente] = useState<any>(null);
   const [numeroRegistroDetectado, setNumeroRegistroDetectado] = useState<string>('');
   const [showAC21EntradaModal, setShowAC21EntradaModal] = useState(false);
+  const [showLineaTemporalModal, setShowLineaTemporalModal] = useState(false);
 
   // Función para crear una nueva página del documento existente
   const handleCrearNuevaPagina = async () => {
@@ -1087,7 +1102,7 @@ function UploadAC21PageContent() {
 
       if (result.success) {
         toast.success(`Página ${documentoExistente.total_paginas + 1} agregada al documento AC21`);
-        router.push('/albaranes/gestion-linea-temporal');
+        setShowLineaTemporalModal(true);
       } else {
         toast.error(result.message || "Error al crear página adicional");
       }
@@ -1225,7 +1240,7 @@ function UploadAC21PageContent() {
 
       if (result && result.message) {
         toast.success(result.message || "Productos guardados en línea temporal");
-        router.push('/albaranes/gestion-linea-temporal');
+        setShowLineaTemporalModal(true);
       } else {
         toast.error("Error al guardar en línea temporal");
       }
@@ -1282,11 +1297,21 @@ function UploadAC21PageContent() {
         equipos_prueba: processedData.equipos_prueba || [],
       };
       
-      console.log("[AC21] Payload enviado a saveAC21Data:", JSON.stringify(payload, null, 2));
+      console.log("[AC21] Payload enviado a guardarEnLineaTemporal:", JSON.stringify(payload, null, 2));
 
-      const result = await saveAC21Data(payload, imagenParaGuardar || undefined);
+      // Para AC21s de ENTRADA, usar el flujo de línea temporal en lugar de crear albarán directamente
+      const result = await guardarEnLineaTemporal(payload, imagenParaGuardar || undefined);
 
-      if (!result.success) {
+      // El backend devuelve success: true cuando se crean líneas temporales correctamente
+      if (result && result.success !== false && result.message) {
+        // Éxito: mostrar mensaje y redirigir
+        toast.success(result.message || "Productos guardados en línea temporal");
+        setIsUploading(false);
+        setShowLineaTemporalModal(true);
+        return;
+      }
+      
+      if (!result || result.success === false) {
         // Si es error por número duplicado, agregar solo productos nuevos al albarán existente
         if (result.duplicate && (result as any).productos_existentes) {
           console.log("[AC21] AC21 ya existe, agregando solo productos nuevos");
@@ -1326,6 +1351,7 @@ function UploadAC21PageContent() {
           
           console.log("[AC21] Agregando productos al albarán existente:", JSON.stringify(payloadExistente, null, 2));
           
+          // Para modo 'agregar_a_existente', usar saveAC21Data (el backend lo maneja directamente)
           const resultExistente = await saveAC21Data(payloadExistente, imagenParaGuardar || undefined);
           
           if (!resultExistente.success) {
@@ -1336,7 +1362,7 @@ function UploadAC21PageContent() {
           
           toast.success(`${productosNuevos.length} producto(s) agregado(s) a la línea temporal para catalogación`);
           setIsUploading(false);
-          router.push('/albaranes/gestion-linea-temporal');
+          setShowLineaTemporalModal(true);
           return;
         } else {
           toast.error(result.message || "Error al procesar el AC21", { duration: 5000 });
@@ -1344,10 +1370,6 @@ function UploadAC21PageContent() {
         setIsUploading(false);
         return;
       }
-
-      toast.success("AC21 procesado correctamente. Los artículos están listos para catalogación.");
-      setIsUploading(false);
-      router.push('/albaranes/gestion-linea-temporal');
       
     } catch (error: any) {
       console.error("Error en handleConfirmContinuado:", error);
@@ -1496,6 +1518,7 @@ function UploadAC21PageContent() {
       
       console.log("[AC21] Payload para agregar a existente:", JSON.stringify(payload, null, 2));
       
+      // Para modo 'agregar_a_existente', usar saveAC21Data (el backend lo maneja directamente)
       const result = await saveAC21Data(payload, imagenParaGuardar || undefined);
       
       if (!result.success) {
@@ -1504,7 +1527,7 @@ function UploadAC21PageContent() {
       }
       
       toast.success(`${productosValidos.length} producto(s) agregado(s) a la línea temporal para catalogación`);
-      router.push('/albaranes/gestion-linea-temporal');
+      setShowLineaTemporalModal(true);
     } catch (error: any) {
       console.error("Error al agregar productos al albarán existente:", error);
       toast.error(error.message || "Error al agregar productos al albarán existente", { duration: 5000 });
@@ -3753,6 +3776,12 @@ function UploadAC21PageContent() {
           isOpen={showAC21EntradaModal}
           onClose={() => setShowAC21EntradaModal(false)}
           onIrALineaTemporal={handleIrALineaTemporal}
+        />
+
+        {/* Modal para Línea Temporal */}
+        <LineaTemporalModal
+          isOpen={showLineaTemporalModal}
+          onClose={() => setShowLineaTemporalModal(false)}
         />
       </div>
     </ProtectedRoute>

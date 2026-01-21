@@ -9,7 +9,7 @@
   ],
   "host_permissions": [
     "https://gobernanza.ccn-cert.cni.es/*",
-    "http://localhost:8080/*"
+    "https://seguridad.idiaicox.com/*"
   ],
   "background": {
     "service_worker": "background.js",

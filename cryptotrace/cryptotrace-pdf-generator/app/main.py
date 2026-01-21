@@ -71,7 +71,7 @@ def generate_pdf_endpoint():
         # Verificar si ya viene con información de paginación del backend
         total_paginas_backend = ac21_data.get("total_paginas", 1)
         lineas_producto = ac21_data.get("lineas_producto", [])
-        productos_por_pagina = 21
+        productos_por_pagina = 18  # Máximo 18 items por hoja
         
         print(f"📄 [PDF Generator] Total páginas del backend: {total_paginas_backend}")
         print(f"📄 [PDF Generator] Total productos: {len(lineas_producto)}")
@@ -122,7 +122,7 @@ def generate_pdf_endpoint():
                     
                     inicio = fin
             else:
-                # Fallback: dividir automáticamente en páginas de 21 productos
+                # Fallback: dividir automáticamente en páginas de 18 productos
                 for pagina in range(1, total_paginas + 1):
                     # Calcular el rango de productos para esta página
                     inicio = (pagina - 1) * productos_por_pagina
@@ -143,8 +143,103 @@ def generate_pdf_endpoint():
                     html_pagina = template.render(datos_pagina)
                     html_pages.append(html_pagina)
             
-            # Combinar todas las páginas con salto de página
-            html_string = '\n<div class="page-break"></div>\n'.join(html_pages)
+            # Envolver cada página en un contenedor para navegación
+            html_pages_wrapped = []
+            for i, html_page in enumerate(html_pages, 1):
+                wrapped = f'<div class="page-container" data-page="{i}">{html_page}</div>'
+                html_pages_wrapped.append(wrapped)
+            
+            # Agregar navegación JavaScript
+            navigation_js = f'''
+            <div class="page-navigation">
+                <button id="btn-first">« Primera</button>
+                <button id="btn-prev">‹ Anterior</button>
+                <span id="page-info">Página 1 de {total_paginas}</span>
+                <button id="btn-next">Siguiente ›</button>
+                <button id="btn-last">Última »</button>
+            </div>
+            <script>
+                (function() {{
+                    let currentPage = 1;
+                    const totalPages = {total_paginas};
+                    
+                    function showPage(page) {{
+                        if (page < 1 || page > totalPages) return;
+                        currentPage = page;
+                        
+                        // Ocultar todas las páginas
+                        var containers = document.querySelectorAll('.page-container');
+                        for (var i = 0; i < containers.length; i++) {{
+                            containers[i].classList.remove('active');
+                        }}
+                        
+                        // Mostrar página actual
+                        var pageContainer = document.querySelector('.page-container[data-page="' + page + '"]');
+                        if (pageContainer) {{
+                            pageContainer.classList.add('active');
+                        }}
+                        
+                        // Actualizar controles
+                        updateNavigation();
+                        
+                        // Scroll al inicio
+                        window.scrollTo(0, 0);
+                    }}
+                    
+                    function showPrevPage() {{
+                        if (currentPage > 1) showPage(currentPage - 1);
+                    }}
+                    
+                    function showNextPage() {{
+                        if (currentPage < totalPages) showPage(currentPage + 1);
+                    }}
+                    
+                    function updateNavigation() {{
+                        var pageInfo = document.getElementById('page-info');
+                        var btnPrev = document.getElementById('btn-prev');
+                        var btnNext = document.getElementById('btn-next');
+                        var btnFirst = document.getElementById('btn-first');
+                        var btnLast = document.getElementById('btn-last');
+                        
+                        if (pageInfo) pageInfo.textContent = 'Página ' + currentPage + ' de ' + totalPages;
+                        if (btnPrev) btnPrev.disabled = currentPage === 1;
+                        if (btnNext) btnNext.disabled = currentPage === totalPages;
+                        if (btnFirst) btnFirst.disabled = currentPage === 1;
+                        if (btnLast) btnLast.disabled = currentPage === totalPages;
+                    }}
+                    
+                    function initNavigation() {{
+                        var btnFirst = document.getElementById('btn-first');
+                        var btnPrev = document.getElementById('btn-prev');
+                        var btnNext = document.getElementById('btn-next');
+                        var btnLast = document.getElementById('btn-last');
+                        
+                        if (btnFirst) btnFirst.onclick = function() {{ showPage(1); }};
+                        if (btnPrev) btnPrev.onclick = function() {{ showPrevPage(); }};
+                        if (btnNext) btnNext.onclick = function() {{ showNextPage(); }};
+                        if (btnLast) btnLast.onclick = function() {{ showPage(totalPages); }};
+                        
+                        // Navegación con teclado
+                        document.onkeydown = function(e) {{
+                            if (e.key === 'ArrowLeft') showPrevPage();
+                            if (e.key === 'ArrowRight') showNextPage();
+                        }};
+                        
+                        // Inicializar mostrando primera página
+                        showPage(1);
+                    }}
+                    
+                    // Ejecutar cuando el DOM esté listo
+                    if (document.readyState === 'loading') {{
+                        document.addEventListener('DOMContentLoaded', initNavigation);
+                    }} else {{
+                        initNavigation();
+                    }}
+                }})();
+            </script>
+            '''
+            
+            html_string = navigation_js + '\n'.join(html_pages_wrapped)
             
         elif len(lineas_producto) <= productos_por_pagina:
             # Una sola página
@@ -176,8 +271,103 @@ def generate_pdf_endpoint():
                 html_pagina = template.render(datos_pagina)
                 html_pages.append(html_pagina)
             
-            # Combinar todas las páginas con salto de página
-            html_string = '\n<div class="page-break"></div>\n'.join(html_pages)
+            # Envolver cada página en un contenedor para navegación
+            html_pages_wrapped = []
+            for i, html_page in enumerate(html_pages, 1):
+                wrapped = f'<div class="page-container" data-page="{i}">{html_page}</div>'
+                html_pages_wrapped.append(wrapped)
+            
+            # Agregar navegación JavaScript
+            navigation_js = f'''
+            <div class="page-navigation">
+                <button id="btn-first">« Primera</button>
+                <button id="btn-prev">‹ Anterior</button>
+                <span id="page-info">Página 1 de {total_paginas}</span>
+                <button id="btn-next">Siguiente ›</button>
+                <button id="btn-last">Última »</button>
+            </div>
+            <script>
+                (function() {{
+                    let currentPage = 1;
+                    const totalPages = {total_paginas};
+                    
+                    function showPage(page) {{
+                        if (page < 1 || page > totalPages) return;
+                        currentPage = page;
+                        
+                        // Ocultar todas las páginas
+                        var containers = document.querySelectorAll('.page-container');
+                        for (var i = 0; i < containers.length; i++) {{
+                            containers[i].classList.remove('active');
+                        }}
+                        
+                        // Mostrar página actual
+                        var pageContainer = document.querySelector('.page-container[data-page="' + page + '"]');
+                        if (pageContainer) {{
+                            pageContainer.classList.add('active');
+                        }}
+                        
+                        // Actualizar controles
+                        updateNavigation();
+                        
+                        // Scroll al inicio
+                        window.scrollTo(0, 0);
+                    }}
+                    
+                    function showPrevPage() {{
+                        if (currentPage > 1) showPage(currentPage - 1);
+                    }}
+                    
+                    function showNextPage() {{
+                        if (currentPage < totalPages) showPage(currentPage + 1);
+                    }}
+                    
+                    function updateNavigation() {{
+                        var pageInfo = document.getElementById('page-info');
+                        var btnPrev = document.getElementById('btn-prev');
+                        var btnNext = document.getElementById('btn-next');
+                        var btnFirst = document.getElementById('btn-first');
+                        var btnLast = document.getElementById('btn-last');
+                        
+                        if (pageInfo) pageInfo.textContent = 'Página ' + currentPage + ' de ' + totalPages;
+                        if (btnPrev) btnPrev.disabled = currentPage === 1;
+                        if (btnNext) btnNext.disabled = currentPage === totalPages;
+                        if (btnFirst) btnFirst.disabled = currentPage === 1;
+                        if (btnLast) btnLast.disabled = currentPage === totalPages;
+                    }}
+                    
+                    function initNavigation() {{
+                        var btnFirst = document.getElementById('btn-first');
+                        var btnPrev = document.getElementById('btn-prev');
+                        var btnNext = document.getElementById('btn-next');
+                        var btnLast = document.getElementById('btn-last');
+                        
+                        if (btnFirst) btnFirst.onclick = function() {{ showPage(1); }};
+                        if (btnPrev) btnPrev.onclick = function() {{ showPrevPage(); }};
+                        if (btnNext) btnNext.onclick = function() {{ showNextPage(); }};
+                        if (btnLast) btnLast.onclick = function() {{ showPage(totalPages); }};
+                        
+                        // Navegación con teclado
+                        document.onkeydown = function(e) {{
+                            if (e.key === 'ArrowLeft') showPrevPage();
+                            if (e.key === 'ArrowRight') showNextPage();
+                        }};
+                        
+                        // Inicializar mostrando primera página
+                        showPage(1);
+                    }}
+                    
+                    // Ejecutar cuando el DOM esté listo
+                    if (document.readyState === 'loading') {{
+                        document.addEventListener('DOMContentLoaded', initNavigation);
+                    }} else {{
+                        initNavigation();
+                    }}
+                }})();
+            </script>
+            '''
+            
+            html_string = navigation_js + '\n'.join(html_pages_wrapped)
         
         # Por ahora, devolvemos el HTML renderizado para previsualización en navegador
         response = make_response(html_string.encode('utf-8'))

@@ -397,15 +397,36 @@ class AlbaranViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(albaran)
             return Response({"success": True, "data": serializer.data, "nuevos": nuevos}, status=status.HTTP_200_OK)
         # --- Nueva lógica: bloquear alta directa de AC21 DE ENTRADA (no salida) ---
-        tipo_documento = data_source.get('tipo_documento') or cabecera.get('tipo_transaccion')
-        direccion_transferencia = data_source.get('direccion_transferencia', 'ENTRADA')
-        
-        # Solo bloquear AC21s de ENTRADA - las SALIDAS pueden crearse directamente
-        if (tipo_documento and str(tipo_documento).upper() in ['TRANSFERENCIA', 'RECIBO_MANO', 'DESTRUCCION', 'OTRO'] 
-            and direccion_transferencia == 'ENTRADA'):
-            return Response({
-                'error': 'El alta de AC21 debe realizarse a través de la gestión temporal (línea temporal) para tipificación de productos. Sube el AC21, valida los artículos y continúa el flujo en la gestión temporal.'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        # PERO permitir modo 'agregar_a_existente' que solo agrega productos a un albarán existente
+        modo = data_source.get('modo')
+        if modo == 'agregar_a_existente':
+            # Este modo ya se maneja arriba, no bloquear
+            pass
+        else:
+            tipo_documento = data_source.get('tipo_documento') or cabecera.get('tipo_transaccion')
+            direccion_transferencia = data_source.get('direccion_transferencia', 'ENTRADA')
+            
+            # Normalizar tipo_documento para comparación
+            tipo_documento_normalizado = None
+            if tipo_documento:
+                tipo_documento_str = str(tipo_documento).upper().replace(' ', '_')
+                # Mapear variaciones comunes
+                tipo_map = {
+                    'RECIBO_EN_MANO': 'RECIBO_MANO',
+                    'RECIBO EN MANO': 'RECIBO_MANO',
+                    'RECIBOENMANO': 'RECIBO_MANO',
+                }
+                tipo_documento_normalizado = tipo_map.get(tipo_documento_str, tipo_documento_str)
+            
+            print(f"🔍 [BACKEND] Validación AC21 - tipo_documento: '{tipo_documento}' -> normalizado: '{tipo_documento_normalizado}', direccion: '{direccion_transferencia}'")
+            
+            # Solo bloquear AC21s de ENTRADA - las SALIDAS pueden crearse directamente
+            if (tipo_documento_normalizado and tipo_documento_normalizado in ['TRANSFERENCIA', 'RECIBO_MANO', 'DESTRUCCION', 'OTRO'] 
+                and direccion_transferencia == 'ENTRADA'):
+                print(f"🚫 [BACKEND] Bloqueando creación directa de AC21 ENTRADA - debe usar flujo temporal")
+                return Response({
+                    'error': 'El alta de AC21 debe realizarse a través de la gestión temporal (línea temporal) para tipificación de productos. Sube el AC21, valida los artículos y continúa el flujo en la gestión temporal.'
+                }, status=status.HTTP_400_BAD_REQUEST)
         # --- Fin bloqueo ---
         # Verificar si existe un albarán con el mismo número de registro (entrada o salida)
         # Usar el mismo método que en encontrar_documento_existente para consistencia
@@ -421,7 +442,9 @@ class AlbaranViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_409_CONFLICT)
         # Usar parsed_data si es dict, sino usar request.data
         serializer = self.get_serializer(data=parsed_data if isinstance(parsed_data, dict) else request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            print(f"❌ [BACKEND] Errores de validación del serializer: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         albaran_instance = self.perform_create(serializer, numero)
         response_serializer = self.get_serializer(albaran_instance)
         headers = self.get_success_headers(response_serializer.data)
@@ -470,11 +493,15 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                         
                         # Generar número con sufijo para la página adicional
                         numero_existente = documento_principal_ref.numero
-                        total_paginas_actual = documento_principal_ref.total_paginas or 1
-                        nueva_pagina = total_paginas_actual + 1
+                        # Usar el mismo método que el modelo para calcular siguiente_pagina
+                        from django.db.models import Max
+                        max_pagina = documento_principal_ref.obtener_todas_las_paginas().aggregate(
+                            max_pagina=Max('pagina_numero')
+                        )['max_pagina'] or 0
+                        nueva_pagina = max_pagina + 1
                         numero = f"{numero_existente}-P{nueva_pagina}"
                         
-                        print(f"[AlbaranViewSet] Número generado para página adicional: {numero}")
+                        print(f"[AlbaranViewSet] Número generado para página adicional: {numero}, Max página: {max_pagina}, Nueva: {nueva_pagina}")
                     except Albaran.DoesNotExist:
                         print(f"[AlbaranViewSet] Error: Documento principal {documento_principal_id} no encontrado")
                         documento_principal_ref = None
@@ -491,9 +518,10 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                 
                 # Si es página adicional, actualizar el total_paginas del documento principal
                 if es_pagina_adicional and documento_principal_ref:
-                    documento_principal_ref.total_paginas = nueva_pagina
-                    documento_principal_ref.save()
-                    print(f"[AlbaranViewSet] Actualizado total_paginas del documento principal a: {nueva_pagina}")
+                    # Usar el método del modelo para actualizar correctamente
+                    documento_principal_ref.actualizar_total_paginas()
+                    documento_principal_ref.refresh_from_db()
+                    print(f"[AlbaranViewSet] Actualizado total_paginas del documento principal a: {documento_principal_ref.total_paginas}")
                 elif not es_pagina_adicional:
                     # Para documentos principales, establecer total_paginas = 1 inicialmente
                     albaran.total_paginas = 1
@@ -967,6 +995,9 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                 total_paginas = len(todas_las_paginas)
                 pagina_actual = 1  # Para documentos multipágina, siempre empezar desde 1 para que el PDF generator genere todas las páginas
                 
+                # Verificar que total_paginas sea correcto
+                print(f"📄 [PDF] Total páginas calculado: {total_paginas}")
+                print(f"📄 [PDF] Páginas encontradas: {[p.pagina_numero for p in todas_las_paginas]}")
                 print(f"📄 [PDF] Total productos combinados: {len(todos_los_productos)}")
                 print(f"📄 [PDF] Productos por página: {[len(p) for p in productos_por_pagina]}")
                 print(f"📄 [PDF] Accesorios por página: {[len(a) for a in accesorios_por_pagina]}")
@@ -1075,19 +1106,245 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    @action(detail=True, methods=['get'], url_path='paginas', permission_classes=[IsAuthenticated])
-    def obtener_paginas(self, request, pk=None):
+    @action(detail=True, methods=['get', 'post'], url_path='paginas', permission_classes=[IsAuthenticated])
+    def paginas(self, request, pk=None):
         """
-        Obtiene todas las páginas de un documento multipágina
+        GET: Obtiene todas las páginas de un documento multipágina
+        POST: Crea una página adicional para un documento existente
         """
         albaran = self.get_object()
         
-        # Obtener todas las páginas del documento
-        todas_las_paginas = albaran.obtener_todas_las_paginas()
+        if request.method == 'GET':
+            # Obtener todas las páginas del documento
+            todas_las_paginas = albaran.obtener_todas_las_paginas()
+            
+            # Serializar y devolver directamente el array de páginas
+            serializer = self.get_serializer(todas_las_paginas, many=True)
+            return Response(serializer.data)
         
-        # Serializar y devolver directamente el array de páginas
-        serializer = self.get_serializer(todas_las_paginas, many=True)
-        return Response(serializer.data)
+        elif request.method == 'POST':
+            # Crear página adicional usando el método del modelo
+            try:
+                # Extraer datos del payload
+                payload = request.data if isinstance(request.data, dict) else {}
+                
+                # Si el payload viene con estructura de AC21 (cabecera, firmas, etc.), extraer campos
+                if 'cabecera' in payload:
+                    from django.utils import timezone
+                    from django.utils.dateparse import parse_datetime, parse_date
+                    from datetime import datetime
+                    
+                    cabecera = payload.get('cabecera', {})
+                    firmas = payload.get('firmas', {})
+                    firma_a = firmas.get('firma_a', {}) if isinstance(firmas, dict) else {}
+                    firma_b = firmas.get('firma_b', {}) if isinstance(firmas, dict) else {}
+                    
+                    # Extraer fechas de la cabecera con conversión adecuada
+                    fecha_informe_raw = cabecera.get('fecha_informe')
+                    fecha_transaccion_raw = cabecera.get('fecha_transaccion')
+                    
+                    # Convertir fecha_informe
+                    fecha_informe = None
+                    if fecha_informe_raw:
+                        if isinstance(fecha_informe_raw, str):
+                            parsed_dt = parse_datetime(fecha_informe_raw)
+                            if parsed_dt:
+                                fecha_informe = parsed_dt.date() if hasattr(parsed_dt, 'date') else parsed_dt
+                            else:
+                                parsed_date = parse_date(fecha_informe_raw)
+                                if parsed_date:
+                                    fecha_informe = parsed_date
+                        else:
+                            fecha_informe = fecha_informe_raw
+                    
+                    if not fecha_informe:
+                        fecha_informe = timezone.now().date()
+                    
+                    # Convertir fecha_transaccion
+                    fecha_transaccion = None
+                    if fecha_transaccion_raw:
+                        if isinstance(fecha_transaccion_raw, str):
+                            parsed_dt = parse_datetime(fecha_transaccion_raw)
+                            if parsed_dt:
+                                fecha_transaccion = parsed_dt.date() if hasattr(parsed_dt, 'date') else parsed_dt
+                            else:
+                                parsed_date = parse_date(fecha_transaccion_raw)
+                                if parsed_date:
+                                    fecha_transaccion = parsed_date
+                        else:
+                            fecha_transaccion = fecha_transaccion_raw
+                    
+                    if not fecha_transaccion:
+                        fecha_transaccion = fecha_informe
+                    
+                    # Convertir fecha_informe a datetime para el campo fecha
+                    from datetime import time
+                    fecha_final = timezone.make_aware(datetime.combine(fecha_informe, time.min))
+                    
+                    # Crear página adicional con datos del AC21
+                    nueva_pagina = albaran.crear_pagina_adicional(
+                        fecha=fecha_final,
+                        fecha_informe=fecha_informe,
+                        fecha_transaccion=fecha_transaccion,
+                        accesorios=payload.get('accesorios', []),
+                        equipos_prueba=payload.get('equipos_prueba', []),
+                        observaciones_odmc=payload.get('observaciones', '') or payload.get('observaciones_odmc', ''),
+                        firma_a_nombre_apellidos=firma_a.get('nombre', ''),
+                        firma_a_cargo=firma_a.get('cargo', ''),
+                        firma_a_empleo_rango=firma_a.get('empleo_rango', ''),
+                        firma_b_nombre_apellidos=firma_b.get('nombre', ''),
+                        firma_b_cargo=firma_b.get('cargo', ''),
+                        firma_b_empleo_rango=firma_b.get('empleo_rango', ''),
+                        created_by=request.user
+                    )
+                else:
+                    # Payload directo (campos del albarán)
+                    from django.utils import timezone
+                    from django.utils.dateparse import parse_datetime, parse_date
+                    from datetime import datetime, time
+                    
+                    # Extraer fechas con fallbacks
+                    fecha_informe_raw = payload.get('fecha_informe') or payload.get('fecha')
+                    fecha_transaccion_raw = payload.get('fecha_transaccion')
+                    
+                    # Convertir fechas si vienen como strings
+                    fecha_informe = None
+                    if fecha_informe_raw:
+                        if isinstance(fecha_informe_raw, str):
+                            # Intentar parsear como datetime o date
+                            parsed_dt = parse_datetime(fecha_informe_raw)
+                            if parsed_dt:
+                                fecha_informe = parsed_dt.date() if hasattr(parsed_dt, 'date') else parsed_dt
+                            else:
+                                parsed_date = parse_date(fecha_informe_raw)
+                                if parsed_date:
+                                    fecha_informe = parsed_date
+                        else:
+                            fecha_informe = fecha_informe_raw
+                    
+                    fecha_transaccion = None
+                    if fecha_transaccion_raw:
+                        if isinstance(fecha_transaccion_raw, str):
+                            parsed_dt = parse_datetime(fecha_transaccion_raw)
+                            if parsed_dt:
+                                fecha_transaccion = parsed_dt.date() if hasattr(parsed_dt, 'date') else parsed_dt
+                            else:
+                                parsed_date = parse_date(fecha_transaccion_raw)
+                                if parsed_date:
+                                    fecha_transaccion = parsed_date
+                        else:
+                            fecha_transaccion = fecha_transaccion_raw
+                    
+                    # Usar fecha del documento principal o fecha_informe o timezone.now() como fallback
+                    fecha_final = None
+                    if fecha_informe:
+                        # Convertir date a datetime para el campo fecha
+                        fecha_final = timezone.make_aware(datetime.combine(fecha_informe, time.min))
+                    elif albaran.fecha:
+                        fecha_final = albaran.fecha
+                    else:
+                        fecha_final = timezone.now()
+                    
+                    # Asegurar valores por defecto para fecha_informe y fecha_transaccion
+                    if not fecha_informe:
+                        fecha_informe = fecha_final.date() if hasattr(fecha_final, 'date') else fecha_final
+                    if not fecha_transaccion:
+                        fecha_transaccion = fecha_informe
+                    
+                    nueva_pagina = albaran.crear_pagina_adicional(
+                        fecha=fecha_final,
+                        fecha_informe=fecha_informe,
+                        fecha_transaccion=fecha_transaccion,
+                        accesorios=payload.get('accesorios', []),
+                        equipos_prueba=payload.get('equipos_prueba', []),
+                        observaciones_odmc=payload.get('observaciones_odmc', ''),
+                        firma_a_nombre_apellidos=payload.get('firma_a_nombre_apellidos', ''),
+                        firma_a_cargo=payload.get('firma_a_cargo', ''),
+                        firma_a_empleo_rango=payload.get('firma_a_empleo_rango', ''),
+                        firma_b_nombre_apellidos=payload.get('firma_b_nombre_apellidos', ''),
+                        firma_b_cargo=payload.get('firma_b_cargo', ''),
+                        firma_b_empleo_rango=payload.get('firma_b_empleo_rango', ''),
+                        created_by=request.user
+                    )
+                
+                # Si hay artículos en el payload, crear líneas temporales para ellos
+                articulos = payload.get('articulos', [])
+                if articulos:
+                    from productos.models import LineaTemporalProducto
+                    
+                    # Extraer datos generales del payload para guardarlos en datos_adicionales
+                    cabecera_payload = payload.get('cabecera', {})
+                    empresa_origen_payload = payload.get('empresa_origen', {})
+                    empresa_destino_payload = payload.get('empresa_destino', {})
+                    accesorios_payload = payload.get('accesorios', [])
+                    equipos_prueba_payload = payload.get('equipos_prueba', [])
+                    firmas_payload = payload.get('firmas', {})
+                    observaciones_payload = payload.get('observaciones', '')
+                    
+                    # Si no hay cabecera en el payload, intentar obtenerla del documento principal
+                    if not cabecera_payload and albaran:
+                        # Construir cabecera desde el documento principal
+                        cabecera_payload = {
+                            'numero_registro_salida': albaran.numero_registro_salida or '',
+                            'numero_registro_entrada': albaran.numero_registro_entrada or '',
+                            'fecha_informe': str(albaran.fecha_informe) if albaran.fecha_informe else '',
+                            'fecha_transaccion': str(albaran.fecha_transaccion) if albaran.fecha_transaccion else '',
+                            'tipo_transaccion': albaran.tipo_documento or '',
+                        }
+                    
+                    for articulo in articulos:
+                        # Preparar datos adicionales con la cabecera completa
+                        datos_adicionales = {
+                            'cabecera': cabecera_payload,
+                            'empresa_origen': empresa_origen_payload,
+                            'empresa_destino': empresa_destino_payload,
+                            'accesorios': accesorios_payload,
+                            'equipos_prueba': equipos_prueba_payload,
+                            'firmas': firmas_payload,
+                            'observaciones_generales': observaciones_payload,
+                        }
+                        
+                        # Extraer y validar CC
+                        cc_raw = articulo.get('cc', '1')
+                        try:
+                            cc = int(float(str(cc_raw))) if cc_raw else 1
+                        except (ValueError, TypeError):
+                            cc = 1
+                        
+                        # Extraer y validar cantidad
+                        cantidad_raw = articulo.get('cantidad', 1)
+                        try:
+                            cantidad = int(float(str(cantidad_raw))) if cantidad_raw else 1
+                            cantidad = max(1, cantidad)
+                        except (ValueError, TypeError):
+                            cantidad = 1
+                        
+                        LineaTemporalProducto.objects.create(
+                            usuario=request.user,
+                            numero_albaran=nueva_pagina.numero,
+                            codigo_producto=articulo.get('codigo') or articulo.get('codigo_producto', ''),
+                            descripcion=articulo.get('descripcion', ''),
+                            numero_serie=articulo.get('numero_serie_inicio') or articulo.get('numero_serie_fin', '') or articulo.get('numero_serie', ''),
+                            observaciones=articulo.get('observaciones', ''),
+                            cantidad=cantidad,
+                            cc=cc,
+                            datos_adicionales=datos_adicionales
+                        )
+                
+                serializer = self.get_serializer(nueva_pagina)
+                return Response({
+                    "success": True,
+                    "data": serializer.data,
+                    "message": f"Página {nueva_pagina.pagina_numero} creada correctamente"
+                }, status=201)
+            except Exception as e:
+                print(f"❌ Error creando página adicional: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return Response({
+                    "success": False,
+                    "error": f"Error creando página adicional: {str(e)}"
+                }, status=500)
 
     @action(detail=False, methods=['get'], url_path='principales', permission_classes=[IsAuthenticated])
     def documentos_principales(self, request):
@@ -1408,14 +1665,14 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             # Extraer CC del OCR (puede ser cualquier valor o estar vacío)
             cc_raw = articulo.get('cc')
             if cc_raw is None or cc_raw == '':
-                cc = None  # Permitir vacío (el modelo usará el default=1 si es necesario)
+                cc = 1  # Usar valor por defecto si está vacío
             else:
                 try:
                     # Intentar convertir a int si es numérico
                     cc = int(float(str(cc_raw)))
                 except (ValueError, TypeError):
-                    # Si no es numérico, intentar convertir a int con default 1, o usar None
-                    cc = None  # Permitir None, el modelo usará default=1
+                    # Si no es numérico, usar valor por defecto
+                    cc = 1
             
             # Preparar datos adicionales para el campo JSON (incluyendo números de serie completos y cantidad)
             datos_adicionales = {
@@ -1520,6 +1777,7 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
         
         print(f"🎉 [BACKEND] bulk_create COMPLETADO - {len(registros_creados)} registros creados en línea temporal")
         return Response({
+            "success": True,
             "message": f"Se crearon {len(registros_creados)} productos en la línea temporal",
             "count": len(registros_creados),
             "con_imagen": imagen_documento is not None
@@ -1558,9 +1816,21 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             procesado=False
         )
         
+        # Agrupar por codigo_producto, observaciones y cc
+        # Normalizar observaciones: None y '' se tratan como iguales
+        from django.db.models import Case, When, Value, CharField, Q
+        
         productos_agrupados = (
             queryset_filtrado
-            .values("codigo_producto")
+            .annotate(
+                observaciones_normalizadas=Case(
+                    When(observaciones__isnull=True, then=Value('')),
+                    When(observaciones='', then=Value('')),
+                    default='observaciones',
+                    output_field=CharField()
+                )
+            )
+            .values("codigo_producto", "observaciones_normalizadas", "cc")
             .annotate(
                 cantidad=Count("id"),  # Contar registros, no sumar cantidades (cada registro = 1 unidad)
                 tipificado=Exists(CatalogoProducto.objects.filter(
@@ -1569,14 +1839,23 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 descripcion=Subquery(descripcion_subquery),
                 tipo=Coalesce(Subquery(tipo_subquery), None)  # Evita valores nulos
             )
-            .order_by("codigo_producto")
+            .order_by("codigo_producto", "observaciones_normalizadas", "cc")
         )
         
         # Enriquecer con información de números de serie desde datos_adicionales
         productos_enriquecidos = []
         for producto in productos_agrupados:
-            # Obtener todos los registros de este código de producto para extraer números de serie
-            registros = queryset_filtrado.filter(codigo_producto=producto['codigo_producto'])
+            # Obtener todos los registros que coinciden con este grupo (codigo_producto + observaciones + cc)
+            observaciones_filtro = producto['observaciones_normalizadas'] if producto['observaciones_normalizadas'] else None
+            registros = queryset_filtrado.filter(
+                codigo_producto=producto['codigo_producto'],
+                cc=producto['cc']
+            )
+            # Filtrar por observaciones normalizadas (None y '' se tratan igual)
+            if observaciones_filtro:
+                registros = registros.filter(observaciones=observaciones_filtro)
+            else:
+                registros = registros.filter(Q(observaciones__isnull=True) | Q(observaciones=''))
             
             # Recopilar todos los rangos de números de serie (inicio-fin)
             rangos_serie = []
@@ -1620,8 +1899,11 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 if ultimos_fins:
                     numero_serie_fin = max(ultimos_fins)  # Último número de serie (máximo)
             
+            # Incluir observaciones y cc en la respuesta para que el frontend pueda diferenciar grupos
             productos_enriquecidos.append({
                 **producto,
+                'observaciones': producto['observaciones_normalizadas'] if producto['observaciones_normalizadas'] else None,
+                'cc': producto['cc'],
                 'numero_serie_inicio': numero_serie_inicio,
                 'numero_serie_fin': numero_serie_fin,
                 'rango_serie': rango_serie  # Todos los rangos concatenados
@@ -1773,16 +2055,24 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 if v is not None and str(v).strip() != '':
                     return v
             return None
+        
+        # Intentar extraer número de múltiples fuentes
         numero = get_first_nonempty(
             cabecera.get('numero'),
             cabecera.get('numero_registro_entrada'),
             cabecera.get('numero_registro_salida'),
+            # También intentar desde el numero_albaran del producto temporal
+            numero_albaran_documento,
         )
         print(f"📋 [BACKEND] Número extraído: {numero}")
+        print(f"📋 [BACKEND] Cabecera completa: {cabecera}")
+        print(f"📋 [BACKEND] numero_albaran_documento: {numero_albaran_documento}")
         
         if not numero:
             print("❌ [BACKEND] ERROR: No se encontró número de registro")
-            return Response({"detail": "No se encontró número de registro en el AC21."}, status=400)
+            print("❌ [BACKEND] Cabecera recibida:", cabecera)
+            print("❌ [BACKEND] Datos adicionales del primer producto:", datos_adicionales)
+            return Response({"detail": "No se encontró número de registro en el AC21. Verifica que la cabecera contenga 'numero_registro_salida' o 'numero_registro_entrada'."}, status=400)
 
         # Verificar si existe un documento con el mismo número de registro
         numero_registro_completo = cabecera.get('numero_registro_entrada') or cabecera.get('numero_registro_salida')
@@ -1823,34 +2113,109 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 if documento_existente:
                     # Es una página adicional de un documento existente
                     print(f"📄 [BACKEND] Creando página adicional para documento existente ID={documento_existente.id}")
-                    albaran = documento_existente.crear_pagina_adicional(
-                        fecha=fecha_informe,
-                        fecha_informe=fecha_informe,
-                        fecha_transaccion=fecha_transaccion,
-                        accesorios=accesorios,
-                        equipos_prueba=equipos_prueba,
-                        observaciones_odmc=observaciones or '',
-                        # Campos de firma A
-                        firma_a_nombre_apellidos=firma_a_data.get('nombre', ''),
-                        firma_a_cargo=firma_a_data.get('cargo', ''),
-                        firma_a_empleo_rango=firma_a_data.get('empleo_rango', ''),
-                        # Campos de firma B
-                        firma_b_nombre_apellidos=firma_b_data.get('nombre', ''),
-                        firma_b_cargo=firma_b_data.get('cargo', ''),
-                        firma_b_empleo_rango=firma_b_data.get('empleo_rango', ''),
-                        created_by=request.user
-                    )
+                    # Verificar si ya existe una página adicional vacía reciente (últimos 5 minutos) para este documento
+                    from django.utils import timezone
+                    from datetime import timedelta
+                    tiempo_limite = timezone.now() - timedelta(minutes=5)
+                    # Buscar páginas vacías consultando directamente desde MovimientoProducto
+                    from productos.models import MovimientoProducto
+                    paginas_con_movimientos = MovimientoProducto.objects.filter(
+                        albaran__documento_principal=documento_existente,
+                        albaran__created_at__gte=tiempo_limite
+                    ).values_list('albaran_id', flat=True).distinct()
+                    
+                    paginas_vacias_recientes = Albaran.objects.filter(
+                        documento_principal=documento_existente,
+                        created_at__gte=tiempo_limite
+                    ).exclude(id__in=paginas_con_movimientos)
+                    
+                    if paginas_vacias_recientes.exists():
+                        # Reutilizar la página vacía existente en lugar de crear una nueva
+                        albaran = paginas_vacias_recientes.first()
+                        print(f"📄 [BACKEND] Reutilizando página vacía existente: {albaran.numero}")
+                        # Actualizar los campos de la página existente
+                        albaran.fecha = fecha_informe
+                        albaran.fecha_informe = fecha_informe
+                        albaran.fecha_transaccion = fecha_transaccion
+                        albaran.accesorios = accesorios
+                        albaran.equipos_prueba = equipos_prueba
+                        albaran.observaciones_odmc = observaciones or ''
+                        albaran.firma_a_nombre_apellidos = firma_a_data.get('nombre', '')
+                        albaran.firma_a_cargo = firma_a_data.get('cargo', '')
+                        albaran.firma_a_empleo_rango = firma_a_data.get('empleo_rango', '')
+                        albaran.firma_b_nombre_apellidos = firma_b_data.get('nombre', '')
+                        albaran.firma_b_cargo = firma_b_data.get('cargo', '')
+                        albaran.firma_b_empleo_rango = firma_b_data.get('empleo_rango', '')
+                        albaran.save()
+                    else:
+                        # Crear nueva página adicional
+                        albaran = documento_existente.crear_pagina_adicional(
+                            fecha=fecha_informe,
+                            fecha_informe=fecha_informe,
+                            fecha_transaccion=fecha_transaccion,
+                            accesorios=accesorios,
+                            equipos_prueba=equipos_prueba,
+                            observaciones_odmc=observaciones or '',
+                            # Campos de firma A
+                            firma_a_nombre_apellidos=firma_a_data.get('nombre', ''),
+                            firma_a_cargo=firma_a_data.get('cargo', ''),
+                            firma_a_empleo_rango=firma_a_data.get('empleo_rango', ''),
+                            # Campos de firma B
+                            firma_b_nombre_apellidos=firma_b_data.get('nombre', ''),
+                            firma_b_cargo=firma_b_data.get('cargo', ''),
+                            firma_b_empleo_rango=firma_b_data.get('empleo_rango', ''),
+                            created_by=request.user
+                        )
                 else:
                     # Es un documento nuevo (página principal)
                     print("🏗️ [BACKEND] Creando nuevo documento (página principal)...")
+                    
+                    # Normalizar tipo_documento desde tipo_transaccion
+                    tipo_transaccion_raw = cabecera.get('tipo_transaccion', '')
+                    tipo_documento_normalizado = None
+                    
+                    if tipo_transaccion_raw:
+                        # Si es un objeto (checkboxes), extraer el primer tipo marcado
+                        if isinstance(tipo_transaccion_raw, dict):
+                            tipos = []
+                            if tipo_transaccion_raw.get('transferencia'): tipos.append('TRANSFERENCIA')
+                            if tipo_transaccion_raw.get('inventario'): tipos.append('INVENTARIO')
+                            if tipo_transaccion_raw.get('destruccion'): tipos.append('DESTRUCCION')
+                            if tipo_transaccion_raw.get('recibo_en_mano'): tipos.append('RECIBO_MANO')
+                            if tipo_transaccion_raw.get('otro'): tipos.append('OTRO')
+                            tipo_documento_normalizado = tipos[0] if tipos else 'INVENTARIO'
+                        else:
+                            # Si es string, normalizarlo
+                            tipo_str = str(tipo_transaccion_raw).upper().replace(' ', '_')
+                            # Mapear variaciones comunes
+                            tipo_map = {
+                                'RECIBO_EN_MANO': 'RECIBO_MANO',
+                                'RECIBO EN MANO': 'RECIBO_MANO',
+                                'RECIBOENMANO': 'RECIBO_MANO',
+                            }
+                            tipo_documento_normalizado = tipo_map.get(tipo_str, tipo_str)
+                            # Truncar a 20 caracteres si es necesario
+                            if len(tipo_documento_normalizado) > 20:
+                                tipo_documento_normalizado = tipo_documento_normalizado[:20]
+                    
+                    # Si no se pudo determinar, usar INVENTARIO por defecto
+                    if not tipo_documento_normalizado:
+                        tipo_documento_normalizado = 'INVENTARIO'
+                    
+                    print(f"📋 [BACKEND] Tipo documento normalizado: '{tipo_documento_normalizado}' (desde: {tipo_transaccion_raw})")
+                    
+                    # Truncar campos numéricos a 20 caracteres si es necesario
+                    numero_registro_entrada = str(cabecera.get('numero_registro_entrada', ''))[:20] if cabecera.get('numero_registro_entrada') else ''
+                    numero_registro_salida = str(cabecera.get('numero_registro_salida', ''))[:20] if cabecera.get('numero_registro_salida') else ''
+                    
                     albaran = Albaran.objects.create(
-                        numero=numero,
-                        tipo_documento=cabecera.get('tipo_transaccion', ''),
+                        numero=numero[:20] if len(str(numero)) > 20 else numero,  # Truncar numero si es necesario
+                        tipo_documento=tipo_documento_normalizado,
                         fecha=fecha_informe,
                         fecha_informe=fecha_informe,
                         fecha_transaccion=fecha_transaccion,
-                        numero_registro_entrada=cabecera.get('numero_registro_entrada', ''),
-                        numero_registro_salida=cabecera.get('numero_registro_salida', ''),
+                        numero_registro_entrada=numero_registro_entrada,
+                        numero_registro_salida=numero_registro_salida,
                         codigo_contabilidad=cabecera.get('codigos_contabilidad', ''),
                         empresa_origen_id=empresa_origen.get('id'),
                         empresa_destino_id=empresa_destino.get('id'),
@@ -1925,12 +2290,17 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                         print(f"⚠️ [BACKEND] Movimiento duplicado para producto {producto.id}, serie {p.numero_serie}, albarán {albaran.id}. Se omite.")
                         continue
                     
+                    # Normalizar tipo_movimiento igual que tipo_documento
+                    tipo_movimiento_normalizado = tipo_documento_normalizado if 'tipo_documento_normalizado' in locals() else 'INVENTARIO'
+                    if len(tipo_movimiento_normalizado) > 20:
+                        tipo_movimiento_normalizado = tipo_movimiento_normalizado[:20]
+                    
                     MovimientoProducto.objects.create(
                         albaran=albaran,
                         producto=producto,
                         numero_serie=p.numero_serie,
                         descripcion=producto.descripcion,
-                        tipo_movimiento=cabecera.get('tipo_transaccion', 'INVENTARIO'),
+                        tipo_movimiento=tipo_movimiento_normalizado,
                         cantidad=getattr(p, 'cantidad', 1),
                         cc=getattr(p, 'cc', 1),
                         observaciones=getattr(p, 'observaciones', '')
@@ -1956,7 +2326,44 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                     registros_restantes.delete()
                 
                 print(f"🎉 [BACKEND] procesar COMPLETADO - Albarán ID={albaran.id}")
-                return Response({"detail": "Albarán creado correctamente.", "albaran_id": albaran.id}, status=201)
+                # Verificar si hay más productos temporales no procesados del mismo usuario
+                # (podrían ser de otra página del mismo PDF)
+                productos_restantes = LineaTemporalProducto.objects.filter(
+                    usuario=request.user,
+                    procesado=False
+                ).count()
+                
+                # Limpiar páginas vacías del documento (sin movimientos) que no sean la página principal
+                if albaran.documento_principal or documento_existente:
+                    doc_principal = albaran.obtener_documento_principal
+                    # Buscar páginas vacías consultando directamente desde MovimientoProducto
+                    from productos.models import MovimientoProducto
+                    paginas_con_movimientos = MovimientoProducto.objects.filter(
+                        albaran__documento_principal=doc_principal
+                    ).values_list('albaran_id', flat=True).distinct()
+                    
+                    paginas_vacias = Albaran.objects.filter(
+                        documento_principal=doc_principal
+                    ).exclude(id__in=paginas_con_movimientos)
+                    
+                    # No eliminar la página que acabamos de crear si tiene movimientos
+                    if MovimientoProducto.objects.filter(albaran=albaran).exists():
+                        paginas_vacias = paginas_vacias.exclude(id=albaran.id)
+                    
+                    if paginas_vacias.exists():
+                        print(f"🧹 [BACKEND] Eliminando {paginas_vacias.count()} página(s) vacía(s) del documento {doc_principal.numero}")
+                        paginas_vacias.delete()
+                        # Actualizar total_paginas después de eliminar páginas vacías
+                        doc_principal.actualizar_total_paginas()
+                
+                return Response({
+                    "detail": "Albarán creado correctamente.", 
+                    "albaran_id": albaran.id,
+                    "albaran_numero": albaran.numero,
+                    "es_pagina_adicional": albaran.documento_principal is not None,
+                    "total_paginas": albaran.obtener_documento_principal.total_paginas if albaran.documento_principal else 1,
+                    "hay_mas_productos_temporales": productos_restantes > 0
+                }, status=201)
         except Exception as e:
             import traceback
             print(f"❌ [BACKEND] ERROR INESPERADO en procesar. Usuario: {request.user.username}, Albarán: {numero}. Error: {str(e)}")

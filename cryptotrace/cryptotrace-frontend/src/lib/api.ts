@@ -74,15 +74,24 @@ export const apiFetch = async (
     let errorMessage = `API error: ${response.status} ${response.statusText}`;
     let errorData: any = null;
     try {
-      errorData = await response.json();
-      errorMessage = errorData.detail || errorData.message || errorData.error || JSON.stringify(errorData) || errorMessage;
-    } catch {
-      // If response is not JSON, use status text
+      const text = await response.text();
+      if (text.trim()) {
+        try {
+          errorData = JSON.parse(text);
+          errorMessage = errorData.detail || errorData.message || errorData.error || errorMessage;
+        } catch {
+          // Si no es JSON válido, usar el texto como mensaje
+          errorMessage = text || errorMessage;
+        }
+      }
+    } catch (e) {
+      // Si hay error al leer la respuesta, usar status text
+      console.warn('Error al leer respuesta de error:', e);
     }
     const error = new Error(errorMessage);
     (error as any).status = response.status;
-    (error as any).data = errorData;
-    console.error('❌ API Error:', { status: response.status, errorData, errorMessage });
+    (error as any).data = errorData || {};
+    console.error('❌ API Error:', { status: response.status, errorData, errorMessage, endpoint });
     throw error;
   }
 
@@ -197,10 +206,16 @@ export const verificarDocumentoExistente = async (numeroRegistro: string): Promi
   };
 };
 
-export const crearPaginaAdicional = async (albaranId: number, paginaNumero: number): Promise<any> => {
+export const obtenerPaginasDocumento = async (albaranId: number): Promise<any[]> => {
+  return apiFetch(`/albaranes/${albaranId}/paginas/`, {
+    method: 'GET',
+  });
+};
+
+export const crearPaginaAdicional = async (albaranId: number, payload: any): Promise<any> => {
   return apiFetch(`/albaranes/${albaranId}/paginas/`, {
     method: 'POST',
-    body: JSON.stringify({ pagina_numero: paginaNumero }),
+    body: JSON.stringify(payload),
   });
 };
 

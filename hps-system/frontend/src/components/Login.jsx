@@ -207,7 +207,7 @@ const Login = () => {
                   errorType === 'user_not_found' ? 'border-yellow-300' :
                   'border-gray-300'
                 }`}
-                placeholder="admin@hps-system.com"
+                placeholder="tu-email@ejemplo.com"
                 autoComplete="email"
                 style={{ color: '#111827' }}
               />
@@ -278,18 +278,6 @@ const Login = () => {
                 'Iniciar Sesión'
               )}
             </button>
-          </div>
-
-          {/* Credenciales de prueba */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <p className="text-xs text-gray-600 text-center mb-2">
-              <strong>Credenciales de prueba:</strong>
-            </p>
-            <div className="grid grid-cols-1 gap-2 text-xs text-gray-600">
-              <div className="text-center">
-                <span className="font-medium">Admin:</span> admin@hps-system.com / admin123
-              </div>
-            </div>
           </div>
         </form>
       </div>

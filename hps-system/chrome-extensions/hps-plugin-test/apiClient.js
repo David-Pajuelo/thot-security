@@ -1,5 +1,5 @@
-// Cliente API para el backend HPS
-const API_BASE_URL = 'http://localhost:8080/api/v1/extension';
+// Cliente API para el backend HPS (Django - Local)
+const API_BASE_URL = 'http://localhost:8080/api/extension';
 
 class ApiClient {
   constructor() {
