@@ -72,7 +72,7 @@ def extension_actualizar_estado(request, numero_documento):
 @permission_classes([AllowAny])
 def extension_marcar_enviada(request, numero_documento):
     """PUT /api/v1/extension/solicitud/{numero_documento}/enviada"""
-    result = ExtensionService.actualizar_estado_solicitud(numero_documento, 'submitted')
+    result = ExtensionService.actualizar_estado_solicitud(numero_documento, 'waiting_dps')
     if not result['success']:
         return Response({'detail': result['message']}, status=status.HTTP_400_BAD_REQUEST)
     return Response(result, status=status.HTTP_200_OK)

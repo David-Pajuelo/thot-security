@@ -1452,10 +1452,10 @@ class HpsExtensionViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['put'], url_path='solicitud/(?P<numero_documento>[^/.]+)/enviada')
     def marcar_solicitud_enviada(self, request, numero_documento=None):
         """
-        Marcar solicitud como enviada (cambiar estado a 'submitted')
+        Marcar solicitud como enviada (cambiar estado a 'waiting_dps')
         PUT /api/v1/extension/solicitud/{numero_documento}/enviada
         """
-        result = ExtensionService.actualizar_estado_solicitud(numero_documento, 'submitted')
+        result = ExtensionService.actualizar_estado_solicitud(numero_documento, 'waiting_dps')
         
         if not result['success']:
             return Response(
