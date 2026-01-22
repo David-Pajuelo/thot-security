@@ -531,12 +531,15 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                     and albaran.direccion_transferencia == 'ENTRADA'):
                     # AC21s de ENTRADA van a gestión temporal
                     for articulo in articulos:
+                        # Mapear observaciones del OCR a descripcion en BD
+                        observaciones_ocr = articulo.get('observaciones') or articulo.get('descripcion', '')
                         LineaTemporalProducto.objects.create(
                             usuario=self.request.user,
                             numero_albaran=albaran.numero,
-                            descripcion=articulo.get('descripcion', ''),
+                            codigo_producto=articulo.get('codigo_producto') or articulo.get('codigo', '') or 'SIN_CODIGO',
+                            descripcion=observaciones_ocr,  # Mapeado desde observaciones del OCR
                             numero_serie=articulo.get('numero_serie_inicio') or articulo.get('numero_serie_fin', ''),
-                            observaciones=articulo.get('observaciones', '')
+                            observaciones=''  # Campo observaciones en BD queda vacío
                         )
                 elif (albaran.tipo_documento in ['TRANSFERENCIA', 'RECIBO_MANO', 'DESTRUCCION', 'OTRO'] 
                       and albaran.direccion_transferencia == 'SALIDA'):
@@ -1691,49 +1694,39 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             }
             
             # Extraer código de producto: viene de "TÍTULO CORTO / EDICIÓN" del AC21
-            # Puede venir como codigo_producto, titulo_corto, codigo, o descripcion (legacy)
+            # Solo usar codigo_producto (eliminado codigo, titulo_corto legacy)
             codigo_producto = (
                 articulo.get('codigo_producto') or 
-                articulo.get('titulo_corto') or 
-                articulo.get('codigo') or 
+                articulo.get('titulo_corto') or  # Mantener por compatibilidad temporal
                 articulo.get('titulo') or  # Campo editable del frontend
                 ''
             )
             
-            # Extraer descripción: viene de "OBSERVACIONES" del AC21
-            # Puede venir como descripcion u observaciones
-            descripcion = (
-                articulo.get('descripcion') or 
+            # Extraer observaciones del OCR: viene de "OBSERVACIONES/REMARKS" del AC21
+            # Este campo se mapea a descripcion en la BD
+            observaciones_ocr = (
                 articulo.get('observaciones') or 
+                articulo.get('descripcion') or  # Mantener por compatibilidad temporal
                 ''
             )
             
-            # Si no hay código pero hay descripción (legacy), usar descripción como código
-            if not codigo_producto and descripcion:
-                codigo_producto = descripcion
-            # Si no hay descripción pero hay código, usar código como descripción (fallback)
-            elif codigo_producto and not descripcion:
-                descripcion = codigo_producto
+            # Mapear observaciones -> descripcion para la BD
+            descripcion = observaciones_ocr.strip() if observaciones_ocr else ''
             
-            # Asegurar que al menos haya código o descripción
-            if not codigo_producto and not descripcion:
-                print(f"⚠️ [BACKEND] Saltando artículo sin código ni descripción: {articulo}")
-                continue
-            
-            # Si aún no hay código, usar descripción como último recurso
+            # Asegurar que al menos haya código
             if not codigo_producto:
                 codigo_producto = descripcion if descripcion else 'SIN_CODIGO'
             
-            print(f"📦 [BACKEND] Artículo procesado - código: '{codigo_producto}', descripción: '{descripcion}', cantidad: {cantidad}, número_serie: '{numero_serie}'")
+            print(f"📦 [BACKEND] Artículo procesado - código: '{codigo_producto}', descripción (de observaciones): '{descripcion}', cantidad: {cantidad}, número_serie: '{numero_serie}'")
             
             registro = LineaTemporalProducto.objects.create(
                 usuario=request.user,
                 numero_albaran=numero_albaran,
                 codigo_producto=codigo_producto,
-                descripcion=descripcion,
+                descripcion=descripcion,  # Mapeado desde observaciones del OCR
                 numero_serie=numero_serie,
                 cantidad=cantidad,  # Usar cantidad validada
-                observaciones=articulo.get('observaciones', ''),
+                observaciones='',  # Campo observaciones en BD queda vacío (la info está en descripcion)
                 cc=cc,  # Usar CC validado
                 datos_adicionales=datos_adicionales
             )
@@ -1816,21 +1809,12 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             procesado=False
         )
         
-        # Agrupar por codigo_producto, observaciones y cc
-        # Normalizar observaciones: None y '' se tratan como iguales
-        from django.db.models import Case, When, Value, CharField, Q
+        # Agrupar solo por codigo_producto y cc
+        from django.db.models import Q
         
         productos_agrupados = (
             queryset_filtrado
-            .annotate(
-                observaciones_normalizadas=Case(
-                    When(observaciones__isnull=True, then=Value('')),
-                    When(observaciones='', then=Value('')),
-                    default='observaciones',
-                    output_field=CharField()
-                )
-            )
-            .values("codigo_producto", "observaciones_normalizadas", "cc")
+            .values("codigo_producto", "cc")
             .annotate(
                 cantidad=Count("id"),  # Contar registros, no sumar cantidades (cada registro = 1 unidad)
                 tipificado=Exists(CatalogoProducto.objects.filter(
@@ -1839,27 +1823,35 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 descripcion=Subquery(descripcion_subquery),
                 tipo=Coalesce(Subquery(tipo_subquery), None)  # Evita valores nulos
             )
-            .order_by("codigo_producto", "observaciones_normalizadas", "cc")
+            .order_by("codigo_producto", "cc")
         )
         
-        # Enriquecer con información de números de serie desde datos_adicionales
+        # Enriquecer con información de números de serie y concatenar observaciones desde datos_adicionales
         productos_enriquecidos = []
         for producto in productos_agrupados:
-            # Obtener todos los registros que coinciden con este grupo (codigo_producto + observaciones + cc)
-            observaciones_filtro = producto['observaciones_normalizadas'] if producto['observaciones_normalizadas'] else None
+            # Obtener todos los registros que coinciden con este grupo (codigo_producto + cc)
+            # Ordenar por created_at para mantener el orden original del documento
             registros = queryset_filtrado.filter(
                 codigo_producto=producto['codigo_producto'],
                 cc=producto['cc']
-            )
-            # Filtrar por observaciones normalizadas (None y '' se tratan igual)
-            if observaciones_filtro:
-                registros = registros.filter(observaciones=observaciones_filtro)
-            else:
-                registros = registros.filter(Q(observaciones__isnull=True) | Q(observaciones=''))
+            ).order_by('created_at')  # Ordenar por fecha de creación para mantener orden original
             
-            # Recopilar todos los rangos de números de serie (inicio-fin)
+            # Recopilar descripciones (observaciones) y números de serie en el mismo orden
+            descripciones_ordenadas = []  # Lista para mantener el orden
+            descripciones_vistas = set()  # Set para evitar duplicados
             rangos_serie = []
+            
             for registro in registros:
+                # Recopilar descripción (observaciones) manteniendo el orden de aparición
+                desc = registro.descripcion
+                if desc and desc.strip():  # Solo agregar si no está vacío
+                    desc_stripped = desc.strip()
+                    # Solo agregar si no la hemos visto antes (evitar duplicados)
+                    if desc_stripped not in descripciones_vistas:
+                        descripciones_ordenadas.append(desc_stripped)
+                        descripciones_vistas.add(desc_stripped)
+                
+                # Recopilar números de serie en el mismo orden
                 datos_adic = registro.datos_adicionales or {}
                 numero_serie_inicio = datos_adic.get('numero_serie_inicio', '').strip() if datos_adic.get('numero_serie_inicio') else ''
                 numero_serie_fin = datos_adic.get('numero_serie_fin', '').strip() if datos_adic.get('numero_serie_fin') else ''
@@ -1877,7 +1869,17 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 elif numero_serie_fin:
                     rangos_serie.append(numero_serie_fin)
             
-            # Concatenar todos los rangos con comas
+            # Concatenar descripciones manteniendo el orden de aparición
+            descripcion_final = None
+            if len(descripciones_ordenadas) > 1:
+                # Hay múltiples descripciones diferentes: concatenarlas en el orden de aparición
+                descripcion_final = ', '.join(descripciones_ordenadas)
+            elif len(descripciones_ordenadas) == 1:
+                # Solo una descripción única: usar esa
+                descripcion_final = descripciones_ordenadas[0]
+            # Si está vacío, descripcion_final queda None
+            
+            # Concatenar todos los rangos con comas (manteniendo el orden)
             rango_serie = ', '.join(rangos_serie) if rangos_serie else None
             
             # Para compatibilidad, también guardar el primer inicio y último fin
@@ -1899,10 +1901,11 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 if ultimos_fins:
                     numero_serie_fin = max(ultimos_fins)  # Último número de serie (máximo)
             
-            # Incluir observaciones y cc en la respuesta para que el frontend pueda diferenciar grupos
+            # Incluir observaciones concatenadas y cc en la respuesta
             productos_enriquecidos.append({
                 **producto,
-                'observaciones': producto['observaciones_normalizadas'] if producto['observaciones_normalizadas'] else None,
+                'observaciones': descripcion_final,  # Descripciones concatenadas si son diferentes
+                'descripcion': descripcion_final,  # También en descripcion para compatibilidad
                 'cc': producto['cc'],
                 'numero_serie_inicio': numero_serie_inicio,
                 'numero_serie_fin': numero_serie_fin,

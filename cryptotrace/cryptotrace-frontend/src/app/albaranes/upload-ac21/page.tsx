@@ -221,7 +221,6 @@ function UploadAC21PageContent() {
     return normalizaCodigo(
       articulo.codigo_producto ||
       articulo.titulo ||
-      articulo.descripcion ||
       '-'
     );
   };
@@ -1192,11 +1191,10 @@ function UploadAC21PageContent() {
         .map((art: any) => {
           // Mapeo correcto:
           // - codigo_producto viene del OCR (TÍTULO CORTO / EDICIÓN)
-          // - descripcion viene del OCR (OBSERVACIONES)
-          // IMPORTANTE: no usar el código como fallback de descripción para evitar
-          // que la columna de OBSERVACIONES se rellene con el TÍTULO CORTO/EDICIÓN.
-          const codigo = art.codigo_producto || art.titulo_corto || art.codigo || '';
-          const descripcion = art.descripcion || art.observaciones || '';
+          // - observaciones viene del OCR (OBSERVACIONES/REMARKS)
+          // - codigo_producto viene del OCR (TÍTULO CORTO/EDICIÓN)
+          const codigo = art.codigo_producto || art.titulo_corto || '';
+          const observaciones = art.observaciones || art.descripcion || ''; // Mantener descripcion por compatibilidad temporal
           
           // Asegurar que cantidad sea un número válido
           let cantidad = art.cantidad;
@@ -1209,9 +1207,8 @@ function UploadAC21PageContent() {
           
           return {
             ...art,
-            codigo: codigo, // Para compatibilidad
             codigo_producto: codigo, // TÍTULO CORTO / EDICIÓN
-            descripcion: descripcion, // OBSERVACIONES
+            observaciones: observaciones, // OBSERVACIONES/REMARKS del OCR (se mapeará a descripcion en BD)
             cantidad: cantidad, // Asegurar que cantidad sea un número válido
             numero_serie_inicio: art.numero_serie_inicio || art.numero_serie || '', // Preservar números de serie
             numero_serie_fin: art.numero_serie_fin || art.numero_serie || '',
@@ -1399,7 +1396,7 @@ function UploadAC21PageContent() {
     const productosSeleccionados = Array.from(selectedArticulos);
     const productosValidos = productosSeleccionados.filter(index => {
       const articulo = processedData.articulos[index];
-      return articulo && (articulo.codigo_producto || articulo.descripcion);
+      return articulo && (articulo.codigo_producto || articulo.observaciones);
     });
 
     if (productosValidos.length === 0) {
@@ -3199,16 +3196,15 @@ function UploadAC21PageContent() {
                                 placeholder="-"
                               />
                             </td>
-                            {/* Observaciones (descripcion) */}
+                            {/* Observaciones */}
                             <td className="border border-gray-400 px-2 py-1">
                               <input
                                 type="text"
                                 className="w-full border-none bg-transparent focus:ring-0 text-xs"
-                                value={articulo.descripcion || articulo.observaciones || ''}
+                                value={articulo.observaciones || articulo.descripcion || ''}
                                 onChange={e => {
                                   const nuevos = [...processedData.articulos];
-                                  nuevos[index].descripcion = e.target.value;
-                                  nuevos[index].observaciones = e.target.value; // Mantener compatibilidad
+                                  nuevos[index].observaciones = e.target.value; // Se mapeará a descripcion en BD
                                   setProcessedData((prev: any) => ({ ...prev, articulos: nuevos }));
                                 }}
                                 disabled={yaExiste}

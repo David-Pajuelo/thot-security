@@ -39,7 +39,7 @@ DEFAULT_JSON_TEMPLATE = {
     "empresa_destino": {
         "nombre": None, "direccion": None, "codigo_postal": None, "ciudad": None, "provincia": None, "numero_odmc": None
     },
-    "articulos": [],  # Cada artículo tiene: codigo_producto (TÍTULO CORTO/EDICIÓN), descripcion (OBSERVACIONES), cantidad, numero_serie_inicio, numero_serie_fin, cc
+    "articulos": [],  # Cada artículo tiene: codigo_producto (TÍTULO CORTO/EDICIÓN), observaciones (OBSERVACIONES/REMARKS), cantidad, numero_serie_inicio, numero_serie_fin, cc
     "accesorios": [],
     "equipos_prueba": [],
     "firmas": {
@@ -329,29 +329,26 @@ class AC21Processor:
                 continue
             
             # Extraer código de producto: viene de "TÍTULO CORTO / EDICIÓN" del AC21
-            # Puede venir como codigo_producto, titulo_corto, codigo, o descripcion (legacy)
+            # Solo usar codigo_producto (eliminado codigo, titulo_corto, descripcion legacy)
             codigo_producto = (
                 article.get("codigo_producto") or 
-                article.get("titulo_corto") or 
-                article.get("codigo") or 
-                article.get("descripcion") or  # Legacy: si viene como descripcion, usarlo como código
+                article.get("titulo_corto") or  # Mantener por compatibilidad temporal
                 ""
             )
             
-            # Extraer descripción: viene de "OBSERVACIONES" del AC21
-            # Puede venir como descripcion u observaciones
-            descripcion = (
-                article.get("descripcion") or 
+            # Extraer observaciones: viene de "OBSERVACIONES/REMARKS" del AC21
+            # Este campo se mapeará a descripcion en la BD
+            observaciones = (
                 article.get("observaciones") or 
+                article.get("descripcion") or  # Mantener por compatibilidad temporal
                 ""
             )
             
             sanitized_article = {
                 "codigo_producto": str(codigo_producto).strip(),
-                "descripcion": str(descripcion).strip(),
+                "observaciones": str(observaciones).strip(),  # Se mapeará a descripcion en la BD
                 "numero_serie_inicio": str(article.get("numero_serie_inicio") or "").strip(),
                 "numero_serie_fin": str(article.get("numero_serie_fin") or "").strip(),
-                "observaciones": str(article.get("observaciones") or "").strip(),  # Mantener observaciones por compatibilidad
             }
 
             # Índice de fila (opcional): número de línea tal y como aparece en la tabla del AC21
@@ -715,8 +712,8 @@ class AC21Processor:
                             - Extrae CADA fila de la tabla en una lista de objetos `articulos` (una fila = un elemento en `articulos`).
                             - Para CADA artículo, DEBES extraer los siguientes campos de la tabla:
                               * `indice_fila`: el número de la fila tal y como aparece en la primera columna de la tabla (1, 2, 3, ...).
-                              * `codigo_producto` o `titulo_corto`: **CRÍTICO** - El valor de la columna "TÍTULO CORTO / EDICIÓN" (en ESPAÑOL) o "SHORT TITLE / EDITION" (en INGLÉS). Este es el código del producto. **NO confundir con OBSERVACIONES/REMARKS**.
-                              * `descripcion`: **CRÍTICO** - El valor de la columna "OBSERVACIONES" (en ESPAÑOL) o "REMARKS" (en INGLÉS). Esta es la descripción/observaciones del producto. **MUY IMPORTANTE**: 
+                              * `codigo_producto`: **CRÍTICO** - El valor de la columna "TÍTULO CORTO / EDICIÓN" (en ESPAÑOL) o "SHORT TITLE / EDITION" (en INGLÉS). Este es el código del producto. **NO confundir con OBSERVACIONES/REMARKS**.
+                              * `observaciones`: **CRÍTICO** - El valor de la columna "OBSERVACIONES" (en ESPAÑOL) o "REMARKS" (en INGLÉS). Esta es la descripción/observaciones del producto. **MUY IMPORTANTE**: 
                                 - Este campo NO debe contener el mismo valor que "TÍTULO CORTO / EDICIÓN" o "SHORT TITLE / EDITION".
                                 - Si la celda de OBSERVACIONES/REMARKS está vacía o contiene el mismo texto que el título corto, usa una cadena vacía "".
                                 - Solo extrae texto que sea diferente del título corto y que sea información adicional sobre el producto.
@@ -732,9 +729,9 @@ class AC21Processor:
                             - Es CRÍTICO que no omitas ningún artículo, aunque dos filas sean idénticas o casi idénticas. Si hay 30 filas en la tabla, debe haber 30 elementos en `articulos`, con `indice_fila` de 1 a 30 sin huecos.
                             - **IMPORTANTE**: 
                               - "TÍTULO CORTO / EDICIÓN" (ESPAÑOL) o "SHORT TITLE / EDITION" (INGLÉS) va a `codigo_producto`.
-                              - "OBSERVACIONES" (ESPAÑOL) o "REMARKS" (INGLÉS) va a `descripcion`.
-                              - **NO dupliques información**: Si OBSERVACIONES/REMARKS contiene el mismo texto que TÍTULO CORTO/EDICIÓN, deja `descripcion` como cadena vacía "".
-                              - `descripcion` solo debe contener información adicional que NO esté en el título corto.
+                              - "OBSERVACIONES" (ESPAÑOL) o "REMARKS" (INGLÉS) va a `observaciones`.
+                              - **NO dupliques información**: Si OBSERVACIONES/REMARKS contiene el mismo texto que TÍTULO CORTO/EDICIÓN, deja `observaciones` como cadena vacía "".
+                              - `observaciones` solo debe contener información adicional que NO esté en el título corto.
                         4.  **Accesorios y Equipos de Prueba**: Extrae las listas de "ACCESORIOS ENTREGADOS" y "EQUIPOS PRUEBAS". A veces el título puede variar ligeramente (p.ej. "EQUIPOS DE PRUEBA AICOX"); debes poder manejar estas variaciones.
                         5.  **Firmas (CRÍTICO)**:
                             - El documento tiene dos bloques de firma: uno a la **izquierda (recuadro 15)** y otro a la **derecha (recuadro 16)**.
@@ -780,7 +777,7 @@ class AC21Processor:
                           "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
                           "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
                           "articulos": [
-                            { "indice_fila": "Int (número de fila en la tabla, empezando en 1)", "codigo_producto": "String (TÍTULO CORTO / EDICIÓN)", "descripcion": "String (OBSERVACIONES)", "cantidad": "Int", "numero_serie_inicio": "String", "numero_serie_fin": "String", "cc": "String (valores válidos: '1', '2' o '3')" }
+                            { "indice_fila": "Int (número de fila en la tabla, empezando en 1)", "codigo_producto": "String (TÍTULO CORTO / EDICIÓN)", "observaciones": "String (OBSERVACIONES/REMARKS)", "cantidad": "Int", "numero_serie_inicio": "String", "numero_serie_fin": "String", "cc": "String (valores válidos: '1', '2' o '3')" }
                           ],
                           "accesorios": [
                             { "descripcion": "String", "cantidad": "Int" }
