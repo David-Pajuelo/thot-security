@@ -2121,7 +2121,6 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                     from datetime import timedelta
                     tiempo_limite = timezone.now() - timedelta(minutes=5)
                     # Buscar páginas vacías consultando directamente desde MovimientoProducto
-                    from productos.models import MovimientoProducto
                     paginas_con_movimientos = MovimientoProducto.objects.filter(
                         albaran__documento_principal=documento_existente,
                         albaran__created_at__gte=tiempo_limite
@@ -2340,7 +2339,6 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 if albaran.documento_principal or documento_existente:
                     doc_principal = albaran.obtener_documento_principal
                     # Buscar páginas vacías consultando directamente desde MovimientoProducto
-                    from productos.models import MovimientoProducto
                     paginas_con_movimientos = MovimientoProducto.objects.filter(
                         albaran__documento_principal=doc_principal
                     ).values_list('albaran_id', flat=True).distinct()
