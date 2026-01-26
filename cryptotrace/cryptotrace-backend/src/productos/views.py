@@ -533,13 +533,37 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                     for articulo in articulos:
                         # Mapear observaciones del OCR a descripcion en BD
                         observaciones_ocr = articulo.get('observaciones') or articulo.get('descripcion', '')
+                        # Extraer CC del artículo (puede venir del OCR o ser None)
+                        cc_articulo = articulo.get('cc')
+                        if cc_articulo is None or cc_articulo == '':
+                            cc_articulo = 1  # Valor por defecto
+                        else:
+                            try:
+                                cc_articulo = int(float(str(cc_articulo)))
+                            except (ValueError, TypeError):
+                                cc_articulo = 1
+                        
+                        codigo_producto_articulo = articulo.get('codigo_producto') or articulo.get('codigo', '') or 'SIN_CODIGO'
+                        
+                        # Buscar el tipo_cryptocustodio en el catálogo (si el producto ya existe)
+                        tipo_cryptocustodio_inicial = 'Ninguno'  # Por defecto
+                        try:
+                            producto_catalogo = CatalogoProducto.objects.get(codigo_producto=codigo_producto_articulo)
+                            if producto_catalogo.tipo_cryptocustodio and producto_catalogo.tipo_cryptocustodio != 'Ninguno':
+                                tipo_cryptocustodio_inicial = producto_catalogo.tipo_cryptocustodio
+                        except CatalogoProducto.DoesNotExist:
+                            # Si no existe en el catálogo, usar 'Ninguno' por defecto
+                            pass
+                        
                         LineaTemporalProducto.objects.create(
                             usuario=self.request.user,
                             numero_albaran=albaran.numero,
-                            codigo_producto=articulo.get('codigo_producto') or articulo.get('codigo', '') or 'SIN_CODIGO',
+                            codigo_producto=codigo_producto_articulo,
                             descripcion=observaciones_ocr,  # Mapeado desde observaciones del OCR
                             numero_serie=articulo.get('numero_serie_inicio') or articulo.get('numero_serie_fin', ''),
-                            observaciones=''  # Campo observaciones en BD queda vacío
+                            observaciones='',  # Campo observaciones en BD queda vacío
+                            cc=cc_articulo,  # CC del AC21 (columna del PDF) - viene del OCR, NO modificar
+                            tipo_cryptocustodio=tipo_cryptocustodio_inicial  # Buscar en catálogo, si no existe usar 'Ninguno'
                         )
                 elif (albaran.tipo_documento in ['TRANSFERENCIA', 'RECIBO_MANO', 'DESTRUCCION', 'OTRO'] 
                       and albaran.direccion_transferencia == 'SALIDA'):
@@ -962,49 +986,109 @@ class AlbaranViewSet(viewsets.ModelViewSet):
             print(f"📄 [PDF] Es multipágina: {es_multipagina}, Total páginas: {len(todas_las_paginas)}")
             
             if es_multipagina:
-                # Para documentos multipágina, organizar productos por página manteniendo la estructura original
-                productos_por_pagina = []
-                accesorios_por_pagina = []
-                equipos_por_pagina = []
+                # Para documentos multipágina, combinar TODOS los productos de todas las hojas físicas
+                # y luego dividirlos en páginas de 18 productos para el PDF imprimible
+                todos_los_productos = []
+                productos_por_hoja_fisica = []  # Para tracking/debugging
+                accesorios_por_hoja_fisica = []
+                equipos_por_hoja_fisica = []
                 
+                # Recopilar todos los productos de todas las hojas físicas en orden
                 for pagina in todas_las_paginas:
-                    movimientos_pagina = MovimientoProducto.objects.filter(albaran=pagina).select_related('producto')
-                    print(f"📄 [PDF] Página {pagina.pagina_numero}: {movimientos_pagina.count()} productos")
+                    movimientos_pagina = MovimientoProducto.objects.filter(albaran=pagina).select_related('producto').order_by('id')
+                    count_movimientos = movimientos_pagina.count()
+                    print(f"📄 [PDF] Hoja física {pagina.pagina_numero} (Albarán ID={pagina.id}, número={pagina.numero}): {count_movimientos} productos")
                     
-                    productos_pagina = []
+                    productos_hoja = []
                     for mov in movimientos_pagina:
-                        productos_pagina.append({
+                        producto_data = {
                             'codigo_producto': mov.producto.codigo_producto,
                             'cantidad': mov.cantidad or 1,
                             'descripcion_producto': mov.descripcion or mov.producto.descripcion,
                             'numero_serie': mov.numero_serie or 'N/A',
                             'observaciones': mov.observaciones or ''
-                        })
-                    productos_por_pagina.append(productos_pagina)
+                        }
+                        productos_hoja.append(producto_data)
+                        todos_los_productos.append(producto_data)
                     
-                    # Recopilar accesorios y equipos de cada página
-                    accesorios_pagina = self._procesar_accesorios(pagina.accesorios)
-                    equipos_pagina = self._procesar_equipos_prueba(pagina.equipos_prueba)
-                    accesorios_por_pagina.append(accesorios_pagina)
-                    equipos_por_pagina.append(equipos_pagina)
+                    productos_por_hoja_fisica.append(productos_hoja)
+                    
+                    # Recopilar accesorios y equipos de cada hoja física
+                    accesorios_hoja = self._procesar_accesorios(pagina.accesorios)
+                    equipos_hoja = self._procesar_equipos_prueba(pagina.equipos_prueba)
+                    accesorios_por_hoja_fisica.append(accesorios_hoja)
+                    equipos_por_hoja_fisica.append(equipos_hoja)
                 
-                # Combinar todos los productos para enviar al PDF generator
-                todos_los_productos = []
-                for productos_pagina in productos_por_pagina:
-                    todos_los_productos.extend(productos_pagina)
+                # Calcular cuántas páginas del PDF imprimible necesitamos (18 productos por página)
+                import math
+                total_productos = len(todos_los_productos)
+                total_paginas_pdf = math.ceil(total_productos / 18)
+                
+                print(f"📄 [PDF] Total productos de todas las hojas físicas: {total_productos}")
+                print(f"📄 [PDF] Productos por hoja física: {[len(p) for p in productos_por_hoja_fisica]}")
+                print(f"📄 [PDF] Total páginas PDF imprimible calculadas: {total_paginas_pdf}")
+                
+                # Dividir productos en páginas de 18 para el PDF imprimible
+                productos_por_pagina_pdf = []
+                accesorios_por_pagina_pdf = []
+                equipos_por_pagina_pdf = []
+                
+                for pagina_pdf in range(total_paginas_pdf):
+                    inicio = pagina_pdf * 18
+                    fin = min(inicio + 18, total_productos)
+                    productos_pagina = todos_los_productos[inicio:fin]
+                    productos_por_pagina_pdf.append(productos_pagina)
+                    
+                    # Determinar qué accesorios/equipos van en esta página del PDF
+                    # Si la página del PDF contiene productos de múltiples hojas físicas,
+                    # combinamos los accesorios/equipos de esas hojas
+                    accesorios_pagina = []
+                    equipos_pagina = []
+                    
+                    # Calcular qué hojas físicas contribuyen a esta página del PDF
+                    productos_antes = inicio
+                    productos_despues = fin
+                    
+                    # Recorrer las hojas físicas para ver cuáles contribuyen
+                    productos_acumulados = 0
+                    for idx_hoja, productos_hoja in enumerate(productos_por_hoja_fisica):
+                        productos_en_hoja = len(productos_hoja)
+                        inicio_hoja = productos_acumulados
+                        fin_hoja = productos_acumulados + productos_en_hoja
+                        
+                        # Si esta hoja física tiene productos en el rango de esta página del PDF
+                        if inicio_hoja < productos_despues and fin_hoja > productos_antes:
+                            # Esta hoja física contribuye a esta página del PDF
+                            accesorios_hoja = accesorios_por_hoja_fisica[idx_hoja]
+                            equipos_hoja = equipos_por_hoja_fisica[idx_hoja]
+                            
+                            # Combinar accesorios y equipos (evitar duplicados)
+                            for acc in accesorios_hoja:
+                                if acc not in accesorios_pagina:
+                                    accesorios_pagina.append(acc)
+                            for eq in equipos_hoja:
+                                if eq not in equipos_pagina:
+                                    equipos_pagina.append(eq)
+                        
+                        productos_acumulados += productos_en_hoja
+                    
+                    accesorios_por_pagina_pdf.append(accesorios_pagina)
+                    equipos_por_pagina_pdf.append(equipos_pagina)
+                    
+                    print(f"📄 [PDF] Página PDF {pagina_pdf + 1}: {len(productos_pagina)} productos, {len(accesorios_pagina)} accesorios, {len(equipos_pagina)} equipos")
                 
                 # Usar datos de la primera página para información general
                 pagina_principal = todas_las_paginas[0]
-                total_paginas = len(todas_las_paginas)
-                pagina_actual = 1  # Para documentos multipágina, siempre empezar desde 1 para que el PDF generator genere todas las páginas
+                pagina_actual = 1
                 
-                # Verificar que total_paginas sea correcto
-                print(f"📄 [PDF] Total páginas calculado: {total_paginas}")
-                print(f"📄 [PDF] Páginas encontradas: {[p.pagina_numero for p in todas_las_paginas]}")
-                print(f"📄 [PDF] Total productos combinados: {len(todos_los_productos)}")
-                print(f"📄 [PDF] Productos por página: {[len(p) for p in productos_por_pagina]}")
-                print(f"📄 [PDF] Accesorios por página: {[len(a) for a in accesorios_por_pagina]}")
-                print(f"📄 [PDF] Equipos por página: {[len(e) for e in equipos_por_pagina]}")
+                # Estructura para enviar al PDF generator
+                estructura_productos = [len(p) for p in productos_por_pagina_pdf]
+                
+                print(f"📄 [PDF] Estructura final para PDF imprimible:")
+                print(f"📄 [PDF] Total páginas PDF: {total_paginas_pdf}")
+                print(f"📄 [PDF] Productos por página PDF: {estructura_productos}")
+                print(f"📄 [PDF] Accesorios por página PDF: {[len(a) for a in accesorios_por_pagina_pdf]}")
+                print(f"📄 [PDF] Equipos por página PDF: {[len(e) for e in equipos_por_pagina_pdf]}")
                 
             else:
                 # Para documentos de página única
@@ -1051,10 +1135,10 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                 'codigos_contabilidad': pagina_principal.codigo_contabilidad or '',
                 'lineas_producto': todos_los_productos,
                 'pagina_actual': pagina_actual,
-                'total_paginas': total_paginas,
-                'productos_por_pagina_estructura': [len(p) for p in productos_por_pagina],  # Información de estructura original
-                'accesorios_por_pagina': accesorios_por_pagina,  # Accesorios específicos de cada página
-                'equipos_por_pagina': equipos_por_pagina,  # Equipos específicos de cada página
+                'total_paginas': total_paginas_pdf if es_multipagina else total_paginas,
+                'productos_por_pagina_estructura': estructura_productos if es_multipagina else [len(p) for p in productos_por_pagina],  # Información de estructura para PDF imprimible
+                'accesorios_por_pagina': accesorios_por_pagina_pdf if es_multipagina else accesorios_por_pagina,  # Accesorios específicos de cada página PDF
+                'equipos_por_pagina': equipos_por_pagina_pdf if es_multipagina else equipos_por_pagina,  # Equipos específicos de cada página PDF
                 'flags': {
                     'firme_y_devuelva': False,  # TODO: mapear estos campos cuando estén en el modelo
                     'para_su_archivo': True
@@ -1078,12 +1162,14 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                     'firma_texto': pagina_principal.firma_b or ''
                 },
                 'observaciones_odmc_remitente': pagina_principal.observaciones_odmc or '',
-                # Agregar accesorios y equipos de prueba
-                'accesorios': self._procesar_accesorios(pagina_principal.accesorios),
-                'equipos_prueba': self._procesar_equipos_prueba(pagina_principal.equipos_prueba)
+                # NO incluir accesorios y equipos aquí - se usarán los específicos por página desde accesorios_por_pagina y equipos_por_pagina
+                # Solo incluir si es documento de página única y no hay estructura por página
+                'accesorios': [] if es_multipagina else self._procesar_accesorios(pagina_principal.accesorios),
+                'equipos_prueba': [] if es_multipagina else self._procesar_equipos_prueba(pagina_principal.equipos_prueba)
             }
 
-            print(f"📄 [PDF] Enviando datos al servicio PDF: {len(todos_los_productos)} productos, página {pagina_actual} de {total_paginas}")
+            total_paginas_final = total_paginas_pdf if es_multipagina else total_paginas
+            print(f"📄 [PDF] Enviando datos al servicio PDF: {len(todos_los_productos)} productos, {total_paginas_final} páginas PDF")
 
             # Llamar al servicio cryptotrace-pdf-generator
             pdf_service_url = 'http://pdf-generator:5003/generate-ac21-pdf'
@@ -1322,15 +1408,28 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                         except (ValueError, TypeError):
                             cantidad = 1
                         
+                        codigo_producto_articulo = articulo.get('codigo') or articulo.get('codigo_producto', '')
+                        
+                        # Buscar el tipo_cryptocustodio en el catálogo (si el producto ya existe)
+                        tipo_cryptocustodio_inicial = 'Ninguno'  # Por defecto
+                        try:
+                            producto_catalogo = CatalogoProducto.objects.get(codigo_producto=codigo_producto_articulo)
+                            if producto_catalogo.tipo_cryptocustodio and producto_catalogo.tipo_cryptocustodio != 'Ninguno':
+                                tipo_cryptocustodio_inicial = producto_catalogo.tipo_cryptocustodio
+                        except CatalogoProducto.DoesNotExist:
+                            # Si no existe en el catálogo, usar 'Ninguno' por defecto
+                            pass
+                        
                         LineaTemporalProducto.objects.create(
                             usuario=request.user,
                             numero_albaran=nueva_pagina.numero,
-                            codigo_producto=articulo.get('codigo') or articulo.get('codigo_producto', ''),
+                            codigo_producto=codigo_producto_articulo,
                             descripcion=articulo.get('descripcion', ''),
                             numero_serie=articulo.get('numero_serie_inicio') or articulo.get('numero_serie_fin', '') or articulo.get('numero_serie', ''),
                             observaciones=articulo.get('observaciones', ''),
                             cantidad=cantidad,
-                            cc=cc,
+                            cc=cc,  # CC del AC21 (columna del PDF) - viene del OCR, NO modificar
+                            tipo_cryptocustodio=tipo_cryptocustodio_inicial,  # Buscar en catálogo, si no existe usar 'Ninguno'
                             datos_adicionales=datos_adicionales
                         )
                 
@@ -1717,7 +1816,17 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             if not codigo_producto:
                 codigo_producto = descripcion if descripcion else 'SIN_CODIGO'
             
-            print(f"📦 [BACKEND] Artículo procesado - código: '{codigo_producto}', descripción (de observaciones): '{descripcion}', cantidad: {cantidad}, número_serie: '{numero_serie}'")
+            # Buscar el tipo_cryptocustodio en el catálogo (si el producto ya existe)
+            tipo_cryptocustodio_inicial = 'Ninguno'  # Por defecto
+            try:
+                producto_catalogo = CatalogoProducto.objects.get(codigo_producto=codigo_producto)
+                if producto_catalogo.tipo_cryptocustodio and producto_catalogo.tipo_cryptocustodio != 'Ninguno':
+                    tipo_cryptocustodio_inicial = producto_catalogo.tipo_cryptocustodio
+            except CatalogoProducto.DoesNotExist:
+                # Si no existe en el catálogo, usar 'Ninguno' por defecto
+                pass
+            
+            print(f"📦 [BACKEND] Artículo procesado - código: '{codigo_producto}', descripción (de observaciones): '{descripcion}', cantidad: {cantidad}, número_serie: '{numero_serie}', tipo_cryptocustodio: '{tipo_cryptocustodio_inicial}'")
             
             registro = LineaTemporalProducto.objects.create(
                 usuario=request.user,
@@ -1727,7 +1836,8 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 numero_serie=numero_serie,
                 cantidad=cantidad,  # Usar cantidad validada
                 observaciones='',  # Campo observaciones en BD queda vacío (la info está en descripcion)
-                cc=cc,  # Usar CC validado
+                cc=cc,  # CC del AC21 (columna del PDF) - viene del OCR, NO modificar
+                tipo_cryptocustodio=tipo_cryptocustodio_inicial,  # Buscar en catálogo, si no existe usar 'Ninguno'
                 datos_adicionales=datos_adicionales
             )
             registros_creados.append(registro)
@@ -1802,6 +1912,11 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             codigo_producto=OuterRef("codigo_producto"),
             tipo__isnull=False
         ).values("tipo__nombre")[:1]
+        
+        # 🔹 Obtener el tipo_cryptocustodio del catálogo (si existe)
+        tipo_cryptocustodio_subquery = CatalogoProducto.objects.filter(
+            codigo_producto=OuterRef("codigo_producto")
+        ).values("tipo_cryptocustodio")[:1]
 
         # Filtrar solo productos no procesados del usuario actual
         queryset_filtrado = self.get_queryset().filter(
@@ -1901,12 +2016,32 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 if ultimos_fins:
                     numero_serie_fin = max(ultimos_fins)  # Último número de serie (máximo)
             
-            # Incluir observaciones concatenadas y cc en la respuesta
+            # Obtener el tipo_cryptocustodio:
+            # 1. Primero intentar obtenerlo del catálogo (si el producto ya tiene uno asignado)
+            # 2. Si no existe en el catálogo, usar el del primer registro de la línea temporal
+            # 3. Si no hay registros, usar 'Ninguno' por defecto
+            try:
+                producto_catalogo = CatalogoProducto.objects.get(codigo_producto=producto['codigo_producto'])
+                tipo_cryptocustodio_catalogo = producto_catalogo.tipo_cryptocustodio
+                # Si el catálogo tiene un valor diferente de 'Ninguno', usarlo
+                if tipo_cryptocustodio_catalogo and tipo_cryptocustodio_catalogo != 'Ninguno':
+                    tipo_cryptocustodio = tipo_cryptocustodio_catalogo
+                    # Actualizar todas las líneas temporales de este grupo con el valor del catálogo
+                    registros.update(tipo_cryptocustodio=tipo_cryptocustodio_catalogo)
+                else:
+                    # Si el catálogo tiene 'Ninguno' o no tiene valor, usar el de la línea temporal
+                    tipo_cryptocustodio = registros.first().tipo_cryptocustodio if registros.exists() else 'Ninguno'
+            except CatalogoProducto.DoesNotExist:
+                # Si el producto no existe en el catálogo, usar el valor de la línea temporal
+                tipo_cryptocustodio = registros.first().tipo_cryptocustodio if registros.exists() else 'Ninguno'
+            
+            # Incluir observaciones concatenadas, cc (del AC21) y tipo_cryptocustodio en la respuesta
             productos_enriquecidos.append({
                 **producto,
                 'observaciones': descripcion_final,  # Descripciones concatenadas si son diferentes
                 'descripcion': descripcion_final,  # También en descripcion para compatibilidad
-                'cc': producto['cc'],
+                'cc': producto['cc'],  # CC del AC21 (columna del PDF) - NO modificar
+                'tipo_cryptocustodio': tipo_cryptocustodio,  # Tipo seleccionado por el usuario ('c', 'CC' o 'Ninguno')
                 'numero_serie_inicio': numero_serie_inicio,
                 'numero_serie_fin': numero_serie_fin,
                 'rango_serie': rango_serie  # Todos los rangos concatenados
@@ -1947,6 +2082,56 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             producto.save()
 
         return Response({"message": "Tipo asignado correctamente", "created": created}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="actualizar-tipo-cryptocustodio", permission_classes=[IsAuthenticated])
+    def actualizar_tipo_cryptocustodio(self, request):
+        """
+        Actualiza el campo tipo_cryptocustodio de todas las líneas temporales
+        no procesadas del usuario actual que tengan el mismo codigo_producto.
+        
+        IMPORTANTE: Este campo es diferente del campo 'cc' que viene del AC21 (columna del PDF).
+        - cc: Viene del OCR del AC21 (columna 12), puede ser 1, 2, 3 o vacío. NO debe modificarse.
+        - tipo_cryptocustodio: Lo selecciona el usuario en el dropdown ('c', 'CC' o 'Ninguno')
+        """
+        codigo_producto = request.data.get("codigo_producto")
+        tipo_cryptocustodio = request.data.get("tipo_cryptocustodio")
+
+        if not codigo_producto:
+            return Response({"error": "Código de producto es obligatorio"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if tipo_cryptocustodio is None:
+            return Response({"error": "El campo tipo_cryptocustodio es obligatorio"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validar que tipo_cryptocustodio sea 'c', 'CC' o 'Ninguno'
+        if tipo_cryptocustodio not in ['c', 'CC', 'Ninguno']:
+            return Response({"error": "El campo tipo_cryptocustodio debe ser 'c', 'CC' o 'Ninguno'"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Actualizar todas las líneas temporales no procesadas del usuario con este codigo_producto
+        # IMPORTANTE: Actualizamos tipo_cryptocustodio, NO el campo cc (que viene del AC21)
+        lineas_actualizadas = LineaTemporalProducto.objects.filter(
+            usuario=request.user,
+            codigo_producto=codigo_producto,
+            procesado=False
+        ).update(tipo_cryptocustodio=tipo_cryptocustodio)
+        
+        # También actualizar el tipo_cryptocustodio en el catálogo para futuras referencias
+        # Si el producto no existe en el catálogo, crearlo con el tipo_cryptocustodio
+        try:
+            producto_catalogo = CatalogoProducto.objects.get(codigo_producto=codigo_producto)
+            producto_catalogo.tipo_cryptocustodio = tipo_cryptocustodio
+            producto_catalogo.save(update_fields=['tipo_cryptocustodio'])
+        except CatalogoProducto.DoesNotExist:
+            # Si no existe en el catálogo, crearlo con el tipo_cryptocustodio
+            CatalogoProducto.objects.create(
+                codigo_producto=codigo_producto,
+                descripcion=f"Producto {codigo_producto}",
+                tipo_cryptocustodio=tipo_cryptocustodio
+            )
+
+        return Response({
+            "message": f"Tipo de cryptocustodio actualizado correctamente",
+            "lineas_actualizadas": lineas_actualizadas
+        }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
     def limpiar_procesados(self, request):

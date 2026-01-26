@@ -1181,7 +1181,16 @@ function UploadAC21PageContent() {
   // Función para guardar en línea temporal y redirigir
   const handleIrALineaTemporal = async () => {
     try {
+      // Validar que el número de registro de salida esté rellenado ANTES de hacer cualquier acción
+      const numeroRegistroSalida = processedData.cabecera?.numero_registro_salida;
+      if (!numeroRegistroSalida || numeroRegistroSalida.trim() === '') {
+        toast.error("Para continuar, debes rellenar el campo 'Número de Registro de Salida' en la cabecera del documento.", { duration: 6000 });
+        return; // No cerrar el modal, no hacer nada
+      }
+      
+      // Solo cerrar el modal si la validación pasa
       setShowAC21EntradaModal(false);
+      
       setIsUploading(true);
 
       // Filtrar productos seleccionados
@@ -1252,6 +1261,14 @@ function UploadAC21PageContent() {
   // Función con la lógica original de confirmación (sin verificación de documento existente)
   const handleConfirmContinuado = async () => {
     try {
+      // Validar que el número de registro de salida esté rellenado ANTES de hacer cualquier acción
+      const numeroRegistroSalida = processedData.cabecera?.numero_registro_salida;
+      if (!numeroRegistroSalida || numeroRegistroSalida.trim() === '') {
+        toast.error("Para continuar, debes rellenar el campo 'Número de Registro de Salida' en la cabecera del documento.", { duration: 6000 });
+        setIsUploading(false);
+        return; // No procesar, no abrir nada
+      }
+      
       setIsUploading(true);
 
       // Filtrar productos seleccionados para excluir los ya existentes
@@ -1444,6 +1461,14 @@ function UploadAC21PageContent() {
         ['TRANSFERENCIA', 'RECIBO_MANO', 'DESTRUCCION', 'OTRO'].includes(tipoDocumentoUpper);
       
       if (esAC21Entrada) {
+        // Validar que el número de registro de salida esté rellenado ANTES de abrir el modal
+        const numeroRegistroSalida = processedData.cabecera?.numero_registro_salida;
+        if (!numeroRegistroSalida || numeroRegistroSalida.trim() === '') {
+          toast.error("Para continuar, debes rellenar el campo 'Número de Registro de Salida' en la cabecera del documento.", { duration: 6000 });
+          setIsUploading(false);
+          return; // No abrir el modal, mostrar error
+        }
+        
         console.log('📋 [AC21] AC21 de ENTRADA detectado, requiere tipificación');
         setShowAC21EntradaModal(true);
         setIsUploading(false);

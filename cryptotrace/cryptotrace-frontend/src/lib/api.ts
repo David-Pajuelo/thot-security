@@ -153,6 +153,16 @@ export const guardarTipoProducto = async (codigoProducto: string, tipo: string):
   });
 };
 
+// Actualizar el tipo de cryptocustodio de las líneas temporales
+// IMPORTANTE: tipo_cryptocustodio es diferente del campo 'cc' que viene del AC21 (columna del PDF)
+// tipo_cryptocustodio puede ser: 'c', 'CC' o 'Ninguno'
+export const guardarTipoCryptocustodio = async (codigoProducto: string, tipoCryptocustodio: string): Promise<any> => {
+  return apiFetch('/lineas-temporales/actualizar-tipo-cryptocustodio/', {
+    method: 'POST',
+    body: JSON.stringify({ codigo_producto: codigoProducto, tipo_cryptocustodio: tipoCryptocustodio }),
+  });
+};
+
 // Inventario
 export const fetchInventario = async (): Promise<any[]> => {
   return apiFetch('/inventario/');

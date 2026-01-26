@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchProductosAgrupados, guardarTipoProducto, procesarAlbaran } from "@/lib/api";
+import { fetchProductosAgrupados, guardarTipoCryptocustodio, procesarAlbaran } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -9,12 +9,8 @@ import LineaTemporalTable from "./LineaTemporalTable";
 
 interface Producto {
   codigo_producto: string;
-  descripcion: string;
-  tipo: string;
   cantidad: number;
-  numero_serie_inicio?: string;
-  numero_serie_fin?: string;
-  rango_serie?: string;
+  tipo_cryptocustodio?: string; // Tipo de cryptocustodio ('c', 'CC' o 'Ninguno') - DIFERENTE del cc del AC21
 }
 
 interface GestionLineaTemporalProps {
@@ -35,9 +31,9 @@ export default function GestionLineaTemporal({ onClose }: GestionLineaTemporalPr
       setLoading(true);
       const response = await fetchProductosAgrupados();
       setProductos(response.productos.map((prod: any) => ({
-        ...prod,
+        codigo_producto: prod.codigo_producto,
         cantidad: prod.cantidad ?? 1,
-        tipo: prod.tipo && prod.tipo.trim() !== '' ? prod.tipo : 'NINGUNO'
+        tipo_cryptocustodio: prod.tipo_cryptocustodio ?? 'Ninguno' // Por defecto 'Ninguno'
       })));
       setTipos(response.tipos_disponibles);
     } catch (error) {
@@ -64,21 +60,22 @@ export default function GestionLineaTemporal({ onClose }: GestionLineaTemporalPr
     };
   }, []);
 
-  const handleGuardarTipo = async (codigoProducto: string, nuevoTipo: string) => {
+  const handleGuardarTipo = async (codigoProducto: string, nuevoTipoCryptocustodio: string) => {
     try {
-      await guardarTipoProducto(codigoProducto, nuevoTipo);
-      setMensaje("✅ Tipo asignado correctamente");
+      // nuevoTipoCryptocustodio viene directamente como 'c', 'CC' o 'Ninguno' desde el select
+      await guardarTipoCryptocustodio(codigoProducto, nuevoTipoCryptocustodio);
+      setMensaje("✅ Tipo de cryptocustodio asignado correctamente");
 
       setProductos((prevProductos) =>
         prevProductos.map((prod) =>
-          prod.codigo_producto === codigoProducto ? { ...prod, tipo: nuevoTipo } : prod
+          prod.codigo_producto === codigoProducto ? { ...prod, tipo_cryptocustodio: nuevoTipoCryptocustodio } : prod
         )
       );
 
       setTimeout(() => setMensaje(null), 2000);
     } catch (error) {
-      console.error("❌ Error guardando el tipo:", error);
-      setMensaje("❌ Error al guardar el tipo");
+      console.error("❌ Error guardando el tipo de cryptocustodio:", error);
+      setMensaje("❌ Error al guardar el tipo de cryptocustodio");
       setTimeout(() => setMensaje(null), 3000);
     }
   };
@@ -95,11 +92,7 @@ export default function GestionLineaTemporal({ onClose }: GestionLineaTemporalPr
 
     // El backend procesa todos los productos temporales no procesados del usuario,
     // no necesita que se envíen en el payload. Solo verificamos que existan productos.
-    // Mostrar advertencia si hay productos sin tipo, pero permitir procesar
-    const productosSinTipo = productos.filter((prod) => !prod.tipo || prod.tipo === 'NINGUNO');
-    if (productosSinTipo.length > 0) {
-      console.warn(`⚠️ ${productosSinTipo.length} producto(s) sin tipo asignado. Se procesarán sin tipo.`);
-    }
+    // Todos los productos tienen un tipo de cryptocustodio (cc), así que no hay advertencia necesaria
 
     try {
       // El backend procesa todos los productos temporales del mismo documento (numero_albaran)

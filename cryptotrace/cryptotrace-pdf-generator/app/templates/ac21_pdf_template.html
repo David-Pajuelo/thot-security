@@ -744,14 +744,13 @@
                     </div>
                     <div class="empresa-content">
                         <div class="empresa-header">
-                            <div class="empresa-odmc{% if not empresa_origen.codigo_odmc and not 'EMAD-004' %} sin-codigo{% endif %}">ODMC Nº.{% if empresa_origen.codigo_odmc %} {{ empresa_origen.codigo_odmc }}{% elif 'EMAD-004' %} EMAD-004{% endif %}</div>
+                            <div class="empresa-odmc{% if not empresa_origen.numero_odmc %} sin-codigo{% endif %}">ODMC Nº.{% if empresa_origen.numero_odmc %} {{ empresa_origen.numero_odmc }}{% endif %}</div>
                         </div>
-                                                 <div class="empresa-nombre">{{ empresa_origen.nombre | default('EMAD') }}</div>
-                         <div class="empresa-direccion">
-                             {{ empresa_origen.direccion | default('Estado Mayor de la Defensa') }}<br>
-                             {{ empresa_origen.localidad_provincia_cp | default('C/ Vitruvio, 1') }}<br>
-                             28071 – Madrid
-                            </div>
+                        <div class="empresa-nombre">{{ empresa_origen.nombre | default('') }}</div>
+                        <div class="empresa-direccion">
+                            {% if empresa_origen.direccion %}{{ empresa_origen.direccion }}<br>{% endif %}
+                            {% if empresa_origen.localidad_provincia_cp %}{{ empresa_origen.localidad_provincia_cp }}{% endif %}
+                        </div>
                     </div>
                 </div>
 
@@ -766,12 +765,12 @@
                         </div>
                     <div class="empresa-content">
                         <div class="empresa-header">
-                            <div class="empresa-odmc{% if not empresa_destino.codigo_odmc %} sin-codigo{% endif %}">ODMC Nº.{% if empresa_destino.codigo_odmc %} {{ empresa_destino.codigo_odmc }}{% endif %}</div>
+                            <div class="empresa-odmc{% if not empresa_destino.numero_odmc %} sin-codigo{% endif %}">ODMC Nº.{% if empresa_destino.numero_odmc %} {{ empresa_destino.numero_odmc }}{% endif %}</div>
                         </div>
-                        <div class="empresa-nombre">{{ empresa_destino.nombre | default('SR. CRIPTOCUSTODIO AICOX') }}</div>
+                        <div class="empresa-nombre">{{ empresa_destino.nombre | default('') }}</div>
                         <div class="empresa-direccion">
-                            {{ empresa_destino.direccion | default('') }}<br>
-                            {{ empresa_destino.localidad_provincia_cp | default('') }}
+                            {% if empresa_destino.direccion %}{{ empresa_destino.direccion }}<br>{% endif %}
+                            {% if empresa_destino.localidad_provincia_cp %}{{ empresa_destino.localidad_provincia_cp }}{% endif %}
                         </div>
                     </div>
                 </div>
@@ -785,13 +784,13 @@
                     <div class="dato-item">
                         <div class="numero-esquina">3.</div>
                         <div class="dato-label">FECHA DEL INFORME (Año, Mes, Día)</div>
-                        <div class="dato-value">{{ fecha_informe | default('2024-11-22') }}</div>
+                        <div class="dato-value">{{ fecha_informe | default('') }}</div>
                     </div>
                     <!-- 4. Nº registro de salida -->
                     <div class="dato-item">
                         <div class="numero-esquina">4.</div>
                         <div class="dato-label">Nº REGISTRO DE SALIDA</div>
-                        <div class="dato-value">{{ numero_registro_salida | default('NA-S-24-365') }}</div>
+                        <div class="dato-value">{{ numero_registro_salida | default('') }}</div>
                     </div>
                 </div>
                 <div class="datos-superiores">
@@ -855,17 +854,20 @@
                     </thead>
                     <tbody>
                     {% set num_productos = lineas_producto|length if lineas_producto else 0 %}
+                    {% set pagina_actual = pagina_actual|default(1) %}
+                    {% set offset_linea = (pagina_actual - 1) * 18 %}
+                    {% set max_productos = [num_productos, 18] | min %}
                     {% for i in range(18) %}
                     <tr>
-                        {% if i < num_productos %}
-                            <td class="col-num">{{ i + 1 }}.</td>
-                            <td class="col-titulo">{{ lineas_producto[i].codigo_producto }}</td>
-                            <td class="col-cantidad">{{ lineas_producto[i].cantidad }}</td>
-                            <td class="col-serie">{{ lineas_producto[i].numero_serie }}</td>
-                            <td class="col-serie">{{ lineas_producto[i].numero_serie }}</td>
-                            <td class="col-cc">1</td>
+                        {% if i < max_productos and i < lineas_producto|length %}
+                            <td class="col-num">{{ offset_linea + i + 1 }}.</td>
+                            <td class="col-titulo">{{ lineas_producto[i].codigo_producto | default('') }}</td>
+                            <td class="col-cantidad">{{ lineas_producto[i].cantidad | default('') }}</td>
+                            <td class="col-serie">{{ lineas_producto[i].numero_serie | default('') }}</td>
+                            <td class="col-serie">{{ lineas_producto[i].numero_serie | default('') }}</td>
+                            <td class="col-cc">{{ lineas_producto[i].cc | default('') }}</td>
                             <td class="col-observaciones">{{ lineas_producto[i].observaciones | default('') }}</td>
-                        {% elif i == num_productos %}
+                        {% elif i == max_productos %}
                             <!-- Línea ULTIMA LINEA después del último producto -->
                             <td colspan="7" class="ultima-linea-celda">
                                 /////////////////////////////////////// ULTIMA LINEA ///////////////////////////////////////
@@ -901,40 +903,11 @@
                             </tr>
                             {% endfor %}
                         {% else %}
+                            <!-- Sin accesorios - dejar tabla vacía -->
                             <tr>
                                 <td class="acc-columna-izq"></td>
-                                <td class="acc-descripcion">CABLE ALIMENTACION</td>
-                                <td class="acc-cantidad">1</td>
-                                <td class="acc-columna-der"></td>
-                            </tr>
-                            <tr>
-                                <td class="acc-columna-izq"></td>
-                                <td class="acc-descripcion">FUENTE DE ALIMENTACION</td>
-                                <td class="acc-cantidad">1</td>
-                                <td class="acc-columna-der"></td>
-                            </tr>
-                            <tr>
-                                <td class="acc-columna-izq"></td>
-                                <td class="acc-descripcion">CABLE CONSOLA</td>
-                                <td class="acc-cantidad">1</td>
-                                <td class="acc-columna-der"></td>
-                            </tr>
-                            <tr>
-                                <td class="acc-columna-izq"></td>
-                                <td class="acc-descripcion">MANUAL USUARIO</td>
-                                <td class="acc-cantidad">1</td>
-                                <td class="acc-columna-der"></td>
-                            </tr>
-                            <tr>
-                                <td class="acc-columna-izq"></td>
-                                <td class="acc-descripcion">BANDEJA</td>
-                                <td class="acc-cantidad">1</td>
-                                <td class="acc-columna-der"></td>
-                            </tr>
-                            <tr>
-                                <td class="acc-columna-izq"></td>
-                                <td class="acc-descripcion">SFP</td>
-                                <td class="acc-cantidad">2</td>
+                                <td class="acc-descripcion"></td>
+                                <td class="acc-cantidad"></td>
                                 <td class="acc-columna-der"></td>
                             </tr>
                         {% endif %}
@@ -952,23 +925,9 @@
                             </tr>
                             {% endfor %}
                         {% else %}
+                            <!-- Sin equipos de prueba - dejar tabla vacía -->
                             <tr>
-                                <td class="equipo-codigo">TLE-147</td>
-                            </tr>
-                            <tr>
-                                <td class="equipo-codigo">TLE-148</td>
-                            </tr>
-                            <tr>
-                                <td class="equipo-codigo">TLE-149</td>
-                            </tr>
-                            <tr>
-                                <td class="equipo-codigo">TLE-150</td>
-                            </tr>
-                            <tr>
-                                <td class="equipo-codigo">TLE-151</td>
-                            </tr>
-                            <tr>
-                                <td class="equipo-codigo">TLE-152</td>
+                                <td class="equipo-codigo"></td>
                             </tr>
                         {% endif %}
                     </table>
@@ -1083,7 +1042,7 @@
 
         <!-- Footer -->
         <div class="footer">
-            Página {{ pagina_actual | default('1') }} de {{ total_paginas | default('3') }} Páginas
+            Página {{ pagina_actual | default('1') }} de {{ total_paginas | default('1') }} Páginas
             </div>
     </div>
 </body>

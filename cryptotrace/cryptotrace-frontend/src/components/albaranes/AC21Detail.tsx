@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, FileText, Printer, ArrowUpRight, ChevronLeft, ChevronRight, Files, Edit, Save, X, Image, Download } from "lucide-react";
 import { Albaran, Empresa } from "@/lib/types";
@@ -217,6 +218,7 @@ interface AC21DetailProps {
 }
 
 export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
+  const router = useRouter();
   const [movimientos, setMovimientos] = useState<any[]>([]);
   const [paginas, setPaginas] = useState<Albaran[]>([]);
   const [paginaActual, setPaginaActual] = useState(0);
@@ -364,7 +366,7 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
   const handleDarSalida = () => {
     // Siempre usar el documento principal para "Dar Salida", no la página actual
     const documentoPrincipalId = albaran.documento_principal ? albaran.documento_principal : albaran.id;
-    window.location.href = `/albaranes/crear-ac21-salida/nuevo?from=${documentoPrincipalId}`;
+    router.push(`/albaranes/crear-ac21-salida/nuevo?from=${documentoPrincipalId}`);
   };
 
   // Funciones para modo edición

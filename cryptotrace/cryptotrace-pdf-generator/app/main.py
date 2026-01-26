@@ -90,14 +90,43 @@ def generate_pdf_endpoint():
             if estructura_original and len(estructura_original) == total_paginas:
                 # Usar la estructura original del documento multipágina
                 print(f"📄 [PDF Generator] Usando estructura original: {estructura_original}")
+                print(f"📄 [PDF Generator] Total productos recibidos: {len(lineas_producto)}")
+                print(f"📄 [PDF Generator] Suma de productos por página: {sum(estructura_original)}")
                 print(f"📄 [PDF Generator] Accesorios por página: {[len(a) for a in accesorios_por_pagina]}")
                 print(f"📄 [PDF Generator] Equipos por página: {[len(e) for e in equipos_por_pagina]}")
+                
+                # Validar que la suma de productos por página coincida con el total
+                suma_estructura = sum(estructura_original)
+                if suma_estructura != len(lineas_producto):
+                    print(f"❌ [PDF Generator] ERROR: La suma de productos por página ({suma_estructura}) no coincide con el total recibido ({len(lineas_producto)})")
+                    print(f"❌ [PDF Generator] Estructura recibida: {estructura_original}")
+                    print(f"❌ [PDF Generator] Esto indica un error en el backend. No se generará el PDF.")
+                    raise ValueError(f"Estructura de productos inconsistente: {suma_estructura} productos en estructura vs {len(lineas_producto)} productos recibidos")
+                
                 inicio = 0
                 
                 for pagina in range(1, total_paginas + 1):
                     productos_en_esta_pagina = estructura_original[pagina - 1]
                     fin = inicio + productos_en_esta_pagina
+                    
+                    # Validar que no se exceda el límite de productos
+                    if fin > len(lineas_producto):
+                        print(f"❌ [PDF Generator] ERROR: Página {pagina} intenta acceder a productos {inicio}-{fin-1} pero solo hay {len(lineas_producto)} productos")
+                        raise ValueError(f"Índice fuera de rango: página {pagina} intenta acceder a más productos de los disponibles")
+                    
+                    # Validar que no haya más de 18 productos por página
+                    if productos_en_esta_pagina > 18:
+                        print(f"⚠️ [PDF Generator] ADVERTENCIA: Página {pagina} tiene {productos_en_esta_pagina} productos (máximo 18). Se truncará a 18.")
+                        productos_en_esta_pagina = 18
+                        fin = inicio + 18
+                    
                     productos_pagina = lineas_producto[inicio:fin]
+                    
+                    # Validar que el slice tenga exactamente los productos esperados
+                    if len(productos_pagina) != productos_en_esta_pagina:
+                        print(f"⚠️ [PDF Generator] ADVERTENCIA: Página {pagina} esperaba {productos_en_esta_pagina} productos pero obtuvo {len(productos_pagina)}")
+                        # Ajustar para evitar errores
+                        productos_pagina = productos_pagina[:productos_en_esta_pagina]
                     
                     # Crear una copia de los datos para esta página
                     datos_pagina = ac21_data.copy()
@@ -106,10 +135,16 @@ def generate_pdf_endpoint():
                     datos_pagina["total_paginas"] = total_paginas
                     
                     # Usar accesorios y equipos específicos de esta página si están disponibles
+                    # Si no hay para esta página, usar lista vacía (no los de la página principal)
                     if accesorios_por_pagina and len(accesorios_por_pagina) >= pagina:
-                        datos_pagina["accesorios"] = accesorios_por_pagina[pagina - 1]
+                        datos_pagina["accesorios"] = accesorios_por_pagina[pagina - 1] or []
+                    else:
+                        datos_pagina["accesorios"] = []
+                    
                     if equipos_por_pagina and len(equipos_por_pagina) >= pagina:
-                        datos_pagina["equipos_prueba"] = equipos_por_pagina[pagina - 1]
+                        datos_pagina["equipos_prueba"] = equipos_por_pagina[pagina - 1] or []
+                    else:
+                        datos_pagina["equipos_prueba"] = []
                     
                     datos_pagina["data"] = datos_pagina
                     
@@ -123,20 +158,34 @@ def generate_pdf_endpoint():
                     inicio = fin
             else:
                 # Fallback: dividir automáticamente en páginas de 18 productos
+                # Recalcular total_paginas basado en el número real de productos
+                import math
+                total_paginas_real = math.ceil(len(lineas_producto) / productos_por_pagina)
+                if total_paginas_real != total_paginas:
+                    print(f"⚠️ [PDF Generator] Ajustando total_paginas: {total_paginas} → {total_paginas_real} (basado en {len(lineas_producto)} productos)")
+                    total_paginas = total_paginas_real
+                
+                print(f"📄 [PDF Generator] Dividiendo {len(lineas_producto)} productos en {total_paginas} páginas (división automática)")
+                
                 for pagina in range(1, total_paginas + 1):
                     # Calcular el rango de productos para esta página
                     inicio = (pagina - 1) * productos_por_pagina
-                    fin = inicio + productos_por_pagina
+                    fin = min(inicio + productos_por_pagina, len(lineas_producto))  # Asegurar que no se exceda
                     productos_pagina = lineas_producto[inicio:fin]
+                    
+                    print(f"📄 [PDF Generator] Página {pagina}: productos {inicio} a {fin-1} (total: {len(productos_pagina)})")
                     
                     # Crear una copia de los datos para esta página
                     datos_pagina = ac21_data.copy()
                     datos_pagina["lineas_producto"] = productos_pagina
                     datos_pagina["pagina_actual"] = pagina
                     datos_pagina["total_paginas"] = total_paginas
+                    # Asegurar que accesorios y equipos estén vacíos si no hay datos específicos
+                    if "accesorios" not in datos_pagina or not datos_pagina.get("accesorios"):
+                        datos_pagina["accesorios"] = []
+                    if "equipos_prueba" not in datos_pagina or not datos_pagina.get("equipos_prueba"):
+                        datos_pagina["equipos_prueba"] = []
                     datos_pagina["data"] = datos_pagina
-                    
-                    print(f"📄 [PDF Generator] Generando página {pagina}: {len(productos_pagina)} productos (división automática)")
                     
                     # Renderizar esta página
                     template = template_env.get_template('ac21_pdf_template.html')
@@ -245,6 +294,11 @@ def generate_pdf_endpoint():
             # Una sola página
             ac21_data["pagina_actual"] = 1
             ac21_data["total_paginas"] = 1
+            # Asegurar que accesorios y equipos estén vacíos si no hay datos
+            if "accesorios" not in ac21_data or not ac21_data.get("accesorios"):
+                ac21_data["accesorios"] = []
+            if "equipos_prueba" not in ac21_data or not ac21_data.get("equipos_prueba"):
+                ac21_data["equipos_prueba"] = []
             template = template_env.get_template('ac21_pdf_template.html')
             html_string = template.render(ac21_data)
         else:
@@ -264,6 +318,11 @@ def generate_pdf_endpoint():
                 datos_pagina["lineas_producto"] = productos_pagina
                 datos_pagina["pagina_actual"] = pagina
                 datos_pagina["total_paginas"] = total_paginas
+                # Asegurar que accesorios y equipos estén vacíos si no hay datos específicos
+                if "accesorios" not in datos_pagina or not datos_pagina.get("accesorios"):
+                    datos_pagina["accesorios"] = []
+                if "equipos_prueba" not in datos_pagina or not datos_pagina.get("equipos_prueba"):
+                    datos_pagina["equipos_prueba"] = []
                 datos_pagina["data"] = datos_pagina
                 
                 # Renderizar esta página

@@ -60,9 +60,20 @@ class TipoProducto(models.Model):
         return self.nombre
 
 class CatalogoProducto(models.Model):
+    TIPO_CRYPTOCUSTODIO_CHOICES = [
+        ('c', 'c'),
+        ('CC', 'CC'),
+        ('Ninguno', 'Ninguno'),
+    ]
     codigo_producto = models.CharField(max_length=50, unique=True)
     descripcion = models.TextField()
     tipo = models.ForeignKey(TipoProducto, on_delete=models.CASCADE, blank=True, null=True)
+    tipo_cryptocustodio = models.CharField(
+        max_length=10,
+        choices=TIPO_CRYPTOCUSTODIO_CHOICES,
+        default='Ninguno',
+        help_text='Tipo de cryptocustodio por defecto para este producto: c, CC o Ninguno'
+    )
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="productos_creados")
     updated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="productos_actualizados")
     albaran = models.ForeignKey('Albaran', on_delete=models.CASCADE, related_name='productos', null=True, blank=True)
@@ -532,7 +543,18 @@ class LineaTemporalProducto(models.Model):
     observaciones = models.TextField(blank=True, null=True)
     procesado = models.BooleanField(default=False)
     cantidad = models.IntegerField(default=1)
-    cc = models.IntegerField(default=1)
+    cc = models.IntegerField(default=1, help_text='CC del AC21 (columna del PDF): 1, 2, 3 o vacío. Viene del OCR y NO debe modificarse.')
+    TIPO_CRYPTOCUSTODIO_CHOICES = [
+        ('c', 'c'),
+        ('CC', 'CC'),
+        ('Ninguno', 'Ninguno'),
+    ]
+    tipo_cryptocustodio = models.CharField(
+        max_length=10,
+        choices=TIPO_CRYPTOCUSTODIO_CHOICES,
+        default='Ninguno',
+        help_text='Tipo de cryptocustodio seleccionado por el usuario: c, CC o Ninguno'
+    )
     
     # Campo JSON para almacenar información adicional del AC21
     datos_adicionales = models.JSONField(
