@@ -198,7 +198,7 @@ class InventarioProductoAdmin(admin.ModelAdmin):
 
 @admin.register(LineaTemporalProducto)
 class LineaTemporalProductoAdmin(admin.ModelAdmin):
-    list_display = ('numero_albaran', 'codigo_producto', 'numero_serie', 'cantidad', 'cc', 'procesado', 'created_at')
+    list_display = ('numero_albaran', 'codigo_producto', 'numero_serie', 'cantidad', 'tipo_producto', 'procesado', 'created_at')
     list_filter = ('procesado', 'usuario', 'created_at')
     search_fields = ('numero_albaran', 'codigo_producto', 'numero_serie')
     readonly_fields = ('created_at', 'updated_at')

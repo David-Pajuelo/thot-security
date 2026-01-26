@@ -1,16 +1,24 @@
 "use client";
 
+interface TipoProducto {
+  id: number;
+  nombre: string;
+}
+
 interface Producto {
   codigo_producto: string;
   cantidad: number;
-  tipo_cryptocustodio?: string; // Tipo de cryptocustodio ('c', 'CC' o 'Ninguno') - DIFERENTE del cc del AC21
+  tipo_producto_id?: number | null;
+  tipo_producto_nombre?: string | null;
+  tipo_catalogo_id?: number | null;
+  tipo_catalogo_nombre?: string | null;
 }
 
 interface LineaTemporalTableProps {
   productos: Producto[];
-  tipos: string[];
+  tipos: TipoProducto[];
   tipoAlbaran: string;
-  onGuardarTipo: (codigoProducto: string, nuevoTipo: string) => void;
+  onGuardarTipo: (codigoProducto: string, tipoProductoId: number | null) => void;
   onTipoAlbaranChange: (tipo: string) => void;
 }
 
@@ -20,8 +28,6 @@ const TIPOS_ALBARAN = [
   { value: 'entrega_mano', label: 'Entrega en mano (AC21)' }
 ];
 
-// Ya no necesitamos mapear, el valor viene directamente como texto
-
 export default function LineaTemporalTable({ 
   productos, 
   tipos, 
@@ -29,9 +35,6 @@ export default function LineaTemporalTable({
   onGuardarTipo,
   onTipoAlbaranChange
 }: LineaTemporalTableProps) {
-  // Tipos de cryptocustodio disponibles
-  const tiposCryptocustodio = ['c', 'CC', 'Ninguno'];
-
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse border border-gray-300">
@@ -50,18 +53,24 @@ export default function LineaTemporalTable({
               <td className="border p-2 text-center">
                 <select
                   className="border p-2 w-full"
-                  value={producto.tipo_cryptocustodio || 'Ninguno'}
+                  value={producto.tipo_producto_id || ''}
                   onChange={(e) => {
-                    // El valor viene directamente como 'c', 'CC' o 'Ninguno'
-                    onGuardarTipo(producto.codigo_producto, e.target.value);
+                    const tipoProductoId = e.target.value ? parseInt(e.target.value, 10) : null;
+                    onGuardarTipo(producto.codigo_producto, tipoProductoId);
                   }}
                 >
-                  {tiposCryptocustodio.map((tipo) => (
-                    <option key={tipo} value={tipo}>
-                      {tipo}
+                  <option value="">-- Seleccionar --</option>
+                  {tipos.map((tipo) => (
+                    <option key={tipo.id} value={tipo.id}>
+                      {tipo.nombre}
                     </option>
                   ))}
                 </select>
+                {producto.tipo_catalogo_id && !producto.tipo_producto_id && (
+                  <span className="text-xs text-gray-500 block mt-1">
+                    (Cargado automáticamente desde catálogo)
+                  </span>
+                )}
               </td>
             </tr>
           ))}

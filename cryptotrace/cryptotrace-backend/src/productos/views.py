@@ -533,37 +533,13 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                     for articulo in articulos:
                         # Mapear observaciones del OCR a descripcion en BD
                         observaciones_ocr = articulo.get('observaciones') or articulo.get('descripcion', '')
-                        # Extraer CC del artículo (puede venir del OCR o ser None)
-                        cc_articulo = articulo.get('cc')
-                        if cc_articulo is None or cc_articulo == '':
-                            cc_articulo = 1  # Valor por defecto
-                        else:
-                            try:
-                                cc_articulo = int(float(str(cc_articulo)))
-                            except (ValueError, TypeError):
-                                cc_articulo = 1
-                        
-                        codigo_producto_articulo = articulo.get('codigo_producto') or articulo.get('codigo', '') or 'SIN_CODIGO'
-                        
-                        # Buscar el tipo_cryptocustodio en el catálogo (si el producto ya existe)
-                        tipo_cryptocustodio_inicial = 'Ninguno'  # Por defecto
-                        try:
-                            producto_catalogo = CatalogoProducto.objects.get(codigo_producto=codigo_producto_articulo)
-                            if producto_catalogo.tipo_cryptocustodio and producto_catalogo.tipo_cryptocustodio != 'Ninguno':
-                                tipo_cryptocustodio_inicial = producto_catalogo.tipo_cryptocustodio
-                        except CatalogoProducto.DoesNotExist:
-                            # Si no existe en el catálogo, usar 'Ninguno' por defecto
-                            pass
-                        
                         LineaTemporalProducto.objects.create(
                             usuario=self.request.user,
                             numero_albaran=albaran.numero,
-                            codigo_producto=codigo_producto_articulo,
+                            codigo_producto=articulo.get('codigo_producto') or articulo.get('codigo', '') or 'SIN_CODIGO',
                             descripcion=observaciones_ocr,  # Mapeado desde observaciones del OCR
                             numero_serie=articulo.get('numero_serie_inicio') or articulo.get('numero_serie_fin', ''),
-                            observaciones='',  # Campo observaciones en BD queda vacío
-                            cc=cc_articulo,  # CC del AC21 (columna del PDF) - viene del OCR, NO modificar
-                            tipo_cryptocustodio=tipo_cryptocustodio_inicial  # Buscar en catálogo, si no existe usar 'Ninguno'
+                            observaciones=''  # Campo observaciones en BD queda vacío
                         )
                 elif (albaran.tipo_documento in ['TRANSFERENCIA', 'RECIBO_MANO', 'DESTRUCCION', 'OTRO'] 
                       and albaran.direccion_transferencia == 'SALIDA'):
@@ -1408,28 +1384,15 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                         except (ValueError, TypeError):
                             cantidad = 1
                         
-                        codigo_producto_articulo = articulo.get('codigo') or articulo.get('codigo_producto', '')
-                        
-                        # Buscar el tipo_cryptocustodio en el catálogo (si el producto ya existe)
-                        tipo_cryptocustodio_inicial = 'Ninguno'  # Por defecto
-                        try:
-                            producto_catalogo = CatalogoProducto.objects.get(codigo_producto=codigo_producto_articulo)
-                            if producto_catalogo.tipo_cryptocustodio and producto_catalogo.tipo_cryptocustodio != 'Ninguno':
-                                tipo_cryptocustodio_inicial = producto_catalogo.tipo_cryptocustodio
-                        except CatalogoProducto.DoesNotExist:
-                            # Si no existe en el catálogo, usar 'Ninguno' por defecto
-                            pass
-                        
                         LineaTemporalProducto.objects.create(
                             usuario=request.user,
                             numero_albaran=nueva_pagina.numero,
-                            codigo_producto=codigo_producto_articulo,
+                            codigo_producto=articulo.get('codigo') or articulo.get('codigo_producto', ''),
                             descripcion=articulo.get('descripcion', ''),
                             numero_serie=articulo.get('numero_serie_inicio') or articulo.get('numero_serie_fin', '') or articulo.get('numero_serie', ''),
                             observaciones=articulo.get('observaciones', ''),
                             cantidad=cantidad,
-                            cc=cc,  # CC del AC21 (columna del PDF) - viene del OCR, NO modificar
-                            tipo_cryptocustodio=tipo_cryptocustodio_inicial,  # Buscar en catálogo, si no existe usar 'Ninguno'
+                            cc=cc,
                             datos_adicionales=datos_adicionales
                         )
                 
@@ -1816,17 +1779,7 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             if not codigo_producto:
                 codigo_producto = descripcion if descripcion else 'SIN_CODIGO'
             
-            # Buscar el tipo_cryptocustodio en el catálogo (si el producto ya existe)
-            tipo_cryptocustodio_inicial = 'Ninguno'  # Por defecto
-            try:
-                producto_catalogo = CatalogoProducto.objects.get(codigo_producto=codigo_producto)
-                if producto_catalogo.tipo_cryptocustodio and producto_catalogo.tipo_cryptocustodio != 'Ninguno':
-                    tipo_cryptocustodio_inicial = producto_catalogo.tipo_cryptocustodio
-            except CatalogoProducto.DoesNotExist:
-                # Si no existe en el catálogo, usar 'Ninguno' por defecto
-                pass
-            
-            print(f"📦 [BACKEND] Artículo procesado - código: '{codigo_producto}', descripción (de observaciones): '{descripcion}', cantidad: {cantidad}, número_serie: '{numero_serie}', tipo_cryptocustodio: '{tipo_cryptocustodio_inicial}'")
+            print(f"📦 [BACKEND] Artículo procesado - código: '{codigo_producto}', descripción (de observaciones): '{descripcion}', cantidad: {cantidad}, número_serie: '{numero_serie}'")
             
             registro = LineaTemporalProducto.objects.create(
                 usuario=request.user,
@@ -1836,8 +1789,8 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 numero_serie=numero_serie,
                 cantidad=cantidad,  # Usar cantidad validada
                 observaciones='',  # Campo observaciones en BD queda vacío (la info está en descripcion)
-                cc=cc,  # CC del AC21 (columna del PDF) - viene del OCR, NO modificar
-                tipo_cryptocustodio=tipo_cryptocustodio_inicial,  # Buscar en catálogo, si no existe usar 'Ninguno'
+                # tipo_producto se deja como null por defecto (se asignará en el modal)
+                # cc del OCR se guarda en datos_adicionales['cc']
                 datos_adicionales=datos_adicionales
             )
             registros_creados.append(registro)
@@ -1907,16 +1860,16 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             codigo_producto=OuterRef("codigo_producto")
         ).values("descripcion")[:1]
 
-        # 🔹 Obtener el tipo de `Producto`
-        tipo_subquery = CatalogoProducto.objects.filter(
+        # 🔹 Obtener el tipo de `CatalogoProducto` (para carga automática)
+        tipo_catalogo_subquery = CatalogoProducto.objects.filter(
+            codigo_producto=OuterRef("codigo_producto"),
+            tipo__isnull=False
+        ).values("tipo__id")[:1]
+        
+        tipo_catalogo_nombre_subquery = CatalogoProducto.objects.filter(
             codigo_producto=OuterRef("codigo_producto"),
             tipo__isnull=False
         ).values("tipo__nombre")[:1]
-        
-        # 🔹 Obtener el tipo_cryptocustodio del catálogo (si existe)
-        tipo_cryptocustodio_subquery = CatalogoProducto.objects.filter(
-            codigo_producto=OuterRef("codigo_producto")
-        ).values("tipo_cryptocustodio")[:1]
 
         # Filtrar solo productos no procesados del usuario actual
         queryset_filtrado = self.get_queryset().filter(
@@ -1924,32 +1877,35 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             procesado=False
         )
         
-        # Agrupar solo por codigo_producto y cc
+        # Agrupar por codigo_producto y tipo_producto (puede ser null)
         from django.db.models import Q
         
         productos_agrupados = (
             queryset_filtrado
-            .values("codigo_producto", "cc")
+            .values("codigo_producto", "tipo_producto")
             .annotate(
                 cantidad=Count("id"),  # Contar registros, no sumar cantidades (cada registro = 1 unidad)
                 tipificado=Exists(CatalogoProducto.objects.filter(
                     codigo_producto=OuterRef("codigo_producto"), tipo__isnull=False
                 )),
                 descripcion=Subquery(descripcion_subquery),
-                tipo=Coalesce(Subquery(tipo_subquery), None)  # Evita valores nulos
+                tipo_catalogo_id=Coalesce(Subquery(tipo_catalogo_subquery), None),  # ID del tipo desde CatalogoProducto
+                tipo_catalogo_nombre=Coalesce(Subquery(tipo_catalogo_nombre_subquery), None)  # Nombre del tipo desde CatalogoProducto
             )
-            .order_by("codigo_producto", "cc")
+            .order_by("codigo_producto", "tipo_producto")
         )
         
         # Enriquecer con información de números de serie y concatenar observaciones desde datos_adicionales
         productos_enriquecidos = []
         for producto in productos_agrupados:
-            # Obtener todos los registros que coinciden con este grupo (codigo_producto + cc)
+            # Obtener todos los registros que coinciden con este grupo (codigo_producto + tipo_producto)
             # Ordenar por created_at para mantener el orden original del documento
-            registros = queryset_filtrado.filter(
-                codigo_producto=producto['codigo_producto'],
-                cc=producto['cc']
-            ).order_by('created_at')  # Ordenar por fecha de creación para mantener orden original
+            filtro = {'codigo_producto': producto['codigo_producto']}
+            if producto['tipo_producto'] is not None:
+                filtro['tipo_producto'] = producto['tipo_producto']
+            else:
+                filtro['tipo_producto__isnull'] = True
+            registros = queryset_filtrado.filter(**filtro).order_by('created_at')  # Ordenar por fecha de creación para mantener orden original
             
             # Recopilar descripciones (observaciones) y números de serie en el mismo orden
             descripciones_ordenadas = []  # Lista para mantener el orden
@@ -2016,43 +1972,40 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 if ultimos_fins:
                     numero_serie_fin = max(ultimos_fins)  # Último número de serie (máximo)
             
-            # Obtener el tipo_cryptocustodio:
-            # 1. Primero intentar obtenerlo del catálogo (si el producto ya tiene uno asignado)
-            # 2. Si no existe en el catálogo, usar el del primer registro de la línea temporal
-            # 3. Si no hay registros, usar 'Ninguno' por defecto
-            try:
-                producto_catalogo = CatalogoProducto.objects.get(codigo_producto=producto['codigo_producto'])
-                tipo_cryptocustodio_catalogo = producto_catalogo.tipo_cryptocustodio
-                # Si el catálogo tiene un valor diferente de 'Ninguno', usarlo
-                if tipo_cryptocustodio_catalogo and tipo_cryptocustodio_catalogo != 'Ninguno':
-                    tipo_cryptocustodio = tipo_cryptocustodio_catalogo
-                    # Actualizar todas las líneas temporales de este grupo con el valor del catálogo
-                    registros.update(tipo_cryptocustodio=tipo_cryptocustodio_catalogo)
-                else:
-                    # Si el catálogo tiene 'Ninguno' o no tiene valor, usar el de la línea temporal
-                    tipo_cryptocustodio = registros.first().tipo_cryptocustodio if registros.exists() else 'Ninguno'
-            except CatalogoProducto.DoesNotExist:
-                # Si el producto no existe en el catálogo, usar el valor de la línea temporal
-                tipo_cryptocustodio = registros.first().tipo_cryptocustodio if registros.exists() else 'Ninguno'
+            # Incluir observaciones concatenadas y tipo_producto en la respuesta
+            # Si tipo_producto es null pero hay tipo_catalogo_id, usar ese para carga automática
+            tipo_producto_id = producto['tipo_producto']
+            tipo_producto_nombre = None
+            if tipo_producto_id:
+                try:
+                    tipo_obj = TipoProducto.objects.get(id=tipo_producto_id)
+                    tipo_producto_nombre = tipo_obj.nombre
+                except TipoProducto.DoesNotExist:
+                    pass
+            elif producto.get('tipo_catalogo_id'):
+                # Si no hay tipo_producto pero hay tipo en CatalogoProducto, usar ese para carga automática
+                tipo_producto_id = producto['tipo_catalogo_id']
+                tipo_producto_nombre = producto.get('tipo_catalogo_nombre')
             
-            # Incluir observaciones concatenadas, cc (del AC21) y tipo_cryptocustodio en la respuesta
             productos_enriquecidos.append({
                 **producto,
                 'observaciones': descripcion_final,  # Descripciones concatenadas si son diferentes
                 'descripcion': descripcion_final,  # También en descripcion para compatibilidad
-                'cc': producto['cc'],  # CC del AC21 (columna del PDF) - NO modificar
-                'tipo_cryptocustodio': tipo_cryptocustodio,  # Tipo seleccionado por el usuario ('c', 'CC' o 'Ninguno')
+                'tipo_producto_id': tipo_producto_id,  # ID del TipoProducto asignado (o desde CatalogoProducto si es null)
+                'tipo_producto_nombre': tipo_producto_nombre,  # Nombre del TipoProducto
+                'tipo_catalogo_id': producto.get('tipo_catalogo_id'),  # ID del tipo desde CatalogoProducto (para carga automática)
+                'tipo_catalogo_nombre': producto.get('tipo_catalogo_nombre'),  # Nombre del tipo desde CatalogoProducto
                 'numero_serie_inicio': numero_serie_inicio,
                 'numero_serie_fin': numero_serie_fin,
                 'rango_serie': rango_serie  # Todos los rangos concatenados
             })
 
-        # 🔹 Obtener todos los tipos de producto disponibles
-        tipos_disponibles = TipoProducto.objects.values_list("nombre", flat=True)
+        # 🔹 Obtener todos los tipos de producto disponibles con su ID
+        tipos_disponibles = TipoProducto.objects.all().values('id', 'nombre')
 
         return Response({
             "productos": productos_enriquecidos,
-            "tipos_disponibles": list(tipos_disponibles)
+            "tipos_disponibles": list(tipos_disponibles)  # Lista de {id, nombre}
         }, status=status.HTTP_200_OK)
     
 
@@ -2083,50 +2036,42 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
 
         return Response({"message": "Tipo asignado correctamente", "created": created}, status=status.HTTP_200_OK)
 
-    @action(detail=False, methods=["post"], url_path="actualizar-tipo-cryptocustodio", permission_classes=[IsAuthenticated])
-    def actualizar_tipo_cryptocustodio(self, request):
+    @action(detail=False, methods=["post"], url_path="actualizar-cc", permission_classes=[IsAuthenticated])
+    def actualizar_cc(self, request):
         """
-        Actualiza el campo tipo_cryptocustodio de todas las líneas temporales
+        Actualiza el campo tipo_producto (tipo de cryptocustodio) de todas las líneas temporales
         no procesadas del usuario actual que tengan el mismo codigo_producto.
-        
-        IMPORTANTE: Este campo es diferente del campo 'cc' que viene del AC21 (columna del PDF).
-        - cc: Viene del OCR del AC21 (columna 12), puede ser 1, 2, 3 o vacío. NO debe modificarse.
-        - tipo_cryptocustodio: Lo selecciona el usuario en el dropdown ('c', 'CC' o 'Ninguno')
+        También actualiza el CatalogoProducto asociado si existe.
+        tipo_producto_id: ID del TipoProducto (ForeignKey)
         """
         codigo_producto = request.data.get("codigo_producto")
-        tipo_cryptocustodio = request.data.get("tipo_cryptocustodio")
+        tipo_producto_id = request.data.get("tipo_producto_id")
 
         if not codigo_producto:
             return Response({"error": "Código de producto es obligatorio"}, status=status.HTTP_400_BAD_REQUEST)
         
-        if tipo_cryptocustodio is None:
-            return Response({"error": "El campo tipo_cryptocustodio es obligatorio"}, status=status.HTTP_400_BAD_REQUEST)
+        if tipo_producto_id is None:
+            return Response({"error": "El campo tipo_producto_id es obligatorio"}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Validar que tipo_cryptocustodio sea 'c', 'CC' o 'Ninguno'
-        if tipo_cryptocustodio not in ['c', 'CC', 'Ninguno']:
-            return Response({"error": "El campo tipo_cryptocustodio debe ser 'c', 'CC' o 'Ninguno'"}, status=status.HTTP_400_BAD_REQUEST)
+        # Obtener el TipoProducto
+        try:
+            tipo_producto = TipoProducto.objects.get(id=tipo_producto_id)
+        except TipoProducto.DoesNotExist:
+            return Response({"error": f"TipoProducto con ID {tipo_producto_id} no existe"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Actualizar todas las líneas temporales no procesadas del usuario con este codigo_producto
-        # IMPORTANTE: Actualizamos tipo_cryptocustodio, NO el campo cc (que viene del AC21)
         lineas_actualizadas = LineaTemporalProducto.objects.filter(
             usuario=request.user,
             codigo_producto=codigo_producto,
             procesado=False
-        ).update(tipo_cryptocustodio=tipo_cryptocustodio)
-        
-        # También actualizar el tipo_cryptocustodio en el catálogo para futuras referencias
-        # Si el producto no existe en el catálogo, crearlo con el tipo_cryptocustodio
-        try:
-            producto_catalogo = CatalogoProducto.objects.get(codigo_producto=codigo_producto)
-            producto_catalogo.tipo_cryptocustodio = tipo_cryptocustodio
-            producto_catalogo.save(update_fields=['tipo_cryptocustodio'])
-        except CatalogoProducto.DoesNotExist:
-            # Si no existe en el catálogo, crearlo con el tipo_cryptocustodio
-            CatalogoProducto.objects.create(
-                codigo_producto=codigo_producto,
-                descripcion=f"Producto {codigo_producto}",
-                tipo_cryptocustodio=tipo_cryptocustodio
-            )
+        ).update(tipo_producto=tipo_producto)
+
+        # Actualizar también el CatalogoProducto si existe
+        producto_catalogo = CatalogoProducto.objects.filter(codigo_producto=codigo_producto).first()
+        if producto_catalogo:
+            producto_catalogo.tipo = tipo_producto
+            producto_catalogo.save()
+            print(f"✅ [BACKEND] CatalogoProducto {codigo_producto} actualizado con tipo {tipo_producto.nombre}")
 
         return Response({
             "message": f"Tipo de cryptocustodio actualizado correctamente",
@@ -2467,6 +2412,12 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                     if not producto:
                         print(f"⚠️ [BACKEND] Producto con código {p.codigo_producto} no encontrado. Se omite movimiento.")
                         continue
+                    
+                    # Actualizar CatalogoProducto.tipo con el tipo_producto de LineaTemporalProducto si existe
+                    if p.tipo_producto:
+                        producto.tipo = p.tipo_producto
+                        producto.save()
+                        print(f"✅ [BACKEND] CatalogoProducto {p.codigo_producto} actualizado con tipo {p.tipo_producto.nombre}")
                         
                     existe = MovimientoProducto.objects.filter(
                         albaran=albaran,
@@ -2482,6 +2433,10 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                     if len(tipo_movimiento_normalizado) > 20:
                         tipo_movimiento_normalizado = tipo_movimiento_normalizado[:20]
                     
+                    # Obtener cc desde datos_adicionales (del OCR del AC21)
+                    datos_add = getattr(p, 'datos_adicionales', {}) or {}
+                    cc_del_ocr = datos_add.get('cc', 1)  # Valor por defecto 1 si no existe
+                    
                     MovimientoProducto.objects.create(
                         albaran=albaran,
                         producto=producto,
@@ -2489,11 +2444,11 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                         descripcion=producto.descripcion,
                         tipo_movimiento=tipo_movimiento_normalizado,
                         cantidad=getattr(p, 'cantidad', 1),
-                        cc=getattr(p, 'cc', 1),
+                        cc=cc_del_ocr,  # Usar cc del OCR desde datos_adicionales
                         observaciones=getattr(p, 'observaciones', '')
                     )
                     movimientos_creados += 1
-                    print(f"✅ [BACKEND] Movimiento creado para producto {producto.codigo_producto}")
+                    print(f"✅ [BACKEND] Movimiento creado para producto {producto.codigo_producto} con cc={cc_del_ocr}")
                 
                 print(f"🎉 [BACKEND] {movimientos_creados} movimientos creados")
                 

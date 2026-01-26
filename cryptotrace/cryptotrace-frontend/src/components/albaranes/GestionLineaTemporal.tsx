@@ -7,10 +7,18 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import LineaTemporalTable from "./LineaTemporalTable";
 
+interface TipoProducto {
+  id: number;
+  nombre: string;
+}
+
 interface Producto {
   codigo_producto: string;
   cantidad: number;
-  tipo_cryptocustodio?: string; // Tipo de cryptocustodio ('c', 'CC' o 'Ninguno') - DIFERENTE del cc del AC21
+  tipo_producto_id?: number | null; // ID del TipoProducto asignado
+  tipo_producto_nombre?: string | null; // Nombre del TipoProducto asignado
+  tipo_catalogo_id?: number | null; // ID del tipo desde CatalogoProducto (para carga automática)
+  tipo_catalogo_nombre?: string | null; // Nombre del tipo desde CatalogoProducto
 }
 
 interface GestionLineaTemporalProps {
@@ -19,7 +27,7 @@ interface GestionLineaTemporalProps {
 
 export default function GestionLineaTemporal({ onClose }: GestionLineaTemporalProps = {}) {
   const [productos, setProductos] = useState<Producto[]>([]);
-  const [tipos, setTipos] = useState<string[]>([]);
+  const [tipos, setTipos] = useState<TipoProducto[]>([]);
   const [tipoAlbaran, setTipoAlbaran] = useState<string>('inventario');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,11 +38,35 @@ export default function GestionLineaTemporal({ onClose }: GestionLineaTemporalPr
     try {
       setLoading(true);
       const response = await fetchProductosAgrupados();
-      setProductos(response.productos.map((prod: any) => ({
-        codigo_producto: prod.codigo_producto,
-        cantidad: prod.cantidad ?? 1,
-        tipo_cryptocustodio: prod.tipo_cryptocustodio ?? 'Ninguno' // Por defecto 'Ninguno'
-      })));
+      
+      // Buscar el tipo "NINGUNO" para usarlo como valor por defecto
+      const tipoNinguno = response.tipos_disponibles.find((t: TipoProducto) => t.nombre === 'NINGUNO');
+      const tipoNingunoId = tipoNinguno?.id || null;
+      
+      setProductos(response.productos.map((prod: any) => {
+        // Si hay tipo_producto_id, usarlo; si no, usar tipo_catalogo_id; si no, usar NINGUNO
+        let tipoProductoId = prod.tipo_producto_id;
+        let tipoProductoNombre = prod.tipo_producto_nombre;
+        
+        if (!tipoProductoId && prod.tipo_catalogo_id) {
+          // Carga automática desde CatalogoProducto
+          tipoProductoId = prod.tipo_catalogo_id;
+          tipoProductoNombre = prod.tipo_catalogo_nombre;
+        } else if (!tipoProductoId) {
+          // Valor por defecto: NINGUNO
+          tipoProductoId = tipoNingunoId;
+          tipoProductoNombre = tipoNinguno?.nombre || null;
+        }
+        
+        return {
+          codigo_producto: prod.codigo_producto,
+          cantidad: prod.cantidad ?? 1,
+          tipo_producto_id: tipoProductoId,
+          tipo_producto_nombre: tipoProductoNombre,
+          tipo_catalogo_id: prod.tipo_catalogo_id,
+          tipo_catalogo_nombre: prod.tipo_catalogo_nombre
+        };
+      }));
       setTipos(response.tipos_disponibles);
     } catch (error) {
       console.error("❌ Error cargando productos:", error);
@@ -60,15 +92,28 @@ export default function GestionLineaTemporal({ onClose }: GestionLineaTemporalPr
     };
   }, []);
 
-  const handleGuardarTipo = async (codigoProducto: string, nuevoTipoCryptocustodio: string) => {
+  const handleGuardarTipo = async (codigoProducto: string, tipoProductoId: number | null) => {
     try {
-      // nuevoTipoCryptocustodio viene directamente como 'c', 'CC' o 'Ninguno' desde el select
-      await guardarTipoCryptocustodio(codigoProducto, nuevoTipoCryptocustodio);
+      if (!tipoProductoId) {
+        setMensaje("❌ Debe seleccionar un tipo de cryptocustodio");
+        setTimeout(() => setMensaje(null), 3000);
+        return;
+      }
+      
+      await guardarTipoCryptocustodio(codigoProducto, tipoProductoId);
       setMensaje("✅ Tipo de cryptocustodio asignado correctamente");
 
+      // Actualizar el producto con el nuevo tipo
+      const tipoSeleccionado = tipos.find(t => t.id === tipoProductoId);
       setProductos((prevProductos) =>
         prevProductos.map((prod) =>
-          prod.codigo_producto === codigoProducto ? { ...prod, tipo_cryptocustodio: nuevoTipoCryptocustodio } : prod
+          prod.codigo_producto === codigoProducto 
+            ? { 
+                ...prod, 
+                tipo_producto_id: tipoProductoId,
+                tipo_producto_nombre: tipoSeleccionado?.nombre || null
+              } 
+            : prod
         )
       );
 
@@ -79,8 +124,6 @@ export default function GestionLineaTemporal({ onClose }: GestionLineaTemporalPr
       setTimeout(() => setMensaje(null), 3000);
     }
   };
-
-  const todosTipificados = productos.every((prod) => prod.tipo);
 
   const handleProcesarAlbaran = async () => {
     // Verificar que hay productos para procesar
@@ -96,8 +139,15 @@ export default function GestionLineaTemporal({ onClose }: GestionLineaTemporalPr
 
     try {
       // El backend procesa todos los productos temporales del mismo documento (numero_albaran)
+      console.log('🔄 [FRONTEND] Iniciando procesamiento de albarán...');
       const result = await procesarAlbaran();
-      setMensaje('✅ Albarán procesado correctamente');
+      console.log('✅ [FRONTEND] Respuesta del backend:', result);
+      
+      if (result && result.albaran_id) {
+        setMensaje(`✅ Albarán procesado correctamente (ID: ${result.albaran_id}, Número: ${result.albaran_numero || 'N/A'})`);
+      } else {
+        setMensaje('✅ Albarán procesado correctamente');
+      }
       
       // Recargar productos para reflejar los cambios (aunque luego se redirija)
       await cargarProductos();
