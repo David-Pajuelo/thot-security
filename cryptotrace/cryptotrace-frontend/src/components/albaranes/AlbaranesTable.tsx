@@ -71,14 +71,14 @@ export default function AlbaranesTable({ filterType = 'ALL' }: AlbaranesTablePro
 
     // 1. Filtrar por tipo de página (ENTRADA/SALIDA/ALL)
     if (filterType === 'ENTRADA') {
-      // Para ENTRADA: mostrar TODOS los albaranes de entrada (albaranes normales + AC21s de entrada)
+      // Para ENTRADA: mostrar TODOS los albaranes de entrada
       filtered = filtered.filter(alb => {
-        // AC21s de entrada
-        if (alb.empresa_origen && alb.empresa_destino && alb.direccion_transferencia === 'ENTRADA') {
+        // AC21s de entrada (con direccion_transferencia='ENTRADA', independientemente de si tienen empresas)
+        if (alb.direccion_transferencia === 'ENTRADA') {
           return true;
         }
-        // Albaranes normales (que no son AC21s pero son entradas)
-        if (!alb.empresa_origen && !alb.empresa_destino) {
+        // Albaranes normales (que no son AC21s - sin direccion_transferencia y sin empresas)
+        if (!alb.direccion_transferencia && !alb.empresa_origen && !alb.empresa_destino) {
           return true;
         }
         return false;
@@ -94,9 +94,11 @@ export default function AlbaranesTable({ filterType = 'ALL' }: AlbaranesTablePro
     // 2. Filtrar por tipo de documento (AC21 vs Albarán normal) - Solo aplicar si NO es página de salida
     if (filterType !== 'SALIDA') {
       if (typeFilter === 'AC21') {
-        filtered = filtered.filter(alb => alb.empresa_origen && alb.empresa_destino);
+        // AC21 es cualquier albarán con direccion_transferencia (ENTRADA o SALIDA)
+        filtered = filtered.filter(alb => alb.direccion_transferencia);
       } else if (typeFilter === 'ALBARAN') {
-        filtered = filtered.filter(alb => !alb.empresa_origen && !alb.empresa_destino);
+        // Albarán normal es el que NO tiene direccion_transferencia
+        filtered = filtered.filter(alb => !alb.direccion_transferencia);
       }
     }
 
@@ -266,7 +268,7 @@ export default function AlbaranesTable({ filterType = 'ALL' }: AlbaranesTablePro
                 <td className="border p-3">{alb.numero}</td>
                 <td className="border p-3 text-center">{new Date(alb.fecha).toLocaleString('es-ES')}</td>
                 <td className="border p-3 text-center">
-                  {alb.empresa_origen && alb.empresa_destino ? (
+                  {alb.direccion_transferencia ? (
                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                       AC21 {alb.direccion_transferencia === 'ENTRADA' ? 'Entrada' : 'Salida'}
                     </span>
@@ -295,7 +297,7 @@ export default function AlbaranesTable({ filterType = 'ALL' }: AlbaranesTablePro
                 </td>
                 <td className="border p-3 text-right">
                   <div className="flex justify-end gap-px max-w-lg ml-auto">
-                    {(alb.empresa_origen && alb.empresa_destino && alb.direccion_transferencia === 'ENTRADA') && (
+                    {alb.direccion_transferencia === 'ENTRADA' && (
                       <Link href={`/albaranes/crear-ac21-salida/nuevo?from=${alb.id}`}>
                         <Button 
                           variant="outline"
@@ -327,7 +329,7 @@ export default function AlbaranesTable({ filterType = 'ALL' }: AlbaranesTablePro
                         </Link>
                       </>
                     )}
-                    {(alb.empresa_origen && alb.empresa_destino && alb.direccion_transferencia === 'ENTRADA') && (
+                    {alb.direccion_transferencia === 'ENTRADA' && (
                       <Link href={`/albaranes/${alb.id}?edit=true`}>
                         <Button 
                           variant="outline"

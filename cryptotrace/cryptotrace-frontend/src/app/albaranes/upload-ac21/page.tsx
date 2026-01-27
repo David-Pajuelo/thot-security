@@ -1424,25 +1424,22 @@ function UploadAC21PageContent() {
     try {
       setIsUploading(true);
 
-      // 1. Verificar si existe un documento con el mismo número de registro
-      const numeroRegistro = processedData.cabecera?.numero_registro_entrada || processedData.cabecera?.numero_registro_salida;
+      // 1. VALIDACIÓN CRÍTICA: Verificar que al menos uno de los números de registro esté presente
+      const numeroRegistroSalida = processedData.cabecera?.numero_registro_salida;
+      const numeroRegistroEntrada = processedData.cabecera?.numero_registro_entrada;
+      const tieneNumeroRegistroSalida = numeroRegistroSalida && numeroRegistroSalida.trim() !== '';
+      const tieneNumeroRegistroEntrada = numeroRegistroEntrada && numeroRegistroEntrada.trim() !== '';
       
-      if (numeroRegistro) {
-        console.log('🔍 [AC21] Verificando documento existente con número:', numeroRegistro);
-        const verificacion = await verificarDocumentoExistente(numeroRegistro);
-        
-        // Verificar que verificacion no sea null y tenga la propiedad existe
-        if (verificacion && verificacion.existe && verificacion.documento) {
-          console.log('📄 [AC21] Documento existente encontrado:', verificacion.documento);
-          setDocumentoExistente(verificacion.documento);
-          setNumeroRegistroDetectado(numeroRegistro);
-          setShowDocumentoExistenteModal(true);
-          setIsUploading(false);
-          return; // Detener el proceso para mostrar el modal
-        }
+      if (!tieneNumeroRegistroSalida && !tieneNumeroRegistroEntrada) {
+        toast.error(
+          "Debes introducir al menos un número de registro: 'Número de Registro de Salida' o 'Número de Registro de Entrada' en la cabecera del documento.",
+          { duration: 7000 }
+        );
+        setIsUploading(false);
+        return; // Cancelar todo el proceso
       }
 
-      // 2. Verificar si es un AC21 de ENTRADA que requiere tipificación
+      // 2. Verificar si es un AC21 de ENTRADA que requiere tipificación (ANTES de verificar documento existente)
       const tipoDocumento = (() => {
         const tipo = processedData.cabecera?.tipo_transaccion;
         if (!tipo) return '';
@@ -1462,8 +1459,7 @@ function UploadAC21PageContent() {
       
       if (esAC21Entrada) {
         // Validar que el número de registro de salida esté rellenado ANTES de abrir el modal
-        const numeroRegistroSalida = processedData.cabecera?.numero_registro_salida;
-        if (!numeroRegistroSalida || numeroRegistroSalida.trim() === '') {
+        if (!tieneNumeroRegistroSalida) {
           toast.error("Para continuar, debes rellenar el campo 'Número de Registro de Salida' en la cabecera del documento.", { duration: 6000 });
           setIsUploading(false);
           return; // No abrir el modal, mostrar error
@@ -1475,7 +1471,25 @@ function UploadAC21PageContent() {
         return; // Detener el proceso para mostrar el modal
       }
 
-      // Si no es AC21 de ENTRADA, continuar con el flujo normal
+      // 3. Verificar si existe un documento con el mismo número de registro (DESPUÉS de detectar AC21 de ENTRADA)
+      const numeroRegistro = numeroRegistroEntrada || numeroRegistroSalida;
+      
+      if (numeroRegistro) {
+        console.log('🔍 [AC21] Verificando documento existente con número:', numeroRegistro);
+        const verificacion = await verificarDocumentoExistente(numeroRegistro);
+        
+        // Verificar que verificacion no sea null y tenga la propiedad existe
+        if (verificacion && verificacion.existe && verificacion.documento) {
+          console.log('📄 [AC21] Documento existente encontrado:', verificacion.documento);
+          setDocumentoExistente(verificacion.documento);
+          setNumeroRegistroDetectado(numeroRegistro);
+          setShowDocumentoExistenteModal(true);
+          setIsUploading(false);
+          return; // Detener el proceso para mostrar el modal
+        }
+      }
+
+      // Si no es AC21 de ENTRADA y no hay documento existente, continuar con el flujo normal
       await handleConfirmContinuado();
       
     } catch (error: any) {

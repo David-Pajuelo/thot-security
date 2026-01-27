@@ -91,7 +91,13 @@ export const apiFetch = async (
     const error = new Error(errorMessage);
     (error as any).status = response.status;
     (error as any).data = errorData || {};
-    console.error('❌ API Error:', { status: response.status, errorData, errorMessage, endpoint });
+    // Log error with endpoint information
+    console.error('❌ API Error:', { 
+      status: response.status, 
+      errorData, 
+      errorMessage, 
+      endpoint: endpoint || 'unknown'
+    });
     throw error;
   }
 
