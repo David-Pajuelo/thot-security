@@ -2409,9 +2409,19 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                     print(f"📦 [BACKEND] Procesando producto temporal ID={p.id}, código={p.codigo_producto}")
                     
                     producto = CatalogoProducto.objects.filter(codigo_producto=p.codigo_producto).first()
+                    print(f"🔍 [BACKEND] Búsqueda de producto: código={p.codigo_producto}, encontrado={producto is not None}, producto_id={producto.id if producto else 'N/A'}")
                     if not producto:
-                        print(f"⚠️ [BACKEND] Producto con código {p.codigo_producto} no encontrado. Se omite movimiento.")
-                        continue
+                        # Crear el producto automáticamente si no existe
+                        print(f"➕ [BACKEND] Producto con código {p.codigo_producto} no encontrado. Creando nuevo producto en catálogo...")
+                        descripcion = getattr(p, 'descripcion', '') or getattr(p, 'observaciones', '') or ''
+                        producto, created = CatalogoProducto.objects.get_or_create(
+                            codigo_producto=p.codigo_producto,
+                            defaults={'descripcion': descripcion}
+                        )
+                        if created:
+                            print(f"✅ [BACKEND] Producto creado: ID={producto.id}, código={producto.codigo_producto}")
+                        else:
+                            print(f"✅ [BACKEND] Producto encontrado después de creación: ID={producto.id}")
                     
                     # Actualizar CatalogoProducto.tipo con el tipo_producto de LineaTemporalProducto si existe
                     if p.tipo_producto:
@@ -2424,12 +2434,16 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                         producto=producto,
                         numero_serie=p.numero_serie
                     ).exists()
+                    print(f"🔍 [BACKEND] Verificación duplicado: albaran_id={albaran.id}, producto_id={producto.id}, serie={p.numero_serie}, existe={existe}")
                     if existe:
                         print(f"⚠️ [BACKEND] Movimiento duplicado para producto {producto.id}, serie {p.numero_serie}, albarán {albaran.id}. Se omite.")
                         continue
                     
+                    print(f"✅ [BACKEND] Producto encontrado y sin duplicados. Continuando con creación de movimiento...")
+                    
                     # Normalizar tipo_movimiento igual que tipo_documento
                     tipo_movimiento_normalizado = tipo_documento_normalizado if 'tipo_documento_normalizado' in locals() else 'INVENTARIO'
+                    print(f"📋 [BACKEND] Tipo movimiento normalizado: {tipo_movimiento_normalizado}")
                     if len(tipo_movimiento_normalizado) > 20:
                         tipo_movimiento_normalizado = tipo_movimiento_normalizado[:20]
                     
@@ -2437,18 +2451,53 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                     datos_add = getattr(p, 'datos_adicionales', {}) or {}
                     cc_del_ocr = datos_add.get('cc', 1)  # Valor por defecto 1 si no existe
                     
-                    MovimientoProducto.objects.create(
-                        albaran=albaran,
+                    # Determinar estados anterior y nuevo basándose en la dirección de transferencia
+                    inventario_existente = InventarioProducto.objects.filter(
                         producto=producto,
-                        numero_serie=p.numero_serie,
-                        descripcion=producto.descripcion,
-                        tipo_movimiento=tipo_movimiento_normalizado,
-                        cantidad=getattr(p, 'cantidad', 1),
-                        cc=cc_del_ocr,  # Usar cc del OCR desde datos_adicionales
-                        observaciones=getattr(p, 'observaciones', '')
-                    )
-                    movimientos_creados += 1
-                    print(f"✅ [BACKEND] Movimiento creado para producto {producto.codigo_producto} con cc={cc_del_ocr}")
+                        numero_serie=p.numero_serie
+                    ).first()
+                    estado_anterior = inventario_existente.estado if inventario_existente else 'inactivo'
+                    
+                    # Determinar estado_nuevo según dirección de transferencia
+                    if albaran.direccion_transferencia == 'SALIDA':
+                        estado_nuevo = 'inactivo'
+                    elif albaran.direccion_transferencia == 'ENTRADA':
+                        estado_nuevo = 'activo'
+                    else:
+                        # Por defecto, si no hay dirección, usar 'activo' para inventarios
+                        estado_nuevo = 'activo'
+                    
+                    print(f"🔄 [BACKEND] Creando MovimientoProducto: producto={producto.codigo_producto}, serie={p.numero_serie}, estado_anterior={estado_anterior}, estado_nuevo={estado_nuevo}")
+                    try:
+                        movimiento = MovimientoProducto.objects.create(
+                            albaran=albaran,
+                            producto=producto,
+                            numero_serie=p.numero_serie,
+                            descripcion=producto.descripcion,
+                            tipo_movimiento=tipo_movimiento_normalizado,
+                            cantidad=getattr(p, 'cantidad', 1),
+                            cc=cc_del_ocr,  # Usar cc del OCR desde datos_adicionales
+                            observaciones=getattr(p, 'observaciones', ''),
+                            estado_anterior=estado_anterior,
+                            estado_nuevo=estado_nuevo
+                        )
+                        movimientos_creados += 1
+                        print(f"✅ [BACKEND] Movimiento creado ID={movimiento.id} para producto {producto.codigo_producto} con cc={cc_del_ocr}, estado_anterior={estado_anterior}, estado_nuevo={estado_nuevo}")
+                        
+                        # Verificar si el inventario se creó/actualizó correctamente
+                        inventario_verificado = InventarioProducto.objects.filter(
+                            producto=producto,
+                            numero_serie=p.numero_serie
+                        ).first()
+                        if inventario_verificado:
+                            print(f"✅ [BACKEND] Inventario verificado: ID={inventario_verificado.id}, estado={inventario_verificado.estado}")
+                        else:
+                            print(f"⚠️ [BACKEND] ADVERTENCIA: Inventario NO encontrado después de crear movimiento")
+                    except Exception as e:
+                        import traceback
+                        print(f"❌ [BACKEND] ERROR al crear movimiento: {str(e)}")
+                        traceback.print_exc()
+                        raise  # Re-lanzar para que la transacción haga rollback
                 
                 print(f"🎉 [BACKEND] {movimientos_creados} movimientos creados")
                 

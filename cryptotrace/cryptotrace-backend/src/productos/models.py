@@ -495,6 +495,7 @@ class MovimientoProducto(models.Model):
         super().save(*args, **kwargs)
         
         try:
+            print(f"🔄 [MovimientoProducto.save] Actualizando inventario para producto={self.producto.codigo_producto}, serie={self.numero_serie}, estado_nuevo={self.estado_nuevo}")
             # Intentamos obtener el registro de inventario existente
             inventario = InventarioProducto.objects.filter(
                 producto=self.producto,
@@ -503,13 +504,16 @@ class MovimientoProducto(models.Model):
 
             if inventario:
                 # Actualizamos el registro existente
+                print(f"📝 [MovimientoProducto.save] Actualizando inventario existente ID={inventario.id}")
                 inventario.estado = self.estado_nuevo
                 inventario.ultimo_movimiento = self
                 inventario.ultima_actualizacion = self.fecha
                 inventario.save()
+                print(f"✅ [MovimientoProducto.save] Inventario actualizado correctamente")
             else:
                 # Creamos un nuevo registro de inventario
-                InventarioProducto.objects.create(
+                print(f"➕ [MovimientoProducto.save] Creando nuevo registro de inventario")
+                nuevo_inventario = InventarioProducto.objects.create(
                     producto=self.producto,
                     numero_serie=self.numero_serie,
                     descripcion=self.producto.descripcion,
@@ -517,9 +521,12 @@ class MovimientoProducto(models.Model):
                     ultimo_movimiento=self,
                     ultima_actualizacion=self.fecha
                 )
+                print(f"✅ [MovimientoProducto.save] Inventario creado correctamente ID={nuevo_inventario.id}")
         except Exception as e:
             # Logueamos el error pero no interrumpimos la operación
-            print(f"❌ Error actualizando inventario: {str(e)}")
+            import traceback
+            print(f"❌ [MovimientoProducto.save] Error actualizando inventario: {str(e)}")
+            traceback.print_exc()
             # Aquí podrías agregar logging más detallado si lo necesitas
 
 class LineaTemporalProducto(models.Model):
