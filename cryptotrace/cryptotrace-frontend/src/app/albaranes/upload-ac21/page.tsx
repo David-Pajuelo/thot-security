@@ -1073,6 +1073,7 @@ function UploadAC21PageContent() {
   const [numeroRegistroDetectado, setNumeroRegistroDetectado] = useState<string>('');
   const [showAC21EntradaModal, setShowAC21EntradaModal] = useState(false);
   const [showLineaTemporalModal, setShowLineaTemporalModal] = useState(false);
+  const [ac21DataForModal, setAc21DataForModal] = useState<any>(null);
 
   // Función para crear una nueva página del documento existente
   const handleCrearNuevaPagina = async () => {
@@ -1421,82 +1422,64 @@ function UploadAC21PageContent() {
       return;
     }
 
-    try {
-      setIsUploading(true);
-
-      // 1. VALIDACIÓN CRÍTICA: Verificar que al menos uno de los números de registro esté presente
-      const numeroRegistroSalida = processedData.cabecera?.numero_registro_salida;
-      const numeroRegistroEntrada = processedData.cabecera?.numero_registro_entrada;
-      const tieneNumeroRegistroSalida = numeroRegistroSalida && numeroRegistroSalida.trim() !== '';
-      const tieneNumeroRegistroEntrada = numeroRegistroEntrada && numeroRegistroEntrada.trim() !== '';
-      
-      if (!tieneNumeroRegistroSalida && !tieneNumeroRegistroEntrada) {
-        toast.error(
-          "Debes introducir al menos un número de registro: 'Número de Registro de Salida' o 'Número de Registro de Entrada' en la cabecera del documento.",
-          { duration: 7000 }
-        );
-        setIsUploading(false);
-        return; // Cancelar todo el proceso
-      }
-
-      // 2. Verificar si es un AC21 de ENTRADA que requiere tipificación (ANTES de verificar documento existente)
-      const tipoDocumento = (() => {
-        const tipo = processedData.cabecera?.tipo_transaccion;
-        if (!tipo) return '';
-        if (typeof tipo === 'string') return tipo; // Legacy format
-        // Convertir objeto a string: obtener el primer tipo marcado
-        const tipos = [];
-        if (tipo.transferencia) tipos.push('TRANSFERENCIA');
-        if (tipo.inventario) tipos.push('INVENTARIO');
-        if (tipo.destruccion) tipos.push('DESTRUCCION');
-        if (tipo.recibo_en_mano) tipos.push('RECIBO EN MANO');
-        if (tipo.otro) tipos.push('OTRO');
-        return tipos.join(', ') || '';
-      })();
-      const tipoDocumentoUpper = tipoDocumento.toUpperCase();
-      const esAC21Entrada = tipoDocumentoUpper && 
-        ['TRANSFERENCIA', 'RECIBO_MANO', 'DESTRUCCION', 'OTRO'].includes(tipoDocumentoUpper);
-      
-      if (esAC21Entrada) {
-        // Validar que el número de registro de salida esté rellenado ANTES de abrir el modal
-        if (!tieneNumeroRegistroSalida) {
-          toast.error("Para continuar, debes rellenar el campo 'Número de Registro de Salida' en la cabecera del documento.", { duration: 6000 });
-          setIsUploading(false);
-          return; // No abrir el modal, mostrar error
-        }
-        
-        console.log('📋 [AC21] AC21 de ENTRADA detectado, requiere tipificación');
-        setShowAC21EntradaModal(true);
-        setIsUploading(false);
-        return; // Detener el proceso para mostrar el modal
-      }
-
-      // 3. Verificar si existe un documento con el mismo número de registro (DESPUÉS de detectar AC21 de ENTRADA)
-      const numeroRegistro = numeroRegistroEntrada || numeroRegistroSalida;
-      
-      if (numeroRegistro) {
-        console.log('🔍 [AC21] Verificando documento existente con número:', numeroRegistro);
-        const verificacion = await verificarDocumentoExistente(numeroRegistro);
-        
-        // Verificar que verificacion no sea null y tenga la propiedad existe
-        if (verificacion && verificacion.existe && verificacion.documento) {
-          console.log('📄 [AC21] Documento existente encontrado:', verificacion.documento);
-          setDocumentoExistente(verificacion.documento);
-          setNumeroRegistroDetectado(numeroRegistro);
-          setShowDocumentoExistenteModal(true);
-          setIsUploading(false);
-          return; // Detener el proceso para mostrar el modal
-        }
-      }
-
-      // Si no es AC21 de ENTRADA y no hay documento existente, continuar con el flujo normal
-      await handleConfirmContinuado();
-      
-    } catch (error: any) {
-      console.error("Error en handleConfirm:", error);
-      toast.error(error.message || "Error inesperado al procesar el AC21", { duration: 5000 });
-      setIsUploading(false);
+    // VALIDACIÓN: Número de registro de salida es obligatorio
+    const numeroRegistroSalida = processedData.cabecera?.numero_registro_salida;
+    if (!numeroRegistroSalida || numeroRegistroSalida.trim() === '') {
+      toast.error(
+        "Debes introducir el 'Número de Registro de Salida' en la cabecera del documento.",
+        { duration: 7000 }
+      );
+      return; // Cancelar todo el proceso
     }
+
+    // Preparar artículos seleccionados para el modal
+    const articulosAInsertar = productosValidos.map((index: number) => {
+      const art = processedData.articulos[index];
+      const codigo = art.codigo_producto || art.titulo_corto || '';
+      const observaciones = art.observaciones || art.descripcion || '';
+      
+      // Asegurar que cantidad sea un número válido
+      let cantidad = art.cantidad;
+      if (cantidad === null || cantidad === undefined || cantidad === '') {
+        cantidad = 1;
+      } else {
+        cantidad = parseInt(String(cantidad), 10) || 1;
+        cantidad = Math.max(1, cantidad);
+      }
+      
+      return {
+        ...art,
+        codigo_producto: codigo,
+        observaciones: observaciones,
+        descripcion: observaciones, // Para compatibilidad
+        cantidad: cantidad,
+        numero_serie_inicio: art.numero_serie_inicio || art.numero_serie || '',
+        numero_serie_fin: art.numero_serie_fin || art.numero_serie || '',
+        numero_serie: art.numero_serie_inicio || art.numero_serie_fin || art.numero_serie || '',
+        cc: art.cc || 1
+      };
+    });
+
+    // Preparar datos completos del AC21 para el modal
+    const ac21Data = {
+      cabecera: processedData.cabecera,
+      empresa_origen: processedData.empresa_origen,
+      empresa_destino: processedData.empresa_destino,
+      articulos: articulosAInsertar,
+      accesorios: processedData.accesorios || [],
+      equipos_prueba: processedData.equipos_prueba || [],
+      firmas: processedData.firmas || {},
+      observaciones: processedData.observaciones || '',
+      imagen: selectedFile || undefined // Pasar el archivo original
+    };
+
+    // Guardar datos para el modal
+    setAc21DataForModal(ac21Data);
+
+    // Abrir modal de línea temporal directamente con datos en memoria
+    // NO se guarda en BD todavía
+    console.log("[AC21] Abriendo modal de línea temporal con datos en memoria");
+    setShowLineaTemporalModal(true);
   };
 
   // Función para agregar productos a un albarán existente
@@ -3816,7 +3799,11 @@ function UploadAC21PageContent() {
         {/* Modal para Línea Temporal */}
         <LineaTemporalModal
           isOpen={showLineaTemporalModal}
-          onClose={() => setShowLineaTemporalModal(false)}
+          onClose={() => {
+            setShowLineaTemporalModal(false);
+            setAc21DataForModal(null);
+          }}
+          ac21Data={ac21DataForModal}
         />
       </div>
     </ProtectedRoute>

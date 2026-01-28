@@ -395,6 +395,45 @@ export const procesarAlbaran = async (): Promise<any> => {
   return apiFetch('/lineas-temporales/procesar/', { method: 'POST' });
 };
 
+// Procesar AC21 directamente sin usar línea temporal (nuevo flujo)
+export const procesarAlbaranDirecto = async (data: any, imagen?: File): Promise<any> => {
+  const token = getAuthToken();
+  
+  // Si hay imagen, usar FormData; si no, usar JSON
+  if (imagen) {
+    const formData = new FormData();
+    formData.append('data', JSON.stringify(data));
+    formData.append('imagen_documento', imagen);
+
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_URL}/lineas-temporales/procesar-directo/`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const error = new Error(errorData.detail || errorData.error || `Error ${response.status}`);
+      (error as any).status = response.status;
+      (error as any).data = errorData;
+      throw error;
+    }
+
+    return await response.json();
+  } else {
+    // Sin imagen, usar JSON
+    return apiFetch('/lineas-temporales/procesar-directo/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+};
+
 // Guardar productos en línea temporal sin crear albarán (para AC21 de ENTRADA)
 export const guardarEnLineaTemporal = async (data: any, imagen?: File): Promise<any> => {
   const token = getAuthToken();

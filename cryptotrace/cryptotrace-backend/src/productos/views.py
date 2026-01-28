@@ -43,6 +43,27 @@ class CatalogoProductoViewSet(viewsets.ModelViewSet):
     serializer_class = CatalogoProductoSerializer
     permission_classes = [IsAuthenticated]
     
+    def get_queryset(self):
+        """
+        Personalizar queryset para soportar filtros personalizados
+        """
+        queryset = super().get_queryset()
+        
+        # Soporte para codigo_producto (búsqueda exacta)
+        codigo_producto = self.request.query_params.get('codigo_producto', None)
+        if codigo_producto:
+            queryset = queryset.filter(codigo_producto=codigo_producto)
+        
+        # Soporte para codigo_producto__in (lista separada por comas)
+        codigo_producto_in = self.request.query_params.get('codigo_producto__in', None)
+        if codigo_producto_in:
+            # Dividir por comas y limpiar espacios
+            codigos = [c.strip() for c in codigo_producto_in.split(',') if c.strip()]
+            if codigos:
+                queryset = queryset.filter(codigo_producto__in=codigos)
+        
+        return queryset
+    
     @action(detail=False, methods=['get'], url_path='productos-sin-tipo', permission_classes=[IsAuthenticated])
     def productos_sin_tipo(self, request):
         """
@@ -1526,25 +1547,81 @@ class AlbaranViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        print(f"🗑️ [BACKEND] destroy - Eliminando albarán ID={instance.id}, número={instance.numero}, tipo={instance.tipo_documento}, dirección={instance.direccion_transferencia}")
+        
         with transaction.atomic():
             movimientos = list(MovimientoProducto.objects.filter(albaran=instance))
+            print(f"🗑️ [BACKEND] destroy - Encontrados {len(movimientos)} movimientos para el albarán")
+            
+            # Recopilar información de productos a eliminar (después de procesar todos los movimientos)
+            productos_a_eliminar = []
+            
             for mov in movimientos:
-                producto = mov.producto
-                numero_serie = mov.numero_serie
+                try:
+                    producto = mov.producto
+                    numero_serie = mov.numero_serie
+                    print(f"🗑️ [BACKEND] destroy - Procesando movimiento: producto={producto.codigo_producto}, serie={numero_serie}")
+                except Exception as e:
+                    print(f"⚠️ [BACKEND] destroy - Error accediendo a producto del movimiento: {str(e)}")
+                    continue
+                
                 # Buscar movimientos anteriores a este albarán para este producto/serie
                 movimientos_anteriores = MovimientoProducto.objects.filter(
                     producto=producto,
                     numero_serie=numero_serie
                 ).exclude(albaran=instance).order_by('-fecha')
+                print(f"🗑️ [BACKEND] destroy - Movimientos anteriores encontrados: {movimientos_anteriores.count()}")
+                
                 inventario = InventarioProducto.objects.filter(producto=producto, numero_serie=numero_serie).first()
-                if instance.tipo_documento == 'INVENTARIO':
+                print(f"🗑️ [BACKEND] destroy - Inventario encontrado: {inventario is not None} (ID={inventario.id if inventario else 'N/A'})")
+                
+                # Verificar si es un AC21 de ENTRADA (independientemente del tipo_documento)
+                es_entrada = instance.direccion_transferencia == 'ENTRADA'
+                
+                if es_entrada:
+                    # AC21 de ENTRADA (independientemente del tipo_documento: TRANSFERENCIA, RECIBO_MANO, etc.)
+                    print(f"🗑️ [BACKEND] destroy - AC21 de ENTRADA detectado (tipo_documento={instance.tipo_documento})")
+                    # AC21 de entrada: restaurar estado anterior o ELIMINAR del inventario
+                    if movimientos_anteriores.exists():
+                        mov_ant = movimientos_anteriores.first()
+                        print(f"🗑️ [BACKEND] destroy - Hay movimientos anteriores, restaurando estado: {mov_ant.estado_nuevo}")
+                        if inventario:
+                            inventario.estado = mov_ant.estado_nuevo
+                            inventario.ultimo_movimiento = mov_ant
+                            inventario.ultima_actualizacion = timezone.now()
+                            inventario.save()
+                            print(f"✅ [BACKEND] destroy - Inventario restaurado a estado anterior")
+                    else:
+                        # Si no hay movimientos anteriores, eliminar del inventario
+                        # porque el producto fue añadido por este AC21 de entrada
+                        print(f"🗑️ [BACKEND] destroy - NO hay movimientos anteriores, ELIMINANDO inventario")
+                        if inventario:
+                            print(f"🗑️ [BACKEND] Eliminando inventario ID={inventario.id} para producto {producto.codigo_producto}, serie {numero_serie} (AC21 ENTRADA eliminado)")
+                            inventario.delete()
+                            print(f"✅ [BACKEND] destroy - Inventario eliminado correctamente")
+                        else:
+                            print(f"⚠️ [BACKEND] destroy - No se encontró inventario para eliminar (producto={producto.codigo_producto}, serie={numero_serie})")
+                        
+                        # Verificar si el producto debe eliminarse (después de procesar todos los movimientos)
+                        otros_movimientos = MovimientoProducto.objects.filter(producto=producto).exclude(albaran=instance)
+                        print(f"🗑️ [BACKEND] destroy - Otros movimientos del producto: {otros_movimientos.count()}")
+                        if not otros_movimientos.exists():
+                            # Guardar para eliminar después
+                            productos_a_eliminar.append(producto.id)
+                            print(f"🗑️ [BACKEND] destroy - Producto {producto.codigo_producto} marcado para eliminación (sin otros movimientos)")
+                        else:
+                            print(f"ℹ️ [BACKEND] destroy - Producto NO eliminado porque tiene {otros_movimientos.count()} otros movimientos")
+                elif instance.tipo_documento == 'INVENTARIO' and not es_entrada:
+                    # Inventario normal (no AC21 de entrada)
                     # Si no hay movimientos anteriores, eliminar del inventario
                     if not movimientos_anteriores.exists():
                         if inventario:
+                            print(f"🗑️ [BACKEND] destroy - Eliminando inventario (INVENTARIO sin movimientos anteriores)")
                             inventario.delete()
                         # Además, si el producto del catálogo fue creado por este albarán y no tiene otros movimientos, eliminarlo
                         otros_movimientos = MovimientoProducto.objects.filter(producto=producto).exclude(albaran=instance)
                         if not otros_movimientos.exists():
+                            print(f"🗑️ [BACKEND] destroy - Eliminando producto del catálogo (INVENTARIO sin otros movimientos)")
                             producto.delete()
                     else:
                         mov_ant = movimientos_anteriores.first()
@@ -1553,23 +1630,7 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                             inventario.ultimo_movimiento = mov_ant
                             inventario.ultima_actualizacion = timezone.now()
                             inventario.save()
-                elif instance.tipo_documento == 'TRANSFERENCIA':
-                    if instance.direccion_transferencia == 'ENTRADA':
-                        # AC21 de entrada: restaurar estado anterior o poner inactivo
-                        if movimientos_anteriores.exists():
-                            mov_ant = movimientos_anteriores.first()
-                            if inventario:
-                                inventario.estado = mov_ant.estado_nuevo
-                                inventario.ultimo_movimiento = mov_ant
-                                inventario.ultima_actualizacion = timezone.now()
-                                inventario.save()
-                        else:
-                            if inventario:
-                                inventario.estado = 'inactivo'
-                                inventario.ultimo_movimiento = None
-                                inventario.ultima_actualizacion = timezone.now()
-                                inventario.save()
-                    elif instance.direccion_transferencia == 'SALIDA':
+                elif instance.tipo_documento == 'TRANSFERENCIA' and instance.direccion_transferencia == 'SALIDA':
                         # AC21 de salida: restaurar estado anterior o poner activo
                         if movimientos_anteriores.exists():
                             mov_ant = movimientos_anteriores.first()
@@ -1584,6 +1645,22 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                                 inventario.ultimo_movimiento = None
                                 inventario.ultima_actualizacion = timezone.now()
                                 inventario.save()
+            
+            # Eliminar productos del catálogo que no tienen otros movimientos (después de procesar todos los movimientos)
+            for producto_id in productos_a_eliminar:
+                try:
+                    producto = CatalogoProducto.objects.get(id=producto_id)
+                    # Verificar nuevamente que no tenga otros movimientos (por si acaso)
+                    otros_movimientos = MovimientoProducto.objects.filter(producto=producto).exclude(albaran=instance)
+                    if not otros_movimientos.exists():
+                        print(f"🗑️ [BACKEND] Eliminando producto del catálogo ID={producto.id}, código {producto.codigo_producto} (sin otros movimientos)")
+                        producto.delete()
+                        print(f"✅ [BACKEND] destroy - Producto del catálogo eliminado correctamente")
+                except CatalogoProducto.DoesNotExist:
+                    print(f"⚠️ [BACKEND] destroy - Producto ID={producto_id} ya no existe")
+                except Exception as e:
+                    print(f"⚠️ [BACKEND] destroy - Error eliminando producto ID={producto_id}: {str(e)}")
+            
             # Borrar el albarán (esto borra los movimientos por cascade)
             response = super().destroy(request, *args, **kwargs)
         return response
@@ -2120,6 +2197,351 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             "count": count
         }, status=200)
     
+    @action(detail=False, methods=["post"], url_path="procesar-directo", permission_classes=[IsAuthenticated])
+    def procesar_directo(self, request):
+        """
+        Procesa un AC21 directamente desde el frontend sin usar línea temporal.
+        Recibe todos los datos del AC21 y crea directamente:
+        - Albaran
+        - Movimientos
+        - Inventario
+        
+        También detecta si existe documento con mismo número y permite crear
+        página adicional o documento independiente.
+        
+        Este es el nuevo flujo: datos en memoria → procesamiento directo.
+        """
+        print("🚀 [BACKEND] procesar_directo - INICIO")
+        print("🚀 [BACKEND] Usuario:", request.user.username)
+        print("🚀 [BACKEND] Método:", request.method)
+        print("🚀 [BACKEND] URL:", request.path)
+        
+        # Manejar FormData (cuando se envía imagen)
+        parsed_data = request.data
+        imagen_documento = None
+        
+        if 'multipart/form-data' in request.content_type:
+            print("🖼️ [BACKEND] Recibiendo FormData con imagen")
+            imagen_documento = request.FILES.get('imagen_documento')
+            if imagen_documento:
+                print(f"🖼️ [BACKEND] Imagen recibida: {imagen_documento.name}, {imagen_documento.size} bytes")
+            
+            # Extraer datos JSON del FormData
+            data_str = request.data.get('data')
+            if data_str:
+                try:
+                    if isinstance(data_str, str):
+                        parsed_data = json.loads(data_str)
+                    else:
+                        parsed_data = data_str
+                    print("✅ [BACKEND] Datos parseados desde FormData")
+                except (json.JSONDecodeError, TypeError) as e:
+                    print(f"❌ [BACKEND] Error parseando JSON de FormData: {e}")
+                    return Response({"error": f"Error parseando datos JSON: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                print("⚠️ [BACKEND] No se encontró campo 'data' en FormData")
+                return Response({"error": "Campo 'data' requerido en FormData"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        print("📢 [BACKEND] Payload recibido en procesar_directo:", json.dumps(parsed_data, indent=2, default=str))
+        
+        # Extraer datos del payload
+        cabecera = parsed_data.get('cabecera', {})
+        empresa_origen = parsed_data.get('empresa_origen', {})
+        empresa_destino = parsed_data.get('empresa_destino', {})
+        articulos = parsed_data.get('articulos', [])
+        accesorios = parsed_data.get('accesorios', [])
+        equipos_prueba = parsed_data.get('equipos_prueba', [])
+        firmas = parsed_data.get('firmas', {})
+        observaciones = parsed_data.get('observaciones', '')
+        
+        # 1. VALIDACIÓN: Número de registro de salida (obligatorio)
+        numero_registro_salida = cabecera.get('numero_registro_salida')
+        if not numero_registro_salida or str(numero_registro_salida).strip() == '':
+            print("❌ [BACKEND] ERROR: Número de registro de salida es obligatorio")
+            return Response({
+                "error": "El número de registro de salida es obligatorio"
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        print(f"✅ [BACKEND] Número de registro de salida validado: {numero_registro_salida}")
+        
+        # 2. DETECCIÓN: Verificar si existe documento con mismo número
+        # PERO solo si NO se está procesando una decisión ya tomada (crear_pagina_adicional)
+        crear_pagina_adicional = parsed_data.get('crear_pagina_adicional', False)
+        documento_existente_id = parsed_data.get('documento_existente_id', None)
+        
+        # Si ya se decidió crear página adicional, saltar la verificación y continuar
+        if not (crear_pagina_adicional and documento_existente_id):
+            documento_existente = Albaran.encontrar_documento_existente(numero_registro_salida)
+            
+            if documento_existente:
+                print(f"🔍 [BACKEND] Documento existente encontrado: ID={documento_existente.id}, Número={documento_existente.numero}")
+                # Devolver información del documento existente para que el frontend pregunte
+                return Response({
+                    "documento_existente": {
+                        "id": documento_existente.id,
+                        "numero": documento_existente.numero,
+                        "fecha": documento_existente.fecha.isoformat() if documento_existente.fecha else None,
+                        "total_paginas": documento_existente.total_paginas if hasattr(documento_existente, 'total_paginas') else 1
+                    },
+                    "requiere_decision": True,
+                    "mensaje": f"Ya existe un documento con el número {numero_registro_salida}. ¿Deseas crear una página adicional o un documento independiente?"
+                }, status=status.HTTP_200_OK)
+            
+            print("✅ [BACKEND] No existe documento con mismo número, continuando con creación...")
+        else:
+            print(f"✅ [BACKEND] Procesando decisión de crear página adicional para documento ID={documento_existente_id}, saltando verificación...")
+        
+        # 3. PROCESAMIENTO: Crear albarán, movimientos e inventario
+        from django.db import transaction
+        from django.utils import timezone
+        import os
+        import time
+        
+        try:
+            with transaction.atomic():
+                # 3.1. Preparar datos para creación de albarán
+                firma_a_data = firmas.get('firma_a', {}) if isinstance(firmas, dict) else {}
+                firma_b_data = firmas.get('firma_b', {}) if isinstance(firmas, dict) else {}
+                
+                fecha_informe = cabecera.get('fecha_informe') or timezone.now().date()
+                fecha_transaccion = cabecera.get('fecha_transaccion_dma') or cabecera.get('fecha_transaccion') or timezone.now().date()
+                
+                # Normalizar tipo_documento desde tipo_transaccion
+                tipo_transaccion_raw = cabecera.get('tipo_transaccion', '')
+                tipo_documento_normalizado = None
+                
+                if tipo_transaccion_raw:
+                    if isinstance(tipo_transaccion_raw, dict):
+                        tipos = []
+                        if tipo_transaccion_raw.get('transferencia'): tipos.append('TRANSFERENCIA')
+                        if tipo_transaccion_raw.get('inventario'): tipos.append('INVENTARIO')
+                        if tipo_transaccion_raw.get('destruccion'): tipos.append('DESTRUCCION')
+                        if tipo_transaccion_raw.get('recibo_en_mano'): tipos.append('RECIBO_MANO')
+                        if tipo_transaccion_raw.get('otro'): tipos.append('OTRO')
+                        tipo_documento_normalizado = tipos[0] if tipos else 'INVENTARIO'
+                    else:
+                        tipo_str = str(tipo_transaccion_raw).upper().replace(' ', '_')
+                        tipo_map = {
+                            'RECIBO_EN_MANO': 'RECIBO_MANO',
+                            'RECIBO EN MANO': 'RECIBO_MANO',
+                            'RECIBOENMANO': 'RECIBO_MANO',
+                        }
+                        tipo_documento_normalizado = tipo_map.get(tipo_str, tipo_str)
+                        if len(tipo_documento_normalizado) > 20:
+                            tipo_documento_normalizado = tipo_documento_normalizado[:20]
+                
+                if not tipo_documento_normalizado:
+                    tipo_documento_normalizado = 'INVENTARIO'
+                
+                print(f"📋 [BACKEND] Tipo documento normalizado: '{tipo_documento_normalizado}'")
+                
+                # Verificar si se debe crear página adicional o documento independiente
+                # (crear_pagina_adicional y documento_existente_id ya se obtuvieron arriba)
+                
+                if crear_pagina_adicional and documento_existente_id:
+                    # Crear página adicional
+                    documento_existente = Albaran.objects.get(id=documento_existente_id)
+                    print(f"📄 [BACKEND] Creando página adicional para documento existente ID={documento_existente.id}, número={documento_existente.numero}")
+                    print(f"📄 [BACKEND] Total páginas antes: {documento_existente.total_paginas}")
+                    
+                    albaran = documento_existente.crear_pagina_adicional(
+                        fecha=fecha_informe,
+                        fecha_informe=fecha_informe,
+                        fecha_transaccion=fecha_transaccion,
+                        accesorios=accesorios,
+                        equipos_prueba=equipos_prueba,
+                        observaciones_odmc=observaciones or '',
+                        firma_a_nombre_apellidos=firma_a_data.get('nombre', ''),
+                        firma_a_cargo=firma_a_data.get('cargo', ''),
+                        firma_a_empleo_rango=firma_a_data.get('empleo_rango', ''),
+                        firma_b_nombre_apellidos=firma_b_data.get('nombre', ''),
+                        firma_b_cargo=firma_b_data.get('cargo', ''),
+                        firma_b_empleo_rango=firma_b_data.get('empleo_rango', ''),
+                        created_by=request.user
+                    )
+                    
+                    # Refrescar documento principal para obtener total_paginas actualizado
+                    documento_existente.refresh_from_db()
+                    print(f"📄 [BACKEND] Página adicional creada: ID={albaran.id}, número={albaran.numero}, página={albaran.pagina_numero}")
+                    print(f"📄 [BACKEND] Total páginas después: {documento_existente.total_paginas}")
+                else:
+                    # Crear documento nuevo
+                    print("🏗️ [BACKEND] Creando nuevo documento (página principal)...")
+                    
+                    numero_registro_entrada = str(cabecera.get('numero_registro_entrada', ''))[:20] if cabecera.get('numero_registro_entrada') else ''
+                    numero_registro_salida = str(numero_registro_salida)[:20] if len(str(numero_registro_salida)) > 20 else numero_registro_salida
+                    
+                    albaran = Albaran.objects.create(
+                        numero=numero_registro_salida,
+                        tipo_documento=tipo_documento_normalizado,
+                        fecha=fecha_informe,
+                        fecha_informe=fecha_informe,
+                        fecha_transaccion=fecha_transaccion,
+                        numero_registro_entrada=numero_registro_entrada,
+                        numero_registro_salida=numero_registro_salida,
+                        codigo_contabilidad=cabecera.get('codigos_contabilidad', ''),
+                        empresa_origen_id=empresa_origen.get('id'),
+                        empresa_destino_id=empresa_destino.get('id'),
+                        direccion_transferencia='ENTRADA',  # Siempre ENTRADA para AC21 desde OCR
+                        accesorios=accesorios,
+                        equipos_prueba=equipos_prueba,
+                        observaciones_odmc=observaciones or '',
+                        pagina_numero=1,
+                        total_paginas=1,
+                        firma_a_nombre_apellidos=firma_a_data.get('nombre', ''),
+                        firma_a_cargo=firma_a_data.get('cargo', ''),
+                        firma_a_empleo_rango=firma_a_data.get('empleo_rango', ''),
+                        firma_b_nombre_apellidos=firma_b_data.get('nombre', ''),
+                        firma_b_cargo=firma_b_data.get('cargo', ''),
+                        firma_b_empleo_rango=firma_b_data.get('empleo_rango', ''),
+                        created_by=request.user
+                    )
+                
+                print(f"✅ [BACKEND] Albarán creado: ID={albaran.id}, Número={albaran.numero}, Página={albaran.pagina_numero}/{albaran.total_paginas}")
+                
+                # 3.2. Guardar imagen si existe
+                if imagen_documento:
+                    try:
+                        from django.core.files.base import ContentFile
+                        extension = imagen_documento.name.split('.')[-1] if '.' in imagen_documento.name else 'jpg'
+                        nombre_final = f"albaran_{albaran.id}_AC21_{int(time.time())}.{extension}"
+                        albaran.imagen_documento.save(nombre_final, imagen_documento, save=True)
+                        print(f"🖼️ [BACKEND] Imagen guardada: {albaran.imagen_documento.name}")
+                    except Exception as e:
+                        print(f"❌ [BACKEND] Error guardando imagen: {str(e)}")
+                        # Continuar sin fallar el proceso
+                
+                # 3.3. Crear mapa de código → tipo_producto_id para actualizar catálogo
+                codigo_a_tipo = {}
+                for articulo in articulos:
+                    codigo = articulo.get('codigo_producto')
+                    tipo_id = articulo.get('tipo_producto_id')
+                    if tipo_id and codigo:
+                        codigo_a_tipo[codigo] = tipo_id
+                        print(f"📋 [BACKEND] Mapeo código→tipo: {codigo} → tipo_id={tipo_id}")
+                    elif codigo:
+                        print(f"⚠️ [BACKEND] Artículo {codigo} sin tipo_producto_id (será null)")
+                
+                print(f"📋 [BACKEND] Total códigos a tipificar: {len(codigo_a_tipo)}")
+                if codigo_a_tipo:
+                    print(f"📋 [BACKEND] Códigos con tipo: {list(codigo_a_tipo.keys())}")
+                
+                # 3.4. Crear movimientos e inventario para cada artículo
+                # NOTA: Los tipos se actualizarán DESPUÉS de crear todos los productos
+                print("🔄 [BACKEND] Creando movimientos...")
+                movimientos_creados = 0
+                
+                for articulo in articulos:
+                    codigo_producto = articulo.get('codigo_producto')
+                    if not codigo_producto:
+                        print(f"⚠️ [BACKEND] Artículo sin código, se omite")
+                        continue
+                    
+                    # Buscar/crear producto en catálogo
+                    producto = CatalogoProducto.objects.filter(codigo_producto=codigo_producto).first()
+                    if not producto:
+                        descripcion = articulo.get('descripcion', '') or articulo.get('observaciones', '')
+                        producto, created = CatalogoProducto.objects.get_or_create(
+                            codigo_producto=codigo_producto,
+                            defaults={'descripcion': descripcion}
+                        )
+                        if created:
+                            print(f"➕ [BACKEND] Producto creado: ID={producto.id}, código={codigo_producto}")
+                    
+                    # Verificar duplicados
+                    numero_serie = articulo.get('numero_serie', '')
+                    existe = MovimientoProducto.objects.filter(
+                        albaran=albaran,
+                        producto=producto,
+                        numero_serie=numero_serie
+                    ).exists()
+                    
+                    if existe:
+                        print(f"⚠️ [BACKEND] Movimiento duplicado para producto {producto.id}, serie {numero_serie}. Se omite.")
+                        continue
+                    
+                    # Determinar estados
+                    inventario_existente = InventarioProducto.objects.filter(
+                        producto=producto,
+                        numero_serie=numero_serie
+                    ).first()
+                    estado_anterior = inventario_existente.estado if inventario_existente else 'inactivo'
+                    estado_nuevo = 'activo'  # Siempre activo para ENTRADA
+                    
+                    # Obtener CC del OCR
+                    cc_del_ocr = articulo.get('cc', 1)
+                    if isinstance(cc_del_ocr, str):
+                        try:
+                            cc_del_ocr = int(float(cc_del_ocr))
+                        except (ValueError, TypeError):
+                            cc_del_ocr = 1
+                    
+                    # Crear movimiento
+                    movimiento = MovimientoProducto.objects.create(
+                        albaran=albaran,
+                        producto=producto,
+                        numero_serie=numero_serie,
+                        descripcion=producto.descripcion,
+                        tipo_movimiento=tipo_documento_normalizado,
+                        cantidad=articulo.get('cantidad', 1),
+                        cc=cc_del_ocr,
+                        observaciones=articulo.get('observaciones', ''),
+                        estado_anterior=estado_anterior,
+                        estado_nuevo=estado_nuevo
+                    )
+                    movimientos_creados += 1
+                    print(f"✅ [BACKEND] Movimiento creado ID={movimiento.id} para {codigo_producto}, serie={numero_serie}")
+                
+                print(f"🎉 [BACKEND] {movimientos_creados} movimientos creados")
+                
+                # 3.5. Actualizar tipos en catálogo DESPUÉS de crear todos los productos
+                # Esto asegura que tanto productos nuevos como existentes tengan el tipo correcto
+                if codigo_a_tipo:
+                    print(f"📋 [BACKEND] Actualizando tipos en catálogo para {len(codigo_a_tipo)} códigos...")
+                    for codigo, tipo_id in codigo_a_tipo.items():
+                        try:
+                            producto = CatalogoProducto.objects.filter(codigo_producto=codigo).first()
+                            if producto:
+                                tipo_producto = TipoProducto.objects.get(id=tipo_id)
+                                producto_anterior_tipo = producto.tipo.nombre if producto.tipo else "sin tipo"
+                                producto.tipo = tipo_producto
+                                producto.save()
+                                print(f"✅ [BACKEND] CatalogoProducto {codigo} actualizado: {producto_anterior_tipo} → {tipo_producto.nombre}")
+                            else:
+                                print(f"⚠️ [BACKEND] Producto {codigo} no encontrado en catálogo para actualizar tipo")
+                        except TipoProducto.DoesNotExist:
+                            print(f"⚠️ [BACKEND] TipoProducto con ID {tipo_id} no existe para código {codigo}")
+                        except Exception as e:
+                            print(f"⚠️ [BACKEND] Error actualizando tipo para {codigo}: {str(e)}")
+                            import traceback
+                            traceback.print_exc()
+                else:
+                    print(f"⚠️ [BACKEND] No hay códigos con tipo_producto_id para actualizar en catálogo")
+                
+                # Obtener total_paginas actualizado
+                doc_principal = albaran.obtener_documento_principal if albaran.documento_principal else albaran
+                doc_principal.refresh_from_db()  # Asegurar que tenemos el valor más reciente
+                total_paginas_actualizado = doc_principal.total_paginas
+                
+                print(f"📊 [BACKEND] Respuesta final - albaran_id={albaran.id}, es_pagina_adicional={albaran.documento_principal is not None}, total_paginas={total_paginas_actualizado}")
+                
+                return Response({
+                    "detail": "AC21 procesado correctamente",
+                    "albaran_id": albaran.id,
+                    "albaran_numero": albaran.numero,
+                    "es_pagina_adicional": albaran.documento_principal is not None,
+                    "total_paginas": total_paginas_actualizado,
+                    "movimientos_creados": movimientos_creados
+                }, status=status.HTTP_201_CREATED)
+                
+        except Exception as e:
+            import traceback
+            print(f"❌ [BACKEND] ERROR en procesar_directo: {str(e)}")
+            traceback.print_exc()
+            return Response({
+                "error": f"Error procesando el AC21: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
     def procesar(self, request):
         """

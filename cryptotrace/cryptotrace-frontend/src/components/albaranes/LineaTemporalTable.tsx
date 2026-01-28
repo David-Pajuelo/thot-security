@@ -41,25 +41,23 @@ export default function LineaTemporalTable({
         <thead>
           <tr className="bg-gray-100">
             <th className="border p-2">Código Producto<br/>(TÍTULO CORTO / EDICIÓN)</th>
-            <th className="border p-2">Cantidad</th>
-            <th className="border p-2">Tipo Cryptocustodio</th>
+            <th className="border p-2">Tipo Cryptocustodio (CC)</th>
           </tr>
         </thead>
         <tbody>
           {productos.map((producto, index) => (
             <tr key={`${producto.codigo_producto}-${index}`} className="border-b">
               <td className="border p-2">{producto.codigo_producto || '-'}</td>
-              <td className="border p-2 text-center">{producto.cantidad || 1}</td>
               <td className="border p-2 text-center">
                 <select
                   className="border p-2 w-full"
-                  value={producto.tipo_producto_id || ''}
+                  value={producto.tipo_producto_id || producto.tipo_catalogo_id || ''}
                   onChange={(e) => {
                     const tipoProductoId = e.target.value ? parseInt(e.target.value, 10) : null;
                     onGuardarTipo(producto.codigo_producto, tipoProductoId);
                   }}
                 >
-                  <option value="">-- Seleccionar --</option>
+                  <option value="">NINGUNO</option>
                   {tipos.map((tipo) => (
                     <option key={tipo.id} value={tipo.id}>
                       {tipo.nombre}
