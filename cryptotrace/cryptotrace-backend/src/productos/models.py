@@ -437,17 +437,26 @@ class Albaran(models.Model):
             self.tipo_documento == 'TRANSFERENCIA'):
             self.numero_registro_salida = self.generar_siguiente_numero_registro_salida()
         
-        # Actualizar el campo 'numero' si es un AC21 de salida y se modifica numero_registro_salida
-        if (self.direccion_transferencia == 'SALIDA' and 
-            self.numero_registro_salida and 
-            self.tipo_documento == 'TRANSFERENCIA'):
-            
-            # Si es página principal (sin documento_principal)
-            if not self.documento_principal:
-                self.numero = self.numero_registro_salida
-            else:
-                # Si es página adicional, usar formato: numero_registro_salida-P{pagina_numero}
-                self.numero = f"{self.numero_registro_salida}-P{self.pagina_numero}"
+        # Actualizar el campo 'numero' basándose en numero_registro_salida o numero_registro_entrada
+        if self.tipo_documento == 'TRANSFERENCIA':
+            # Para SALIDA: usar numero_registro_salida
+            if (self.direccion_transferencia == 'SALIDA' and self.numero_registro_salida):
+                # Si es página principal (sin documento_principal)
+                if not self.documento_principal:
+                    self.numero = self.numero_registro_salida
+                else:
+                    # Si es página adicional, usar formato: numero_registro_salida-P{pagina_numero}
+                    self.numero = f"{self.numero_registro_salida}-P{self.pagina_numero}"
+            # Para ENTRADA: usar numero_registro_entrada si existe, sino numero_registro_salida
+            elif (self.direccion_transferencia == 'ENTRADA'):
+                numero_a_usar = self.numero_registro_entrada or self.numero_registro_salida
+                if numero_a_usar:
+                    # Si es página principal (sin documento_principal)
+                    if not self.documento_principal:
+                        self.numero = numero_a_usar
+                    else:
+                        # Si es página adicional, usar formato: numero-P{pagina_numero}
+                        self.numero = f"{numero_a_usar}-P{self.pagina_numero}"
         
         if not self.pk:  # Si es una creación nueva
             self.created_at = timezone.now()
@@ -480,7 +489,7 @@ class MovimientoProducto(models.Model):
     
     # Campos adicionales para AC-21
     cantidad = models.IntegerField(default=1, help_text='Cantidad del producto en el movimiento')
-    cc = models.IntegerField(default=1, help_text='Campo CC del AC-21')
+    cc = models.IntegerField(null=True, blank=True, help_text='Campo CC del AC-21 (Accounting Legend Code) - Informativo del documento, puede estar vacío')
     observaciones = models.TextField(blank=True, null=True, help_text='Observaciones específicas del movimiento')
 
     class Meta:

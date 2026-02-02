@@ -81,9 +81,15 @@ export default function AlbaranDetail({ id }: AlbaranDetailProps) {
 
   if (!albaran) return <p className="text-gray-500 text-center">Albarán no encontrado.</p>;
 
-  // Detectar si es un AC21 basándose en la presencia de empresas origen y destino
-  // Los AC21 siempre tienen empresas asignadas, los albaranes Excel no
-  const isAC21 = albaran.empresa_origen && albaran.empresa_destino;
+  // Detectar si es un AC21 basándose en múltiples criterios:
+  // 1. Tiene direccion_transferencia (ENTRADA o SALIDA) - criterio principal
+  // 2. Tiene tipo_documento = 'TRANSFERENCIA' - criterio secundario
+  // 3. Tiene empresas origen y destino - criterio adicional (puede faltar en algunos casos)
+  // Un AC21 debe tener al menos direccion_transferencia o tipo_documento = 'TRANSFERENCIA'
+  const isAC21 = albaran.direccion_transferencia === 'ENTRADA' || 
+                 albaran.direccion_transferencia === 'SALIDA' ||
+                 albaran.tipo_documento === 'TRANSFERENCIA' ||
+                 (albaran.empresa_origen && albaran.empresa_destino);
 
   // Si es un AC21, usar el componente específico
   if (isAC21) {

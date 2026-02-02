@@ -736,7 +736,15 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                         if 'numero_serie' in mov_data:
                             movimiento.numero_serie = mov_data['numero_serie']
                         if 'cc' in mov_data:
-                            movimiento.cc = mov_data['cc']
+                            # Convertir cadena vacía a None para el campo IntegerField
+                            cc_value = mov_data['cc']
+                            if cc_value == '' or cc_value is None:
+                                movimiento.cc = None
+                            else:
+                                try:
+                                    movimiento.cc = int(cc_value) if cc_value else None
+                                except (ValueError, TypeError):
+                                    movimiento.cc = None
                         if 'observaciones' in mov_data:
                             movimiento.observaciones = mov_data['observaciones']
                         if 'descripcion' in mov_data:
@@ -753,13 +761,23 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                                 defaults={'descripcion': mov_data.get('descripcion', '')}
                             )
                             
+                            # Normalizar el valor de cc: convertir cadena vacía a None
+                            cc_value = mov_data.get('cc')
+                            if cc_value == '' or cc_value is None:
+                                cc_value = None
+                            else:
+                                try:
+                                    cc_value = int(cc_value) if cc_value else None
+                                except (ValueError, TypeError):
+                                    cc_value = None
+                            
                             MovimientoProducto.objects.create(
                                 albaran=albaran,
                                 producto=producto,
                                 numero_serie=mov_data.get('numero_serie', ''),
                                 descripcion=mov_data.get('descripcion', ''),
                                 cantidad=mov_data.get('cantidad', 1),
-                                cc=mov_data.get('cc', 1),
+                                cc=cc_value,  # None si está vacío o no es un número válido
                                 observaciones=mov_data.get('observaciones', ''),
                                 tipo_movimiento=albaran.tipo_documento or 'INVENTARIO',
                                 estado_anterior='inactivo',
@@ -1390,12 +1408,14 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                             'observaciones_generales': observaciones_payload,
                         }
                         
-                        # Extraer y validar CC
-                        cc_raw = articulo.get('cc', '1')
-                        try:
-                            cc = int(float(str(cc_raw))) if cc_raw else 1
-                        except (ValueError, TypeError):
-                            cc = 1
+                        # Extraer y validar CC - puede estar vacío
+                        cc_raw = articulo.get('cc', '')
+                        cc = None  # Valor por defecto: NULL
+                        if cc_raw and str(cc_raw).strip():
+                            try:
+                                cc = int(float(str(cc_raw).strip()))
+                            except (ValueError, TypeError):
+                                cc = None  # No convertible, dejar como NULL
                         
                         # Extraer y validar cantidad
                         cantidad_raw = articulo.get('cantidad', 1)
@@ -1806,15 +1826,14 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             
             # Extraer CC del OCR (puede ser cualquier valor o estar vacío)
             cc_raw = articulo.get('cc')
-            if cc_raw is None or cc_raw == '':
-                cc = 1  # Usar valor por defecto si está vacío
-            else:
+            cc = None  # Valor por defecto: NULL (puede estar vacío)
+            if cc_raw is not None and cc_raw != '':
                 try:
                     # Intentar convertir a int si es numérico
                     cc = int(float(str(cc_raw)))
                 except (ValueError, TypeError):
-                    # Si no es numérico, usar valor por defecto
-                    cc = 1
+                    # Si no es numérico, dejar como NULL
+                    cc = None
             
             # Preparar datos adicionales para el campo JSON (incluyendo números de serie completos y cantidad)
             datos_adicionales = {
@@ -2468,13 +2487,34 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                     estado_anterior = inventario_existente.estado if inventario_existente else 'inactivo'
                     estado_nuevo = 'activo'  # Siempre activo para ENTRADA
                     
-                    # Obtener CC del OCR
-                    cc_del_ocr = articulo.get('cc', 1)
-                    if isinstance(cc_del_ocr, str):
-                        try:
-                            cc_del_ocr = int(float(cc_del_ocr))
-                        except (ValueError, TypeError):
-                            cc_del_ocr = 1
+                    # Obtener CC del OCR - puede estar vacío, respetar el vacío usando NULL
+                    cc_del_ocr_raw = articulo.get('cc', '')
+                    cc_del_ocr = None  # Valor por defecto: NULL (campo puede estar vacío)
+                    
+                    # Si el campo viene con valor, intentar convertirlo a entero
+                    if cc_del_ocr_raw is not None and cc_del_ocr_raw != '':
+                        if isinstance(cc_del_ocr_raw, str):
+                            cc_str = cc_del_ocr_raw.strip()
+                            if cc_str:  # Solo si no está vacío después de trim
+                                try:
+                                    cc_del_ocr = int(float(cc_str))
+                                    print(f"✅ [BACKEND] CC extraído del OCR: {cc_del_ocr}")
+                                except (ValueError, TypeError):
+                                    # Si no se puede convertir, dejar como NULL
+                                    print(f"⚠️ [BACKEND] CC no convertible '{cc_del_ocr_raw}', dejando como NULL")
+                                    cc_del_ocr = None
+                            else:
+                                # Cadena vacía después de trim - el OCR indicó que está vacío
+                                print(f"ℹ️ [BACKEND] CC vacío en OCR, guardando como NULL")
+                                cc_del_ocr = None
+                        elif isinstance(cc_del_ocr_raw, (int, float)):
+                            cc_del_ocr = int(cc_del_ocr_raw)
+                            print(f"✅ [BACKEND] CC extraído del OCR: {cc_del_ocr}")
+                    else:
+                        # None o cadena vacía - el OCR no proporcionó valor
+                        print(f"ℹ️ [BACKEND] CC no proporcionado en OCR (None o ''), guardando como NULL")
+                        cc_del_ocr = None
+                    # Si el usuario quiere respetar el vacío, necesitaríamos cambiar el modelo a null=True
                     
                     # Crear movimiento
                     movimiento = MovimientoProducto.objects.create(
@@ -2871,7 +2911,23 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                     
                     # Obtener cc desde datos_adicionales (del OCR del AC21)
                     datos_add = getattr(p, 'datos_adicionales', {}) or {}
-                    cc_del_ocr = datos_add.get('cc', 1)  # Valor por defecto 1 si no existe
+                    cc_del_ocr_raw = datos_add.get('cc', '')
+                    cc_del_ocr = None  # Valor por defecto: NULL (campo puede estar vacío)
+                    
+                    # Si el campo viene con valor, intentar convertirlo a entero
+                    if cc_del_ocr_raw is not None and cc_del_ocr_raw != '':
+                        if isinstance(cc_del_ocr_raw, str):
+                            cc_str = cc_del_ocr_raw.strip()
+                            if cc_str:
+                                try:
+                                    cc_del_ocr = int(float(cc_str))
+                                except (ValueError, TypeError):
+                                    cc_del_ocr = None  # No convertible, dejar como NULL
+                            else:
+                                cc_del_ocr = None  # Cadena vacía - dejar como NULL
+                        elif isinstance(cc_del_ocr_raw, (int, float)):
+                            cc_del_ocr = int(cc_del_ocr_raw)
+                    # Si es None o '', cc_del_ocr ya está como None
                     
                     # Determinar estados anterior y nuevo basándose en la dirección de transferencia
                     inventario_existente = InventarioProducto.objects.filter(

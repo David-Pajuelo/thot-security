@@ -262,7 +262,7 @@ export default function GestionLineaTemporal({ onClose, ac21Data }: GestionLinea
             descripcion: art.observaciones || art.descripcion || '',
             tipo_producto_id: codigoATipo.get(codigo) || null, // Tipo asignado en modal
             observaciones: art.observaciones || '',
-            cc: art.cc || 1 // CC del OCR
+            cc: (art.cc && art.cc.toString().trim() !== '') ? art.cc : '' // CC del OCR - NO usar valor por defecto si está vacío
           };
         }),
         accesorios: ac21Data.accesorios || [],

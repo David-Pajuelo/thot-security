@@ -82,7 +82,120 @@ class AC21Processor:
         Codifica la imagen en base64
         """
         return base64.b64encode(image_bytes).decode('utf-8')
+    
+    def preprocess_image(self, image_bytes: bytes) -> bytes:
+        """
+        Preprocesa la imagen para mejorar la calidad del OCR:
+        - Aumenta resolución si es muy pequeña
+        - Mejora contraste
+        - Reduce ruido (opcional)
+        """
+        if Image is None:
+            print("⚠️ PIL no disponible, saltando preprocesamiento")
+            return image_bytes
+        
+        try:
+            img = Image.open(BytesIO(image_bytes)).convert("RGB")
+            original_size = img.size
+            print(f"📐 [PREPROCESS] Tamaño original: {original_size[0]}x{original_size[1]}")
+            
+            # Aumentar resolución si es muy pequeña (< 2000px de ancho)
+            if img.width < 2000:
+                scale_factor = 2000 / img.width
+                new_size = (int(img.width * scale_factor), int(img.height * scale_factor))
+                img = img.resize(new_size, Image.LANCZOS)
+                print(f"🔍 [PREPROCESS] Resolución aumentada: {new_size[0]}x{new_size[1]} (factor: {scale_factor:.2f}x)")
+            
+            # Mejorar contraste
+            try:
+                from PIL import ImageEnhance
+                enhancer = ImageEnhance.Contrast(img)
+                img = enhancer.enhance(1.3)  # Aumentar contraste 30%
+                print("✨ [PREPROCESS] Contraste mejorado (+30%)")
+            except Exception as e:
+                print(f"⚠️ [PREPROCESS] Error mejorando contraste: {e}")
+            
+            # Convertir de vuelta a bytes
+            output = BytesIO()
+            img.save(output, format="PNG", optimize=True)
+            processed_bytes = output.getvalue()
+            print(f"✅ [PREPROCESS] Preprocesamiento completado: {len(processed_bytes)} bytes")
+            return processed_bytes
+            
+        except Exception as e:
+            print(f"❌ [PREPROCESS] Error en preprocesamiento: {str(e)}")
+            print(f"📚 Stack trace: {traceback.format_exc()}")
+            return image_bytes  # Devolver original si falla
 
+    def detect_table_bounds(self, image_bytes: bytes) -> Dict[str, float]:
+        """
+        Detecta automáticamente los límites de la tabla usando análisis de densidad de contenido.
+        Retorna top, bottom, left, right como porcentajes [0-1].
+        """
+        if Image is None:
+            print("⚠️ PIL no disponible, usando límites por defecto")
+            return {"top": 0.25, "bottom": 0.98, "left": 0.03, "right": 0.97}
+        
+        try:
+            img = Image.open(BytesIO(image_bytes)).convert("L")  # Escala de grises
+            width, height = img.size
+            print(f"🔍 [DETECT BOUNDS] Analizando imagen: {width}x{height}")
+            
+            # Análisis por filas horizontales (detectar zona de tabla)
+            row_densities = []
+            sample_step = max(5, height // 200)  # Muestrear cada 5px o menos si imagen pequeña
+            
+            for y in range(0, height, sample_step):
+                row = img.crop((0, y, width, min(y + sample_step, height)))
+                # Calcular densidad: desviación estándar indica variación (más contenido = más variación)
+                from PIL import ImageStat
+                stat = ImageStat.Stat(row)
+                row_densities.append((y, stat.stddev[0]))
+            
+            if not row_densities:
+                print("⚠️ [DETECT BOUNDS] No se pudieron analizar filas, usando valores por defecto")
+                return {"top": 0.25, "bottom": 0.98, "left": 0.03, "right": 0.97}
+            
+            # Encontrar umbral de densidad (percentil 70 = zona con más contenido)
+            densities = [d[1] for d in row_densities]
+            threshold = sorted(densities)[int(len(densities) * 0.70)]
+            
+            # Encontrar inicio y fin de tabla (zonas de alta densidad)
+            table_start_y = None
+            table_end_y = None
+            
+            for y, density in row_densities:
+                if density > threshold:
+                    if table_start_y is None:
+                        table_start_y = y
+                    table_end_y = y
+            
+            # Convertir a porcentajes con márgenes de seguridad
+            if table_start_y is not None and table_end_y is not None:
+                top = max(0.0, (table_start_y / height) - 0.02)  # Margen 2% arriba
+                bottom = min(1.0, (table_end_y / height) + 0.02)  # Margen 2% abajo
+                print(f"✅ [DETECT BOUNDS] Tabla detectada: top={top:.2%}, bottom={bottom:.2%}")
+            else:
+                print("⚠️ [DETECT BOUNDS] No se detectaron límites claros, usando valores por defecto")
+                top = 0.25
+                bottom = 0.98
+            
+            # Márgenes laterales fijos (las tablas suelen estar centradas)
+            left = 0.03
+            right = 0.97
+            
+            return {
+                "top": top,
+                "bottom": bottom,
+                "left": left,
+                "right": right
+            }
+            
+        except Exception as e:
+            print(f"❌ [DETECT BOUNDS] Error detectando límites: {str(e)}")
+            print(f"📚 Stack trace: {traceback.format_exc()}")
+            return {"top": 0.25, "bottom": 0.98, "left": 0.03, "right": 0.97}
+    
     def _crop_image_for_items(self, image_bytes: bytes, crop_params: Optional[Dict[str, float]] = None) -> bytes:
         """
         Genera una versión recortada de la imagen centrada en la zona de la tabla de inventario.
@@ -319,12 +432,14 @@ class AC21Processor:
     def sanitize_article_data(self, articles: List[Dict]) -> List[Dict]:
         """
         Sanitiza y valida los datos de los artículos principales.
+        Respeta el indice_fila extraído del documento (puede tener saltos).
+        Si el OCR no proporcionó indice_fila, asigna uno secuencial basándose en la posición.
         """
         sanitized = []
         if not isinstance(articles, list):
             return sanitized
             
-        for article in articles:
+        for index, article in enumerate(articles, start=1):
             if not isinstance(article, dict):
                 continue
             
@@ -344,21 +459,29 @@ class AC21Processor:
                 ""
             )
             
+            # Índice de fila: OBLIGATORIO - debe venir del OCR
+            # NO usar fallbacks - si falta, es un error del OCR
+            indice_fila = None
+            try:
+                idx_raw = article.get("indice_fila") or article.get("indice") or article.get("fila")
+                if idx_raw is not None and str(idx_raw).strip() != "":
+                    indice_fila = int(str(idx_raw))
+            except (ValueError, TypeError):
+                pass
+            
+            # Si no se pudo extraer del OCR, registrar advertencia pero NO asignar fallback
+            if indice_fila is None:
+                codigo_art = article.get("codigo_producto") or article.get("titulo_corto") or f"artículo_{index}"
+                logger.warning(f"⚠️ [OCR] ADVERTENCIA CRÍTICA: Artículo sin indice_fila extraído del documento. Código: {codigo_art}, Posición en array: {index}. El OCR debe extraer el número de la primera columna del documento.")
+                # Dejar como None - el frontend debe validar y rechazar si falta
+            
             sanitized_article = {
+                "indice_fila": indice_fila,  # Respeta el número del documento (puede tener saltos)
                 "codigo_producto": str(codigo_producto).strip(),
                 "observaciones": str(observaciones).strip(),  # Se mapeará a descripcion en la BD
                 "numero_serie_inicio": str(article.get("numero_serie_inicio") or "").strip(),
                 "numero_serie_fin": str(article.get("numero_serie_fin") or "").strip(),
             }
-
-            # Índice de fila (opcional): número de línea tal y como aparece en la tabla del AC21
-            try:
-                idx_raw = article.get("indice_fila") or article.get("indice") or article.get("fila")
-                if idx_raw is not None and str(idx_raw).strip() != "":
-                    sanitized_article["indice_fila"] = int(str(idx_raw))
-            except (ValueError, TypeError):
-                # Si no se puede convertir, simplemente no añadimos el campo
-                pass
             
             # Extraer cantidad: debe ser un número entero válido
             try:
@@ -378,9 +501,59 @@ class AC21Processor:
                 sanitized_article["cc"] = ""
             else:
                 # Mantener como string para permitir cualquier valor
-                sanitized_article["cc"] = str(cc_value).strip()
+                cc_str = str(cc_value).strip()
+                # Si después de trim está vacío o es solo símbolos sin número, dejar como ""
+                # Validar que realmente contiene un número (1, 2, 3, etc.)
+                if not cc_str:
+                    sanitized_article["cc"] = ""
+                else:
+                    # Intentar validar que es un número válido
+                    try:
+                        # Si se puede convertir a número, es válido
+                        int(float(cc_str))
+                        sanitized_article["cc"] = cc_str
+                    except (ValueError, TypeError):
+                        # Si no es un número, probablemente son solo símbolos - dejar vacío
+                        print(f"⚠️ [OCR] CC contiene símbolos no numéricos: '{cc_str}', dejando como vacío")
+                        sanitized_article["cc"] = ""
             
             sanitized.append(sanitized_article)
+        
+        # VALIDACIÓN POST-SANITIZACIÓN: Detectar duplicados en indice_fila
+        # NOTA: Los duplicados pueden ser legítimos si el documento original tiene filas con el mismo número.
+        # Por lo tanto, NO eliminamos duplicados automáticamente, solo registramos una advertencia.
+        indices_vistos = {}
+        duplicados_encontrados = []
+        for idx, art in enumerate(sanitized):
+            indice_fila = art.get("indice_fila")
+            if indice_fila is not None:
+                if indice_fila in indices_vistos:
+                    # Duplicado detectado - puede ser legítimo del documento o un error del OCR
+                    duplicados_encontrados.append({
+                        "indice_fila": indice_fila,
+                        "primera_ocurrencia": indices_vistos[indice_fila],
+                        "ocurrencia_duplicada": idx,
+                        "codigo_primera": sanitized[indices_vistos[indice_fila]].get("codigo_producto", "sin código"),
+                        "codigo_duplicada": art.get("codigo_producto", "sin código")
+                    })
+                    logger.warning(f"⚠️ [OCR] DUPLICADO DETECTADO: indice_fila {indice_fila} aparece en posiciones {indices_vistos[indice_fila]} y {idx}")
+                    # Agregar también a indices_vistos para detectar múltiples duplicados del mismo número
+                    if isinstance(indices_vistos[indice_fila], list):
+                        indices_vistos[indice_fila].append(idx)
+                    else:
+                        indices_vistos[indice_fila] = [indices_vistos[indice_fila], idx]
+                else:
+                    indices_vistos[indice_fila] = idx
+        
+        # Si hay duplicados, registrar advertencia pero NO eliminar (pueden ser legítimos del documento)
+        if duplicados_encontrados:
+            logger.warning(f"⚠️ [OCR] ADVERTENCIA: Se detectaron {len(duplicados_encontrados)} indice_fila duplicados.")
+            logger.warning(f"   Esto puede ser legítimo si el documento original tiene filas con el mismo número.")
+            logger.warning(f"   O puede ser un error del OCR si está inventando filas que no existen.")
+            logger.warning(f"   Se mantienen TODAS las filas para que el usuario pueda revisar.")
+            for dup in duplicados_encontrados:
+                logger.warning(f"   - indice_fila {dup['indice_fila']}: primera en posición {dup['primera_ocurrencia']} (código: {dup['codigo_primera']}), duplicada en posición {dup['ocurrencia_duplicada']} (código: {dup['codigo_duplicada']})")
+            # NO eliminamos duplicados - se mantienen todas las filas para revisión manual
                 
         return sanitized
 
@@ -472,12 +645,23 @@ class AC21Processor:
         """
         print("🖼️ Iniciando procesamiento de imagen (modo 2-pasadas)...")
         try:
+            # 0. Preprocesar imagen (mejorar calidad)
+            print("🔄 [PREPROCESS] Aplicando preprocesamiento de imagen...")
+            processed_image_bytes = self.preprocess_image(image_bytes)
+            
             # 1. Codificar imagen completa (para cabecera/empresas/firmas)
-            base64_image_full = self.encode_image(image_bytes)
+            base64_image_full = self.encode_image(processed_image_bytes)
             print("✅ Imagen completa codificada en base64")
 
-            # 1b. Generar imagen recortada para la tabla (ITEMS) y codificarla
-            cropped_bytes = self._crop_image_for_items(image_bytes, crop_params=crop_params)
+            # 1b. Detectar límites de tabla automáticamente si no se proporcionan
+            if crop_params is None:
+                print("🔍 [DETECT BOUNDS] Detectando límites de tabla automáticamente...")
+                detected_bounds = self.detect_table_bounds(processed_image_bytes)
+                crop_params = detected_bounds
+                print(f"✅ [DETECT BOUNDS] Límites detectados: {crop_params}")
+            
+            # 1c. Generar imagen recortada para la tabla (ITEMS) y codificarla
+            cropped_bytes = self._crop_image_for_items(processed_image_bytes, crop_params=crop_params)
             base64_image_items = self.encode_image(cropped_bytes)
             print("✅ Imagen recortada para ITEMS codificada en base64")
 
@@ -489,7 +673,7 @@ class AC21Processor:
             header_response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=header_messages,
-                max_tokens=1600,
+                max_tokens=2000,  # Tokens para extracción de cabecera, empresas y firmas
                 temperature=0,
                 response_format={"type": "json_object"}
             )
@@ -534,7 +718,7 @@ class AC21Processor:
             items_response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=items_messages,
-                max_tokens=1600,
+                max_tokens=10000,  # Tokens para capturar todas las líneas (hasta 35 artículos con datos completos)
                 temperature=0,
                 response_format={"type": "json_object"}
             )
@@ -586,6 +770,16 @@ class AC21Processor:
                 result["accesorios"] = self.sanitize_accesorios(result.get("accesorios"))
             if "equipos_prueba" in result:
                 result["equipos_prueba"] = self.sanitize_equipos_prueba(result.get("equipos_prueba"))
+
+            # 8. Validación post-OCR: Verificar integridad de extracción
+            validation_info = self._validate_extraction(cropped_bytes, result)
+            if validation_info:
+                result["_validation"] = validation_info
+                if validation_info.get("discrepancy", 0) > 2:
+                    print(f"⚠️ [VALIDATION] ADVERTENCIA: Se detectaron {validation_info['discrepancy']} líneas faltantes")
+                    print(f"   Visible: {validation_info.get('estimated_visible_rows', 'N/A')}, Extraído: {validation_info.get('extracted_count', 'N/A')}")
+                else:
+                    print(f"✅ [VALIDATION] Validación OK: {validation_info.get('extracted_count', 0)} artículos extraídos")
 
             print("================== FINAL PROCESSED DATA =================")
             print(json.dumps(result, indent=2))
@@ -711,27 +905,44 @@ class AC21Processor:
                             - Debes devolver EXACTAMENTE ese mismo número de elementos en la lista `articulos`. No debes agrupar ni fusionar filas aunque parezcan similares o repetidas.
                             - Extrae CADA fila de la tabla en una lista de objetos `articulos` (una fila = un elemento en `articulos`).
                             - Para CADA artículo, DEBES extraer los siguientes campos de la tabla:
-                              * `indice_fila`: el número de la fila tal y como aparece en la primera columna de la tabla (1, 2, 3, ...).
+                              * `indice_fila`: **OBLIGATORIO - EXTRAE el número de la PRIMERA COLUMNA del documento** (puede ser 1, 2, 3, 4, 5, etc.). 
+                                - **CRÍTICO**: Este campo es OBLIGATORIO. SIEMPRE debe tener un valor.
+                                - Si el documento tiene saltos en los números (ej: 1, 2, 5, 6...), respeta esos saltos EXACTAMENTE.
+                                - Si la primera columna NO tiene número visible, reporta `null` o `0`, pero NUNCA inventes un número secuencial.
+                                - **NO asignes números secuenciales automáticamente si no ves el número en el documento.**
+                                - El `indice_fila` debe reflejar el número REAL del documento, no forzar secuencia.
                               * `codigo_producto`: **CRÍTICO** - El valor de la columna "TÍTULO CORTO / EDICIÓN" (en ESPAÑOL) o "SHORT TITLE / EDITION" (en INGLÉS). Este es el código del producto. **NO confundir con OBSERVACIONES/REMARKS**.
                               * `observaciones`: **CRÍTICO** - El valor de la columna "OBSERVACIONES" (en ESPAÑOL) o "REMARKS" (en INGLÉS). Esta es la descripción/observaciones del producto. **MUY IMPORTANTE**: 
-                                - Este campo NO debe contener el mismo valor que "TÍTULO CORTO / EDICIÓN" o "SHORT TITLE / EDITION".
-                                - Si la celda de OBSERVACIONES/REMARKS está vacía o contiene el mismo texto que el título corto, usa una cadena vacía "".
-                                - Solo extrae texto que sea diferente del título corto y que sea información adicional sobre el producto.
+                                - **EXTRAE TODO el texto visible en la celda** (negrita, normal, todas las líneas, todo el contenido, sin omitir nada).
+                                - **NO omitas texto** - si hay texto en la celda OBSERVACIONES/REMARKS, debe aparecer completo en `observaciones`.
+                                - **REGLA DE DUPLICACIÓN (SOLO SI ES EXACTAMENTE IGUAL)**: Si el texto de OBSERVACIONES/REMARKS es EXACTAMENTE el mismo (carácter por carácter) que el texto de "TÍTULO CORTO / EDICIÓN", entonces usa "" (cadena vacía). Si hay CUALQUIER diferencia, incluso mínima, incluye el texto completo.
+                                - Si la celda está completamente vacía, usa "".
+                                - **IMPORTANTE**: Incluye TODO el texto de la celda OBSERVACIONES/REMARKS, sin filtrar ni omitir partes. Solo omite si es EXACTAMENTE igual al título corto.
                               * `cantidad`: El número de la columna "CANTIDAD" (debe ser un número entero)
                               * `numero_serie_inicio`: El valor de la columna "NÚMERO DE SERIE - INICIO"
                               * `numero_serie_fin`: El valor de la columna "NÚMERO DE SERIE - FIN"
-                              * `cc`: El valor de la columna "CC" o "ALC" (código de contabilidad / Accounting Legend Code). **BUSCA ESPECÍFICAMENTE LA COLUMNA 12**: Busca "12. ALC" (INGLÉS) o "12. CC" (ESPAÑOL) en la cabecera de la tabla. Esta columna puede estar etiquetada como "ALC", "CC", "12. ALC", o "12. CC". Los valores más comunes son 1, 2 o 3:
-                                - **1**: Contabilizable por número de serie (Accountable by serial number)
-                                - **2**: Contabilizable por cantidad (Accountable by quantity)
-                                - **3**: Acuse de recibo inicial (Initial receipt required)
-                                **IMPORTANTE**: Extrae el valor numérico que aparece en la celda de la columna 12 (ALC/CC). Puede aparecer solo el número (ej: "1"), o con marcas (ej: "1 ☑", "1 #", "1✓"). Extrae SOLO el número, ignorando las marcas. Si la celda está vacía, usa una cadena vacía "". Si encuentras cualquier otro valor numérico, extrae ese valor tal como aparece.
-                                Devuelve el valor como string (puede ser "1", "2", "3", otro valor numérico, o "" si está vacío).
+                              * `cc`: El valor de la columna "CC" o "ALC" (código de contabilidad / Accounting Legend Code). **BUSCA ESPECÍFICAMENTE LA COLUMNA 12**: Busca "12. ALC" (INGLÉS) o "12. CC" (ESPAÑOL) en la cabecera de la tabla. Esta columna puede estar etiquetada como "ALC", "CC", "12. ALC", o "12. CC".
+                                **CRÍTICO - EXTRAE EXACTAMENTE LO QUE HAY - PUEDE ESTAR VACÍO EN TODAS LAS FILAS:**
+                                - Si la celda tiene un número visible y claro (ej: "1", "2", "3", "4", etc.), extrae ese número como string.
+                                - Si la celda tiene un número con marcas (ej: "1 ☑", "1 #", "1✓"), extrae SOLO el número, ignorando las marcas.
+                                - Si la celda está vacía, tiene solo símbolos sin número, tiene solo puntos/círculos, o no hay número visible, usa "" (cadena vacía).
+                                - **PROHIBIDO ABSOLUTAMENTE:**
+                                  * NO inventes valores.
+                                  * NO asumas valores por defecto.
+                                  * NO uses valores de otras filas.
+                                  * NO asignes secuencias (1, 2, 3, 4...).
+                                  * NO uses el valor de `indice_fila` para CC.
+                                  * NO asumas que debe haber un valor.
+                                - **Si no estás 100% seguro de que hay un número visible y claro, usa "".**
+                                - Si no encuentras la columna CC/ALC en la cabecera, usa "" para TODAS las filas.
+                                - **RECUERDA: Es PERFECTAMENTE NORMAL que CC esté vacío en TODAS las filas. No intentes "completar" valores faltantes.**
+                                Devuelve el valor como string (puede ser cualquier número visible en la celda, o "" si está vacío - ES NORMAL que esté vacío).
                             - Es CRÍTICO que no omitas ningún artículo, aunque dos filas sean idénticas o casi idénticas. Si hay 30 filas en la tabla, debe haber 30 elementos en `articulos`, con `indice_fila` de 1 a 30 sin huecos.
                             - **IMPORTANTE**: 
                               - "TÍTULO CORTO / EDICIÓN" (ESPAÑOL) o "SHORT TITLE / EDITION" (INGLÉS) va a `codigo_producto`.
                               - "OBSERVACIONES" (ESPAÑOL) o "REMARKS" (INGLÉS) va a `observaciones`.
-                              - **NO dupliques información**: Si OBSERVACIONES/REMARKS contiene el mismo texto que TÍTULO CORTO/EDICIÓN, deja `observaciones` como cadena vacía "".
-                              - `observaciones` solo debe contener información adicional que NO esté en el título corto.
+                              - **REGLA DE DUPLICACIÓN (SOLO SI ES EXACTAMENTE IGUAL)**: Si el texto de OBSERVACIONES/REMARKS es EXACTAMENTE igual (carácter por carácter) al texto de TÍTULO CORTO/EDICIÓN, entonces deja `observaciones` como cadena vacía "". Si hay CUALQUIER diferencia, incluye el texto completo de OBSERVACIONES/REMARKS.
+                              - **NO filtres texto parcialmente**: Si OBSERVACIONES/REMARKS contiene texto que también aparece parcialmente en el título corto, DEBES incluirlo completo en `observaciones`. Solo omite si es EXACTAMENTE igual.
                         4.  **Accesorios y Equipos de Prueba**: Extrae las listas de "ACCESORIOS ENTREGADOS" y "EQUIPOS PRUEBAS". A veces el título puede variar ligeramente (p.ej. "EQUIPOS DE PRUEBA AICOX"); debes poder manejar estas variaciones.
                         5.  **Firmas (CRÍTICO)**:
                             - El documento tiene dos bloques de firma: uno a la **izquierda (recuadro 15)** y otro a la **derecha (recuadro 16)**.
@@ -777,7 +988,7 @@ class AC21Processor:
                           "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
                           "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
                           "articulos": [
-                            { "indice_fila": "Int (número de fila en la tabla, empezando en 1)", "codigo_producto": "String (TÍTULO CORTO / EDICIÓN)", "observaciones": "String (OBSERVACIONES/REMARKS)", "cantidad": "Int", "numero_serie_inicio": "String", "numero_serie_fin": "String", "cc": "String (valores válidos: '1', '2' o '3')" }
+                            { "indice_fila": "Int (número de fila en la tabla, empezando en 1)", "codigo_producto": "String (TÍTULO CORTO / EDICIÓN)", "observaciones": "String (OBSERVACIONES/REMARKS)", "cantidad": "Int", "numero_serie_inicio": "String", "numero_serie_fin": "String", "cc": "String (puede ser cualquier número visible en la celda CC/ALC, o '' si está vacío - ES NORMAL que esté vacío en todas las filas)" }
                           ],
                           "accesorios": [
                             { "descripcion": "String", "cantidad": "Int" }
@@ -822,98 +1033,73 @@ class AC21Processor:
                     {
                         "type": "text",
                         "text": """
-                        Analiza la imagen de este documento AC-21 y EXTRAe ÚNICAMENTE:
-                        - La CABECERA:
-                          * `tipo_transaccion`: **CRÍTICO** - Tipo de transacción. **BUSCA ESPECÍFICAMENTE EL PUNTO 1**: Busca "1." seguido de las opciones: "TRANSFER", "INVENTORY", "DESTRUCTION", "HAND RECEIPT", "OTHER" (INGLÉS) o "TRANSFERENCIA", "INVENTARIO", "DESTRUCCION", "RECIBO EN MANO", "OTRO" (ESPAÑOL). Detecta qué casilla está marcada (✓, X, o cualquier marca visible) en el punto 1. **IMPORTANTE**: Solo una casilla debe estar marcada. Si ninguna está marcada o no puedes detectarlo, devuelve `"transferencia"` como valor por defecto. Devuelve el valor como string: `"transferencia"`, `"inventario"`, `"destruccion"`, `"recibo_en_mano"`, o `"otro"`. Si no encuentras ninguna marca, usa `"transferencia"` como valor por defecto.
-                          * `numero_registro_salida`: **CRÍTICO** - Número de registro de salida. Este es un NÚMERO o CÓDIGO alfanumérico (ej: "SA2024-0001", "12345", etc.), **NO es una FECHA, NO es "DATE OF REPORT", NO es "DATE OF TRANSACTION", NO es una dirección física, NO es un número ODMC, NO es "ACCT. NO"**. **BUSCA ESPECÍFICAMENTE EL PUNTO 4**: Busca "4." seguido de "Nº Registro de Salida" (ESPAÑOL) o "Outgoing Number" (INGLÉS). Etiquetas en ESPAÑOL: "4. Nº Registro de Salida", "Nº Registro de Salida", "Número Registro Salida", "Registro Salida". Etiquetas en INGLÉS: "4. Outgoing Number", "Outgoing No.", "Exit Registration Number", "Registration Number", "Exit Reg. No.", "Reg. No.". **⚠️⚠️⚠️ CRÍTICO - NO CONFUNDAS CON FECHAS**: Si encuentras una fecha (formato YYYY-MM-DD, DD/MM/YYYY, o similar) en el punto 4, NO la uses. Las fechas pertenecen a los puntos 3 (DATE OF REPORT) y 5 (DATE OF TRANSACTION), NO al punto 4. **IMPORTANTE**: Si en el punto 4 no encuentras ningún valor o el campo está vacío, usa una cadena vacía "". NO inventes valores. Si encuentras una fecha, NO la uses aquí. Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si encuentras una dirección completa (con calle, número, ciudad), NO la uses aquí. Si no encuentras un número de registro de salida en el punto 4, usa una cadena vacía "".
-                          * `fecha_informe`: **CRÍTICO** - Fecha del informe. **BUSCA ESPECÍFICAMENTE EL PUNTO 3**: Busca "3." seguido de "DATE OF REPORT" o "Fecha del Informe". Etiquetas en ESPAÑOL: "3. Fecha del Informe", "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Etiquetas en INGLÉS: "3. DATE OF REPORT", "3. Report Date", "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15"). NO uses números ODMC, códigos, "ACCT. NO", ni ningún otro valor que no sea una fecha. Si no encuentras una fecha en el punto 3, usa una cadena vacía "".
-                          * `numero_registro_entrada`: **CRÍTICO** - Número de registro de entrada. Este es un NÚMERO o CÓDIGO alfanumérico, **NO es un número ODMC, NO es "ACCT. NO", NO es el número ODMC de ninguna empresa**. **BUSCA ESPECÍFICAMENTE EL PUNTO 6**: Busca "6." seguido de "Nº Registro de Entrada" (ESPAÑOL) o "Incoming Number" (INGLÉS). Etiquetas en ESPAÑOL: "6. Nº Registro de Entrada", "Nº Registro de Entrada", "Registro Entrada". Etiquetas en INGLÉS: "6. Incoming Number", "Incoming No.", "Entry Registration Number", "Entry Reg. No.". **⚠️⚠️⚠️ CRÍTICO - NO CONFUNDAS**: Si encuentras un número que está en la sección de empresas (junto a "ACCT. NO" o "ODMC"), ese número pertenece a `numero_odmc` de la empresa, NO a `numero_registro_entrada`. Ejemplos de números ODMC que NO debes usar aquí: "000303", "EMAD-004-E08", "02.01.06.21", etc. **IMPORTANTE**: Si en el punto 6 no encuentras ningún valor o el campo está vacío, usa una cadena vacía "". NO inventes valores. Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si no encuentras un número de registro de entrada en el punto 6, usa una cadena vacía "".
-                          * `fecha_transaccion`: **🔥 CRÍTICO - ESTE CAMPO ES PRIORITARIO** - Fecha de la transacción. **⚠️⚠️⚠️ ATENCIÓN: Este campo es DIFERENTE de "Fecha del Informe" / "Date of Report". NO los confundas. ⚠️⚠️⚠️** 
-                          
-                          **INSTRUCCIONES ESPECÍFICAS PARA EXTRAER `fecha_transaccion`:**
-                          1. **BUSCA ESPECÍFICAMENTE EL PUNTO 5**: Busca "5." seguido de texto que mencione "DATE OF" o "FECHA DE". La sección 5 es SIEMPRE la fecha de transacción. NO confundas con el punto 3 que es la fecha del informe.
-                          2. **BUSCA EN LA CABECERA**: Escanea toda la parte superior del documento (cabecera) buscando:
-                             - "5." seguido de "DATE OF TRASACTION" o "DATE OF TRANSACTION" o "FECHA DE TRANSACCIÓN"
-                             - Cualquier fecha que aparezca después del punto 5 y antes del punto 6 o 7
-                          3. Etiquetas en ESPAÑOL: "5. Fecha de la Transacción", "5. Fecha Transacción", "5. Fecha de Transacción", "Fecha de la Transacción", "Fecha Transacción".
-                          4. Etiquetas en INGLÉS: "5. DATE OF TRASACTION" (con error de ortografía), "5. DATE OF TRANSACTION", "5. DATE OF TRAS ACTION", "5. Transaction Date", "5. DATE OF TRASACTION" (con error).
-                          5. **REGLA ABSOLUTA**: 
-                             - Si ves "3." seguido de "DATE OF REPORT" o "Fecha del Informe" → esa fecha va a `fecha_informe` (punto 3)
-                             - Si ves "5." seguido de "DATE OF TRANSACTION" / "DATE OF TRASACTION" / "Fecha de la Transacción" → esa fecha va a `fecha_transaccion` (punto 5)
-                          6. **BUSCA ACTIVAMENTE EL PUNTO 5**: Escanea la cabecera buscando específicamente "5." seguido de "DATE OF" o "FECHA DE" y luego una fecha. Esa fecha es `fecha_transaccion`. Si el punto 5 está vacío o no tiene fecha visible, busca cualquier fecha que esté en la misma fila o cerca del punto 5.
-                          7. Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15").
-                          8. NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha.
-                          9. **SI ENCUENTRAS una fecha en el punto 5 (junto a "5." y "Transaction"/"Transacción"/"Trasaction"), esa es `fecha_transaccion`.**
-                          10. **IMPORTANTE**: Si el punto 5 existe pero no tiene fecha visible o está vacío, busca en la misma área visual (misma fila o columna) cualquier fecha que pueda corresponder al punto 5.
-                          11. Si NO encuentras ninguna fecha en el punto 5 o cerca del punto 5, usa una cadena vacía "".
-                        - **Empresas**: 
-                          * Busca dos secciones de empresa. Identifícalas por posición:
-                            - ARRIBA (parte superior) → `empresa_origen`
-                            - ABAJO (parte inferior) → `empresa_destino`
-                          * Si hay etiquetas, úsalas como referencia:
-                            - "DE", "FROM", "ORIGEN" → `empresa_origen`
-                            - "PARA", "TO", "DESTINATION" → `empresa_destino`
-                          * Extrae para cada empresa siguiendo el orden típico (puede haber saltos):
-                            - **`numero_odmc`**: Busca "ACCT. NO" o "ODMC" y extrae el código. Formato: "EMAD-004-E08", "02.01.06.21", "000303", "2010622", etc.
-                            - **`nombre`**: Nombre completo de la empresa/organización. Está después del número ODMC, ANTES de dirección/ciudad. Las letras sueltas (T, R, F, OM, etc.) son parte de "TO" o "FROM" escritas en VERTICAL, NO son etiquetas. Ignora esas letras verticales. El nombre puede ser múltiples líneas. **NO uses ciudades como nombre**.
-                            - **`direccion`**: Dirección física (calle, número). Aparece después del nombre. Si solo hay ciudad sin calle, deja vacío.
-                            - **`codigo_postal`**: **🔥🔥🔥 CRÍTICO - BUSCA ACTIVAMENTE ESTE CAMPO** - Código postal numérico (típicamente 5 dígitos en España). **ESTE CAMPO SIEMPRE ESTÁ PRESENTE EN LA INFORMACIÓN DE LA EMPRESA, DESPUÉS DE LA DIRECCIÓN**. **FORMATOS COMUNES**:
-                              - **Formato con guión y paréntesis**: "28300-ARANJUEZ (MADRID)" → codigo_postal: "28300", ciudad: "ARANJUEZ", provincia: "MADRID"
-                              - **Formato con guión y paréntesis**: "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → codigo_postal: "28703", ciudad: "SAN SEBASTIAN DE LOS REYES", provincia: "MADRID"
-                              - **Formato con guión**: "28071 – Madrid" → codigo_postal: "28071", ciudad: "Madrid"
-                              - **Formato separado por espacio**: "28071 Madrid" → codigo_postal: "28071", ciudad: "Madrid"
-                              - **PATRÓN CLAVE**: Busca un número de 5 dígitos (ej: "28071", "28300", "28703", "08001", "41001") que aparece DESPUÉS de la dirección y ANTES o JUNTO a la ciudad
-                              - **EJEMPLOS REALES DE DOCUMENTOS**:
-                                * "C/ JOAQUIN RODRIGO, 11\n28300-ARANJUEZ (MADRID)" → codigo_postal: "28300"
-                                * "AV.SOMOSIERRA,12\n28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → codigo_postal: "28703"
-                                * "C/ Vitruvio, 1\n28071 – Madrid" → codigo_postal: "28071"
-                              - Si no encuentras un código postal (5 dígitos numéricos), usa "".
-                            - **`ciudad`**: **🔥🔥🔥 CRÍTICO - BUSCA ACTIVAMENTE ESTE CAMPO** - Nombre de la ciudad. **ESTE CAMPO SIEMPRE ESTÁ PRESENTE EN LA INFORMACIÓN DE LA EMPRESA, DESPUÉS DEL CÓDIGO POSTAL**. **FORMATOS COMUNES**:
-                              - **Formato con guión y paréntesis**: "28300-ARANJUEZ (MADRID)" → ciudad: "ARANJUEZ"
-                              - **Formato con guión y paréntesis**: "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → ciudad: "SAN SEBASTIAN DE LOS REYES"
-                              - **Formato con guión**: "28071 – Madrid" → ciudad: "Madrid"
-                              - **Formato separado por espacio**: "28071 Madrid" → ciudad: "Madrid"
-                              - **PATRÓN CLAVE**: Busca el nombre de la ciudad que aparece DESPUÉS del código postal (separado por guión "-" o espacio). La ciudad está ANTES de la provincia (que puede estar entre paréntesis).
-                              - **EJEMPLOS REALES DE DOCUMENTOS**:
-                                * "28300-ARANJUEZ (MADRID)" → ciudad: "ARANJUEZ"
-                                * "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → ciudad: "SAN SEBASTIAN DE LOS REYES"
-                                * "28071 – Madrid" → ciudad: "Madrid"
-                              - Ejemplos comunes: "Madrid", "ARANJUEZ", "SAN SEBASTIAN DE LOS REYES", "Barcelona", "Valencia", "Sevilla", etc.
-                              - **NO confundas ciudades con nombres de empresa**. Si aparece "Madrid", "ARANJUEZ", "SAN SEBASTIAN DE LOS REYES", etc., es `ciudad`, NO es nombre de empresa.
-                              - Si no encuentras una ciudad claramente identificable, usa "".
-                            - **`provincia`**: **🔥🔥🔥 CRÍTICO - BUSCA ACTIVAMENTE ESTE CAMPO** - Nombre de la provincia/región. **ESTE CAMPO PUEDE ESTAR ENTRE PARÉNTESIS DESPUÉS DE LA CIUDAD**. **FORMATOS COMUNES**:
-                              - **Formato entre paréntesis**: "28300-ARANJUEZ (MADRID)" → provincia: "MADRID"
-                              - **Formato entre paréntesis**: "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → provincia: "MADRID"
-                              - **Formato implícito**: "28071 – Madrid" → provincia: "Madrid" (cuando la ciudad y provincia tienen el mismo nombre)
-                              - **PATRÓN CLAVE**: Busca texto entre paréntesis "(...)" después de la ciudad. Ese texto suele ser la provincia. Si no hay paréntesis pero la ciudad es una capital (ej: "Madrid", "Barcelona"), la provincia suele ser la misma que la ciudad.
-                              - **EJEMPLOS REALES DE DOCUMENTOS**:
-                                * "28300-ARANJUEZ (MADRID)" → provincia: "MADRID"
-                                * "28703-SAN SEBASTIAN DE LOS REYES (MADRID)" → provincia: "MADRID"
-                                * "28071 – Madrid" → provincia: "Madrid" (mismo nombre que la ciudad)
-                              - Ejemplos comunes: "MADRID", "Madrid", "Barcelona", "Valencia", "Sevilla", etc.
-                              - Si no encuentras una provincia claramente identificable, usa "".
-                          * **ORDEN TÍPICO**: Número ODMC → Nombre → Dirección → Código Postal → Ciudad → Provincia
-                          * **NOTA**: Las letras sueltas (T, R, F, OM) son parte de "TO"/"FROM" escritas verticalmente. Ignóralas al extraer datos.
-                          * **NO inviertas**: ARRIBA = origen, ABAJO = destino.
-                        - El ESTADO DEL MATERIAL (sección "14. EL MATERIAL HA SIDO:" o "14. THE MATERIAL HAS BEEN:"):
-                          * Detecta qué casilla está marcada: "RECIBIDO"/"RECEIVED", "INVENTARIADO"/"INVENTORIED", o "DESTRUIDO"/"DESTROYED"
-                          * Devuelve `estado_material` con los campos booleanos correspondientes (solo uno debe ser `true`)
-                        - Las FIRMAS (bloque izquierdo = destinatario, bloque derecho = testigo):
-                          * Para cada bloque de firma, busca las etiquetas:
-                            - **Nombre**: "Nombre y Apellidos" (ESPAÑOL) o "Name", "Name and Surname" (INGLÉS) → campo `nombre`
-                            - **Empleo/Rango**: "Empleo" o "Rango" (ESPAÑOL) o "Grade" (INGLÉS) → campo `empleo_rango`
-                            - **Cargo**: "Cargo" (ESPAÑOL) o "Service" (INGLÉS) → campo `cargo`
-                        - Las OBSERVACIONES GENERALES del punto 17
+                        Extrae SOLO la cabecera, empresas, firmas y observaciones del documento AC-21.
 
-                        NO debes extraer la tabla de artículos en detalle en esta llamada. 
-                        Si por cualquier motivo incluyes el campo "articulos", "accesorios" o "equipos_prueba", debe ser siempre una lista vacía.
+                        **REGLAS FUNDAMENTALES:**
+                        1. NO inventes datos. Si un campo está vacío o no es visible, usa "" (cadena vacía).
+                        2. NO confundas campos. Cada campo tiene su ubicación específica.
+                        3. NO uses valores por defecto a menos que se indique explícitamente.
 
-                        REGLAS ESTRICTAS PARA EL JSON DE SALIDA:
-                        - El resultado debe ser SIEMPRE un único objeto JSON válido, sin texto adicional antes ni después.
-                        - Si algún valor de texto contiene comillas dobles en el documento original, reemplázalas por comillas simples en el valor para evitar errores de JSON.
-                        - Evita saltos de línea dentro de los valores de texto; usa espacios en su lugar siempre que sea posible.
-                        - Si no estás seguro de un valor de texto, usa una cadena vacía "" en lugar de inventar contenido complejo.
-                        - No añadas comentarios, explicaciones ni campos extra fuera de la estructura indicada.
+                        **CABECERA:**
+
+                        * `tipo_transaccion`: Busca "1." y detecta qué casilla está marcada:
+                          - "TRANSFER"/"TRANSFERENCIA" → "transferencia"
+                          - "INVENTORY"/"INVENTARIO" → "inventario"
+                          - "DESTRUCTION"/"DESTRUCCION" → "destruccion"
+                          - "HAND RECEIPT"/"RECIBO EN MANO" → "recibo_en_mano"
+                          - "OTHER"/"OTRO" → "otro"
+                          - Si ninguna está marcada o no es visible, usa "transferencia" (único caso con valor por defecto).
+
+                        * `numero_registro_salida`: Busca "4." seguido de "Nº Registro de Salida" (ES) o "Outgoing Number" (EN).
+                          - Extrae el número/código alfanumérico que aparece ahí.
+                          - NO uses fechas, direcciones, ni números ODMC.
+                          - Si está vacío o no es visible, usa "".
+
+                        * `fecha_informe`: Busca "3." seguido de "DATE OF REPORT" (EN) o "Fecha del Informe" (ES).
+                          - Extrae SOLO la fecha en formato YYYY-MM-DD.
+                          - NO uses números ODMC, códigos, ni otros valores.
+                          - Si no hay fecha visible, usa "".
+
+                        * `fecha_transaccion`: Busca "5." seguido de "DATE OF TRANSACTION" (EN) o "Fecha de la Transacción" (ES).
+                          - Extrae SOLO la fecha en formato YYYY-MM-DD.
+                          - NO confundas con fecha_informe (punto 3).
+                          - Si no hay fecha visible, usa "".
+
+                        * `numero_registro_entrada`: Busca "6." seguido de "Nº Registro de Entrada" (ES) o "Incoming Number" (EN).
+                          - Extrae el número/código alfanumérico que aparece ahí.
+                          - NO uses números ODMC (esos van en `numero_odmc` de empresas).
+                          - Si está vacío o no es visible, usa "".
+                        **EMPRESAS:**
+                        - Busca dos secciones: ARRIBA = `empresa_origen`, ABAJO = `empresa_destino`.
+                        - Para cada empresa, extrae en este orden:
+                          * `numero_odmc`: Busca "ACCT. NO" o "ODMC" y extrae el código visible.
+                          * `nombre`: Nombre de la empresa (después de ODMC, antes de dirección). NO uses ciudades como nombre.
+                          * `direccion`: Calle y número. Si solo hay ciudad, deja "".
+                          * `codigo_postal`: Busca número de 5 dígitos (ej: "28071", "28300"). Si no hay, usa "".
+                          * `ciudad`: Nombre de ciudad después del código postal. Si no hay, usa "".
+                          * `provincia`: Texto entre paréntesis después de ciudad, o igual a ciudad si es capital. Si no hay, usa "".
+                        - Si algún campo no es visible, usa "".
+
+                        **ESTADO DEL MATERIAL:**
+                        - Busca "14. EL MATERIAL HA SIDO:" o "14. THE MATERIAL HAS BEEN:".
+                        - Detecta casilla marcada: "RECIBIDO"/"RECEIVED" → recibido=true, "INVENTARIADO"/"INVENTORIED" → inventariado=true, "DESTRUIDO"/"DESTROYED" → destruido=true.
+                        - Si ninguna está marcada, todos false.
+
+                        **FIRMAS:**
+                        - Bloque IZQUIERDA = `destinatario`, bloque DERECHA = `testigo`.
+                        - Para cada bloque, busca etiquetas y extrae:
+                          * `nombre`: "Nombre y Apellidos" (ES) o "Name" (EN).
+                          * `empleo_rango`: "Empleo"/"Rango" (ES) o "Grade" (EN).
+                          * `cargo`: "Cargo" (ES) o "Service" (EN).
+                        - Si no hay valor visible, usa "".
+
+                        **OBSERVACIONES GENERALES:**
+                        - Extrae "17. OBSERVACIONES DEL ODMC REMITENTE". Si no hay, usa "".
+
+                        **IMPORTANTE:**
+                        - NO extraigas la tabla de artículos aquí. Deja "articulos", "accesorios", "equipos_prueba" como listas vacías [].
+                        - NO inventes datos. Si no ves algo, usa "".
+                        - JSON válido, sin texto adicional.
 
                         El JSON de salida debe tener al menos esta estructura:
                         {
@@ -966,62 +1152,148 @@ class AC21Processor:
                     {
                         "type": "text",
                         "text": """
-                        Analiza SOLO las tablas de inventario del documento AC-21 y extrae:
-                        - La lista completa de ARTÍCULOS (cada fila de la tabla principal de inventario)
-                        - La lista de ACCESORIOS ENTREGADOS
-                        - La lista de EQUIPOS DE PRUEBA
+                        Extrae SOLO las tablas de inventario del documento AC-21.
 
-                        Reglas para los ARTÍCULOS:
-                        - Primero, cuenta el número TOTAL de filas de la tabla de inventario (excluyendo cabeceras).
-                        - Debes devolver EXACTAMENTE ese mismo número de elementos en la lista `articulos`. 
-                          No debes agrupar ni fusionar filas aunque parezcan similares o repetidas.
-                        - Extrae CADA fila de la tabla en un objeto dentro de `articulos` (una fila = un elemento).
-                        - Para cada artículo, extrae:
-                          * `codigo_producto`: **CRÍTICO** - El valor de la columna "TÍTULO CORTO / EDICIÓN" (en ESPAÑOL) o "SHORT TITLE / EDITION" (en INGLÉS). Este es el código del producto. **NO confundir con OBSERVACIONES/REMARKS**.
-                          * `descripcion`: **CRÍTICO** - El valor de la columna "OBSERVACIONES" (en ESPAÑOL) o "REMARKS" (en INGLÉS). Esta es la descripción/observaciones del producto. **MUY IMPORTANTE**: 
-                            - Busca la columna etiquetada como "OBSERVACIONES" (ESPAÑOL) o "REMARKS" (INGLÉS).
-                            - Debe incluir TODO el texto visible en la celda de observaciones/remarks:
-                              * No te quedes solo con las palabras en negrita; incluye también el texto normal y las frases completas.
-                              * No resumas ni te limites al "título" en negrita: concatena todas las líneas de la celda en una sola cadena, separadas por espacios.
-                            - **MUY IMPORTANTE - NO DUPLICAR INFORMACIÓN**:
-                              * Si el contenido de OBSERVACIONES/REMARKS es idéntico o muy similar al contenido de TÍTULO CORTO/EDICIÓN, usa una cadena vacía "" para `descripcion`.
-                              * `descripcion` solo debe contener información adicional que NO esté ya en `codigo_producto`.
-                              * Si la celda de OBSERVACIONES/REMARKS está vacía, usa una cadena vacía "".
-                          * `cantidad` (CANTIDAD, entero)
-                          * `numero_serie_inicio` (NÚMERO DE SERIE - INICIO)
-                          * `numero_serie_fin` (NÚMERO DE SERIE - FIN)
-                          * `cc`: **CRÍTICO** - El valor de la columna "CC" o "ALC" (código de contabilidad / Accounting Legend Code). **BUSCA ESPECÍFICAMENTE LA COLUMNA 12**: Busca "12. ALC" (INGLÉS) o "12. CC" (ESPAÑOL) en la cabecera de la tabla. Esta columna puede estar etiquetada como "ALC", "CC", "12. ALC", o "12. CC". Los valores más comunes son 1, 2 o 3:
-                            - **1**: Contabilizable por número de serie (Accountable by serial number)
-                            - **2**: Contabilizable por cantidad (Accountable by quantity)
-                            - **3**: Acuse de recibo inicial (Initial receipt required)
-                            **IMPORTANTE**: Extrae el valor numérico que aparece en la celda de la columna 12 (ALC/CC). Puede aparecer solo el número (ej: "1"), o con marcas (ej: "1 ☑", "1 #", "1✓", "1#"). Extrae SOLO el número, ignorando las marcas (☑, ✓, #, etc.). Si la celda está vacía, usa una cadena vacía "". Si encuentras cualquier otro valor numérico, extrae ese valor tal como aparece.
-                            Devuelve el valor como string (puede ser "1", "2", "3", otro valor numérico, o "" si está vacío).
+                        **REGLAS FUNDAMENTALES (OBLIGATORIAS):**
+                        1. NO inventes datos. Si un campo está vacío o no es visible, usa "" (cadena vacía).
+                        2. NO omitas información. Extrae TODO lo que veas, sin excepciones.
+                        3. NO asumas valores. Si no ves un número, no pongas "1" por defecto.
+                        4. **CRÍTICO PARA CC**: El campo `cc` puede estar vacío en TODAS las filas. Si la columna CC está vacía o solo tiene símbolos, usa "" para TODAS las filas. NUNCA asignes secuencias (1, 2, 3...) a CC. NUNCA uses el número de `indice_fila` para CC.
 
-                        Reglas para ACCESORIOS y EQUIPOS DE PRUEBA:
-                        - `accesorios`: lista de objetos { "descripcion": "String", "cantidad": "Int" }
-                        - `equipos_prueba`: lista de objetos { "codigo": "String" }
+                        **PROCESO DE EXTRACCIÓN:**
 
-                        IMPORTANTE:
-                        - En esta llamada NO es necesario devolver cabecera, empresas ni firmas. 
-                          Si incluyes esos campos, déjalos vacíos o con valores mínimos.
+                        **PASO 1 - CONTAR Y VERIFICAR FILAS:**
+                        - Cuenta EXACTAMENTE cuántas filas de datos hay en la tabla (excluyendo cabeceras).
+                        - Rango típico: 1-35 filas. Si ves más de 35, verifica que no estés contando cabeceras/pie.
+                        - Anota: N = número de filas contadas.
+                        - **CRÍTICO - NO INVENTAR FILAS**: 
+                          * SOLO extrae filas que REALMENTE VES en el documento.
+                          * NO inventes filas que no existen en el documento.
+                          * NO dupliques filas (cada `indice_fila` debe aparecer UNA SOLA VEZ).
+                          * Si el documento tiene filas 31, 32, 33, 35, 36... (NO hay fila 44), NO extraigas una fila 44.
+                          * Si el documento tiene filas 31, 32, 33, 35, 36... (NO hay fila 34), NO extraigas una fila 34.
+                          * **REGLA DE ORO**: Si NO ves la fila en el documento, NO la extraigas.
+                        - **CRÍTICO - VERIFICAR CONTINUIDAD**: Después de extraer, verifica que los `indice_fila` extraídos no tengan saltos dentro del rango visible. Si extraes filas con índices 31, 32, 34, 35... (falta la 33), eso es un ERROR - debes revisar la imagen y extraer la fila faltante. PERO si el documento NO tiene la fila 33 visible, NO la inventes.
 
-                        REGLAS ESTRICTAS PARA EL JSON DE SALIDA:
-                        - El resultado debe ser SIEMPRE un único objeto JSON válido, sin texto adicional antes ni después.
-                        - Si algún valor de texto contiene comillas dobles en el documento original, reemplázalas por comillas simples en el valor para evitar errores de JSON.
-                        - Evita saltos de línea dentro de los valores de texto; usa espacios en su lugar siempre que sea posible.
-                        - Si no estás seguro de un valor de texto, usa una cadena vacía "" en lugar de inventar contenido complejo.
+                        **PASO 2 - EXTRAER ARTÍCULOS:**
+                        - Extrae EXACTAMENTE N elementos (una fila = un elemento).
+                        - Orden: según el orden en que aparecen en el documento (puede tener saltos en numeración).
+                        - **CRÍTICO - NO INVENTAR FILAS**: 
+                          * SOLO extrae filas que REALMENTE VES en el documento.
+                          * NO inventes filas que no existen.
+                          * NO dupliques filas (cada `indice_fila` debe ser ÚNICO).
+                          * Si el documento muestra filas 31, 32, 33, 35, 36... y NO hay fila 44 visible, NO extraigas una fila 44.
+                          * **ANTES DE EXTRAER CADA FILA**: Verifica en la imagen que esa fila REALMENTE existe en el documento.
+                        - **CRÍTICO - NO OMITIR FILAS**: 
+                          * Debes extraer TODAS las filas visibles en la tabla, sin excepciones.
+                          * Si ves una fila en el documento, DEBES extraerla, aunque parezca similar a otra.
+                          * NO omitas filas porque tengan el mismo código_producto o contenido similar.
+                        - **CRÍTICO - VALIDACIÓN DE CONTENIDO**: 
+                          * Para cada fila extraída, verifica que el contenido (código_producto, observaciones, cantidad, numero_serie, cc) coincide EXACTAMENTE con lo que aparece en esa fila del documento original.
+                          * Compara mentalmente cada campo extraído con lo que ves en la imagen. Si hay discrepancia, revisa la imagen y corrige.
+                          * Asegúrate de que el código_producto, observaciones, cantidad, numero_serie y cc de cada fila extraída corresponden a la misma fila del documento.
+                        - Para cada fila, extrae estos campos de sus columnas correspondientes:
 
-                        El JSON de salida debe tener al menos esta estructura:
+                          * `indice_fila`: **OBLIGATORIO - EXTRAE el número que aparece en la PRIMERA COLUMNA de la tabla del documento** (puede ser 1, 2, 3, 4, 5, etc.). 
+                            - **CRÍTICO**: Este campo es OBLIGATORIO. SIEMPRE debe tener un valor.
+                            - Si el documento tiene saltos (ej: 1, 2, 5, 6...), respeta esos saltos EXACTAMENTE.
+                            - Si la primera columna NO tiene número visible, debes reportar esto explícitamente usando `null` o `0`, pero NUNCA inventes un número secuencial.
+                            - El `indice_fila` debe reflejar el número REAL del documento, no forzar secuencia.
+                            - **NO asignes números secuenciales automáticamente si no ves el número en el documento.**
+
+                          * `codigo_producto`: Valor de columna "TÍTULO CORTO / EDICIÓN" (ES) o "SHORT TITLE / EDITION" (EN).
+                            - NO uses el valor de "OBSERVACIONES/REMARKS" aquí.
+                            - Si está vacío, usa "".
+
+                          * `observaciones`: **CRÍTICO** - Valor de columna "OBSERVACIONES" (ES) o "REMARKS" (EN).
+                            - **EXTRAE TODO el texto de la celda** (negrita + normal, todas las líneas, todo el contenido visible, sin omitir nada).
+                            - **NO omitas texto** - si hay texto en la celda, debe aparecer completo en `observaciones`.
+                            - **REGLA DE DUPLICACIÓN (SOLO SI ES EXACTAMENTE IGUAL)**: Si el texto de OBSERVACIONES/REMARKS es EXACTAMENTE igual (carácter por carácter) al texto de `codigo_producto`, entonces usa "" (cadena vacía). Si hay CUALQUIER diferencia, incluso mínima, incluye el texto completo.
+                            - Si la celda está completamente vacía, usa "".
+                            - **IMPORTANTE**: Incluye TODO el texto de la celda OBSERVACIONES/REMARKS, sin filtrar ni omitir partes. Solo omite si es EXACTAMENTE igual al título corto.
+
+                          * `cantidad`: Número entero de columna "CANTIDAD".
+                            - Si está vacío o no es visible, usa 1 (mínimo permitido).
+
+                          * `numero_serie_inicio`: Valor de columna "NÚMERO DE SERIE - INICIO".
+                            - Si está vacío, usa "".
+
+                          * `numero_serie_fin`: Valor de columna "NÚMERO DE SERIE - FIN".
+                            - Si está vacío, usa "".
+
+                          * `cc`: **CRÍTICO - EXTRAE EXACTAMENTE LO QUE HAY - PUEDE ESTAR VACÍO EN TODAS LAS FILAS**
+                            - Busca la columna etiquetada "12. CC" (ES) o "12. ALC" (EN) en la cabecera de la tabla.
+                            - **EXTRAE EXACTAMENTE lo que aparece en la celda de esa columna para esta fila:**
+                              * Si hay un número visible y claro (ej: "1", "2", "3", "4", etc.), extrae ese número como string.
+                              * Si hay un número con marcas (ej: "1 ☑", "1 #", "1✓"), extrae SOLO el número, ignorando las marcas.
+                              * Si la celda está vacía, tiene solo símbolos sin número, tiene solo puntos/círculos, o no hay número visible, usa "" (cadena vacía).
+                            - **PROHIBIDO ABSOLUTAMENTE:**
+                              * NO inventes valores.
+                              * NO asumas valores por defecto.
+                              * NO uses valores de otras filas.
+                              * NO asignes secuencias (1, 2, 3, 4...).
+                              * NO uses el valor de `indice_fila` para CC.
+                              * NO asumas que debe haber un valor porque otras filas lo tienen.
+                            - **Si solo ves símbolos, puntos, círculos, marcas de verificación, o la celda está vacía → usa "".**
+                            - Si no encuentras la columna CC/ALC en la cabecera, usa "" para TODAS las filas.
+                            - **CRÍTICO: Si no estás 100% seguro de que hay un número visible y claro, usa "".**
+                            - **RECUERDA: Es PERFECTAMENTE NORMAL que CC esté vacío en TODAS las filas. No intentes "completar" valores faltantes.**
+
+                        **PASO 3 - VALIDAR ANTES DE RESPONDER:**
+                        - Verifica: `len(articulos) == N` (número contado en PASO 1).
+                        - Si hay discrepancia, REVISA y corrige.
+                        - **CRÍTICO - VALIDAR DUPLICADOS**: 
+                          * Verifica que NO hay `indice_fila` duplicados en los artículos extraídos.
+                          * Cada `indice_fila` debe aparecer UNA SOLA VEZ.
+                          * Si encuentras duplicados (ej: dos artículos con `indice_fila: 44`), REVISA la imagen y elimina el duplicado incorrecto.
+                          * **REGLA**: Si el documento NO muestra una fila con un número específico, NO debes tener un artículo con ese `indice_fila`.
+                        - **VALIDACIÓN DE CONTENIDO FINAL**: 
+                          * Revisa mentalmente cada artículo extraído y compara con la imagen del documento.
+                          * Verifica que el contenido de cada fila (código_producto, observaciones, cantidad, numero_serie, cc) coincide EXACTAMENTE con lo que aparece en esa fila del documento.
+                          * **CRÍTICO**: Verifica que `observaciones` contiene TODO el texto de la columna OBSERVACIONES/REMARKS, sin omitir nada (excepto si es exactamente igual al título corto).
+                          * **CRÍTICO - VALIDACIÓN DE CC**: 
+                            * Verifica que `cc` contiene exactamente lo que aparece en la columna CC/ALC, o "" si está vacío.
+                            * **RECHAZA cualquier patrón secuencial**: Si ves que CC tiene valores como "1", "2", "3", "4"... en secuencia, REVISA la imagen. Esto es un ERROR - CC debe estar vacío o tener valores específicos del documento, NO secuencias.
+                            * NO debe tener valores inventados, secuenciales, o basados en `indice_fila`.
+                            * Si todas las celdas CC están vacías en el documento, TODAS las filas deben tener `cc: ""`.
+                          * Si detectas alguna discrepancia, revisa la imagen y corrige antes de responder.
+                        - **VALIDACIÓN DE ÍNDICES Y CONTINUIDAD**: 
+                          * Los `indice_fila` deben reflejar los números de la primera columna del documento.
+                          * **CRÍTICO - DETECCIÓN DE SALTOS EN EL RANGO VISIBLE**: 
+                            * Extrae todos los `indice_fila` de los artículos extraídos.
+                            * Calcula el rango: min_indice = mínimo `indice_fila`, max_indice = máximo `indice_fila`.
+                            * **VERIFICAR SALTOS**: Revisa la imagen del documento y verifica si los saltos en `indice_fila` son del documento original o si omitiste una fila:
+                              * Si el documento original muestra un salto (ej: tiene filas 31, 32, 33, 35... y NO hay fila 34 visible en el documento), entonces el salto es VÁLIDO - respétalo.
+                              * Si el documento original tiene una fila visible que NO extrajiste (ej: el documento muestra fila 33 pero tú no la extrajiste), entonces es un ERROR - debes extraerla.
+                            * **IMPORTANTE**: Antes de reportar un salto como válido, VERIFICA en la imagen que realmente no existe esa fila en el documento. Si ves una fila en el documento pero no la extrajiste, es un ERROR y debes corregirlo.
+                            * Si el documento tiene secuencia continua pero tú extrajiste con saltos, es un ERROR - debes extraer todas las filas visibles.
+                          * **CRÍTICO - SEPARACIÓN DE CAMPOS**: 
+                            * Esta regla de secuencia SOLO aplica a `indice_fila` (la primera columna con números de fila), NO a `cc`.
+                            * El campo `cc` es COMPLETAMENTE INDEPENDIENTE de `indice_fila`.
+                            * El campo `cc` debe extraerse exactamente como aparece en la columna CC/ALC, sin secuencias, sin patrones, sin valores inventados.
+                            * Si `indice_fila` es 1, 2, 3... eso NO significa que `cc` deba ser 1, 2, 3...
+                            * Si `indice_fila` es 1, 2, 5... eso NO significa que `cc` deba seguir ningún patrón.
+                            * **RECUERDA: CC puede estar vacío en TODAS las filas, independientemente de los valores de `indice_fila`.**
+                          * Si la primera columna no tiene número visible, usa secuencia (1, 2, 3...) SOLO para `indice_fila`.
+
+                        **ACCESORIOS y EQUIPOS DE PRUEBA:**
+                        - `accesorios`: Lista de objetos con "descripcion" y "cantidad" (solo si existen en el documento).
+                        - `equipos_prueba`: Lista de objetos con "codigo" (solo si existen en el documento).
+
+                        **FORMATO JSON:**
+                        - Un único objeto JSON válido, sin texto adicional.
+                        - Campos de texto vacíos = "" (no null, no undefined).
+                        - **CRÍTICO - OBLIGATORIO**: `indice_fila` debe reflejar el número de la PRIMERA COLUMNA del documento. Si el documento tiene saltos (ej: 1, 2, 5, 6...), respétalos EXACTAMENTE. Si la primera columna NO tiene número visible, reporta `null` o `0`, pero NUNCA inventes un número secuencial. Este campo es OBLIGATORIO y debe estar presente en TODOS los artículos.
+                        - Estructura:
                         {
                           "articulos": [
-                            { "indice_fila": "Int", "codigo_producto": "String", "descripcion": "String", "cantidad": "Int", "numero_serie_inicio": "String", "numero_serie_fin": "String", "cc": "String" }
+                            { "indice_fila": 1, "codigo_producto": "...", "observaciones": "...", "cantidad": 1, "numero_serie_inicio": "...", "numero_serie_fin": "...", "cc": "" },
+                            { "indice_fila": 2, "codigo_producto": "...", "observaciones": "...", "cantidad": 1, "numero_serie_inicio": "...", "numero_serie_fin": "...", "cc": "" },
+                            { "indice_fila": 5, "codigo_producto": "...", "observaciones": "...", "cantidad": 1, "numero_serie_inicio": "...", "numero_serie_fin": "...", "cc": "" },
+                            ...
                           ],
-                          "accesorios": [
-                            { "descripcion": "String", "cantidad": "Int" }
-                          ],
-                          "equipos_prueba": [
-                            { "codigo": "String" }
-                          ]
+                          "accesorios": [ { "descripcion": "...", "cantidad": 1 } ],
+                          "equipos_prueba": [ { "codigo": "..." } ]
                         }
                         """
                     },
@@ -1073,7 +1345,7 @@ class AC21Processor:
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                max_tokens=2048,
+                max_tokens=2500,  # Tokens para reparación de JSON
                 temperature=0,
                 response_format={"type": "json_object"}
             )
@@ -1277,5 +1549,68 @@ class AC21Processor:
         logger.info(f"Datos post-procesados (firmas): {data.get('firmas')}")
         return data
 
+    def _validate_extraction(self, image_bytes: bytes, extracted_data: Dict) -> Optional[Dict]:
+        """
+        Valida que el número de artículos extraídos es razonable comparado con la imagen.
+        Retorna información de validación o None si no se puede validar.
+        """
+        if Image is None:
+            return None
+        
+        try:
+            extracted_count = len(extracted_data.get('articulos', []))
+            
+            # Estimación simple: contar líneas horizontales densas en la zona de tabla
+            # Esto es una aproximación, no un conteo exacto
+            # Los documentos AC21 típicamente tienen entre 1 y 35 líneas de inventario
+            img = Image.open(BytesIO(image_bytes)).convert("L")
+            width, height = img.size
+            
+            # Analizar densidad de líneas horizontales (las filas de tabla tienen más contenido)
+            row_densities = []
+            for y in range(0, height, 10):  # Muestrear cada 10px
+                row = img.crop((0, y, width, min(y + 10, height)))
+                from PIL import ImageStat
+                stat = ImageStat.Stat(row)
+                # Mayor desviación = más contenido (texto, bordes)
+                row_densities.append(stat.stddev[0])
+            
+            if not row_densities:
+                return None
+            
+            # Contar "picos" de densidad (cada pico = posible fila de tabla)
+            threshold = sorted(row_densities)[int(len(row_densities) * 0.60)]  # Percentil 60
+            peaks = 0
+            in_peak = False
+            
+            for density in row_densities:
+                if density > threshold:
+                    if not in_peak:
+                        peaks += 1
+                        in_peak = True
+                else:
+                    in_peak = False
+            
+            estimated_visible_rows = max(peaks - 1, 0)  # Restar 1 por la cabecera
+            # Limitar estimación a rango razonable (1-40 líneas, considerando margen)
+            estimated_visible_rows = min(estimated_visible_rows, 40)
+            discrepancy = estimated_visible_rows - extracted_count
+            
+            validation_info = {
+                "extracted_count": extracted_count,
+                "estimated_visible_rows": estimated_visible_rows,
+                "discrepancy": discrepancy,
+                "is_reasonable": abs(discrepancy) <= 2,  # Tolerancia de ±2 filas
+                "needs_review": abs(discrepancy) > 5,  # Si faltan más de 5, necesita revisión
+                "expected_range": "1-35 líneas típicas en documentos AC21",
+                "within_expected_range": 1 <= extracted_count <= 40  # Rango esperado con margen
+            }
+            
+            return validation_info
+            
+        except Exception as e:
+            print(f"⚠️ [VALIDATION] Error en validación: {str(e)}")
+            return None
+    
     def _get_openai_client(self):
         return OpenAI(api_key=self.api_key)

@@ -219,6 +219,8 @@ interface AC21DetailProps {
 
 export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
   const router = useRouter();
+  // Estado local del albarán principal (se actualiza después de guardar)
+  const [albaranLocal, setAlbaranLocal] = useState<Albaran>(albaran);
   const [movimientos, setMovimientos] = useState<any[]>([]);
   const [paginas, setPaginas] = useState<Albaran[]>([]);
   const [paginaActual, setPaginaActual] = useState(0);
@@ -234,15 +236,73 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
   const [modalImagenAbierto, setModalImagenAbierto] = useState(false);
 
   // Obtener albarán actual (puede ser la página principal o una página específica)
-  const albaranActual = (paginas.length > 0 && paginas[paginaActual]) ? paginas[paginaActual] : albaran;
+  const albaranActual = (paginas.length > 0 && paginas[paginaActual]) ? paginas[paginaActual] : albaranLocal;
+  
+  // Actualizar albaranLocal cuando cambie el prop albaran
+  useEffect(() => {
+    setAlbaranLocal(albaran);
+  }, [albaran]);
+
+  // Función para recargar todos los datos del albarán desde el servidor
+  const recargarDatos = async (albaranGuardadoId?: number) => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      if (!token) {
+        console.error('No hay token de autenticación');
+        return;
+      }
+
+      // Determinar qué albarán recargar (el guardado o el principal)
+      const idAlbaranARecargar = albaranGuardadoId || albaranLocal.id;
+
+      // 1. Recargar el albarán principal
+      const albaranResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/albaranes/${albaranLocal.id}/`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      if (albaranResponse.ok) {
+        const albaranData = await albaranResponse.json();
+        setAlbaranLocal(albaranData);
+        console.log('✅ Albarán recargado:', albaranData);
+      }
+
+      // 2. Recargar movimientos del albarán que se guardó (o el principal si no se especifica)
+      const movimientosResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/albaranes/${idAlbaranARecargar}/movimientos/`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      if (movimientosResponse.ok) {
+        const movimientosData = await movimientosResponse.json();
+        setMovimientos(movimientosData);
+        console.log('✅ Movimientos recargados:', movimientosData.length);
+      }
+
+      // 3. Recargar páginas si es multipágina
+      if (albaranLocal.total_paginas && albaranLocal.total_paginas > 1) {
+        try {
+          const paginasDocumento = await obtenerPaginasDocumento(albaranLocal.id);
+          setPaginas(paginasDocumento);
+          console.log('✅ Páginas recargadas:', paginasDocumento.length);
+        } catch (error) {
+          console.error('Error recargando páginas:', error);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error recargando datos:', error);
+    }
+  };
 
   // Cargar páginas del documento si es multipágina
   useEffect(() => {
     const cargarPaginas = async () => {
-      if (albaran.total_paginas && albaran.total_paginas > 1) {
+      if (albaranLocal.total_paginas && albaranLocal.total_paginas > 1) {
         setCargandoPaginas(true);
         try {
-          const paginasDocumento = await obtenerPaginasDocumento(albaran.id);
+          const paginasDocumento = await obtenerPaginasDocumento(albaranLocal.id);
           setPaginas(paginasDocumento);
         } catch (error) {
           console.error('Error cargando páginas:', error);
@@ -254,7 +314,7 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
     };
 
     cargarPaginas();
-  }, [albaran.id, albaran.total_paginas]);
+  }, [albaranLocal.id, albaranLocal.total_paginas]);
 
   // Cargar empresas disponibles
   useEffect(() => {
@@ -313,11 +373,18 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
     const urlParams = new URLSearchParams(window.location.search);
     const editMode = urlParams.get('edit') === 'true';
     
-    // Verificar si es un AC21 (tiene empresa origen y destino) y ya se cargaron los movimientos
-    const esAC21 = albaranActual.empresa_origen && albaranActual.empresa_destino;
+    // Verificar si es un AC21 usando múltiples criterios (no solo empresas)
+    const esAC21 = albaranActual.direccion_transferencia === 'ENTRADA' || 
+                   albaranActual.direccion_transferencia === 'SALIDA' ||
+                   albaranActual.tipo_documento === 'TRANSFERENCIA';
     
-    if (editMode && esAC21 && movimientos.length > 0) {
-      // Activar edición para cualquier AC21 (entrada o salida) una vez que se cargaron los movimientos
+    // Solo activar si:
+    // 1. Hay parámetro ?edit=true en la URL
+    // 2. Es un AC21
+    // 3. No está ya en modo edición
+    // 4. Los movimientos se han cargado (para evitar activación prematura)
+    if (editMode && esAC21 && !modoEdicion && movimientos.length >= 0) {
+      // Activar edición para cualquier AC21 (entrada o salida) una vez que se cargaron los datos
       setTimeout(() => {
         iniciarEdicion();
         // Limpiar el parámetro de la URL para que no se active cada vez
@@ -325,7 +392,7 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
         window.history.replaceState({}, '', newUrl);
       }, 100); // Pequeño delay para que se carguen los datos primero
     }
-  }, [albaranActual.empresa_origen, albaranActual.empresa_destino, movimientos]);
+  }, [albaranActual.direccion_transferencia, albaranActual.tipo_documento, modoEdicion, movimientos.length]);
 
   const handlePrintAC21 = async () => {
     try {
@@ -401,7 +468,7 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
         descripcion: mov.descripcion || '',
         cantidad: mov.cantidad || 1,
         numero_serie: mov.numero_serie || '',
-        cc: mov.cc || 1,
+        cc: (mov.cc && mov.cc.toString().trim() !== '' && mov.cc !== 1) ? mov.cc : '', // CC puede estar vacío - solo mostrar si tiene valor real
         observaciones: mov.observaciones || ''
       })),
       // Accesorios y equipos de prueba editables
@@ -494,54 +561,149 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
       if (response.status === 401) {
         console.log('🔄 Token expirado, intentando renovar...');
         
-        const refreshToken = localStorage.getItem('refreshToken');
-        if (!refreshToken) {
-          throw new Error('No hay token de renovación. Por favor, inicia sesión nuevamente.');
+        const refreshTokenValue = localStorage.getItem('refreshToken');
+        if (!refreshTokenValue) {
+          console.error('❌ No hay refresh token disponible');
+          localStorage.removeItem('accessToken');
+          throw new Error('Sesión expirada. Por favor, inicia sesión nuevamente.');
         }
 
-        // Intentar renovar el token
-        const refreshResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/token/refresh/`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            refresh: refreshToken
-          }),
-        });
+        // Intentar renovar el token usando el endpoint correcto
+        // El API_URL ya incluye /api, así que usamos /token/refresh/
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
+        let refreshResponse: Response | null = null;
+        let refreshData: any = null;
+        let refreshError: Error | null = null;
+        
+        try {
+          console.log(`🔄 Intentando refresh token en: ${API_URL}/token/refresh/`);
+          refreshResponse = await fetch(`${API_URL}/token/refresh/`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              refresh: refreshTokenValue
+            }),
+          });
+          
+          if (refreshResponse.ok) {
+            refreshData = await refreshResponse.json();
+            console.log('✅ Refresh token exitoso');
+          } else {
+            const errorText = await refreshResponse.text();
+            console.error(`❌ Error en refresh token (${refreshResponse.status}):`, errorText);
+            refreshError = new Error(`Error al renovar token: ${refreshResponse.status}`);
+          }
+        } catch (error: any) {
+          console.error('❌ Error de red al renovar token:', error);
+          refreshError = error instanceof Error ? error : new Error('Error de red al renovar la sesión');
+        }
 
-        if (refreshResponse.ok) {
-          const refreshData = await refreshResponse.json();
+        // Si el refresh fue exitoso, usar el nuevo token
+        if (refreshResponse && refreshResponse.ok && refreshData && refreshData.access) {
           const newToken = refreshData.access;
           localStorage.setItem('accessToken', newToken);
-          console.log('✅ Token renovado exitosamente');
+          console.log('✅ Token renovado exitosamente, reintentando petición original...');
           
           // Reintentar la petición original con el nuevo token
           response = await intentarPeticion(newToken);
         } else {
-          throw new Error('No se pudo renovar el token. Por favor, inicia sesión nuevamente.');
+          // Si el refresh falló, limpiar tokens y lanzar error
+          console.error('❌ No se pudo renovar el token. Refresh token expirado o inválido.');
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
+          
+          if (refreshError) {
+            throw new Error(`Error al renovar la sesión: ${refreshError.message}. Por favor, inicia sesión nuevamente.`);
+          } else if (refreshResponse && refreshResponse.status === 401) {
+            throw new Error('Sesión expirada. Por favor, inicia sesión nuevamente.');
+          } else {
+            throw new Error('Error al renovar la sesión. Por favor, inicia sesión nuevamente.');
+          }
         }
       }
 
+      // Clonar la respuesta para poder leerla múltiples veces si es necesario
+      const responseClone = response.clone();
+      
+      // Verificar si la respuesta es exitosa (200-299)
       if (response.ok) {
-        const responseData = await response.json();
+        let responseData;
+        try {
+          responseData = await response.json();
+        } catch (jsonError) {
+          // Si no se puede parsear como JSON, intentar leer como texto desde el clon
+          try {
+            const textData = await responseClone.text();
+            console.warn('⚠️ Respuesta no es JSON válido:', textData);
+            // Si el status es 200 pero no es JSON, considerar éxito pero con advertencia
+            if (response.status >= 200 && response.status < 300) {
+              toast.success('Cambios guardados correctamente (respuesta no válida del servidor)');
+              setModoEdicion(false);
+              setDatosEditables({});
+              // Recargar todos los datos desde el servidor
+              await recargarDatos(albaranActual.id);
+              router.refresh();
+              return;
+            }
+            throw new Error(`Respuesta inválida del servidor: ${textData}`);
+          } catch (textError) {
+            console.error('❌ Error leyendo respuesta como texto:', textError);
+            throw new Error('Error al procesar la respuesta del servidor');
+          }
+        }
+        
         console.log('✅ Cambios guardados exitosamente:', responseData);
         toast.success('Cambios guardados correctamente');
         setModoEdicion(false);
         
-        // Actualizar los datos locales - si es multipágina, actualizar la página específica
-        if (paginas.length > 0) {
-          const nuevasPaginas = [...paginas];
-          nuevasPaginas[paginaActual] = responseData;
-          setPaginas(nuevasPaginas);
-        }
-        
         // Limpiar datos editables
         setDatosEditables({});
+        
+        // Recargar todos los datos desde el servidor para reflejar los cambios
+        // Usar el ID del albarán guardado (puede ser una página o el principal)
+        const albaranGuardadoId = responseData?.id || albaranActual.id;
+        await recargarDatos(albaranGuardadoId);
+        
+        // Refrescar la página para actualizar el listado de Entradas
+        router.refresh();
       } else {
-        const errorData = await response.text();
-        console.error('❌ Error del servidor:', errorData);
-        throw new Error(`Error del servidor: ${response.status} - ${errorData}`);
+        // Manejar errores del servidor - leer el body solo una vez
+        let errorData;
+        const contentType = response.headers.get('content-type');
+        
+        try {
+          if (contentType && contentType.includes('application/json')) {
+            errorData = await response.json();
+          } else {
+            errorData = await response.text();
+          }
+        } catch (readError) {
+          console.error('❌ Error leyendo respuesta de error:', readError);
+          errorData = `Error ${response.status}: ${response.statusText}`;
+        }
+        
+        console.error('❌ Error del servidor:', {
+          status: response.status,
+          statusText: response.statusText,
+          data: errorData
+        });
+        
+        // Si el error es 400 (Bad Request), mostrar detalles de validación
+        if (response.status === 400 && typeof errorData === 'object') {
+          const validationErrors = Object.entries(errorData)
+            .map(([field, errors]: [string, any]) => {
+              if (Array.isArray(errors)) {
+                return `${field}: ${errors.join(', ')}`;
+              }
+              return `${field}: ${errors}`;
+            })
+            .join('; ');
+          throw new Error(`Error de validación: ${validationErrors}`);
+        }
+        
+        throw new Error(`Error del servidor (${response.status}): ${typeof errorData === 'object' ? JSON.stringify(errorData) : errorData}`);
       }
     } catch (error) {
       console.error('❌ Error guardando cambios:', error);
@@ -708,7 +870,11 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
                 )}
                 
                 {/* Botones de edición */}
-                {(albaranActual.empresa_origen && albaranActual.empresa_destino) && !modoEdicion && (
+                {/* Mostrar botón de editar si es un AC21 (tiene direccion_transferencia o tipo_documento = TRANSFERENCIA) */}
+                {(albaranActual.direccion_transferencia === 'ENTRADA' || 
+                  albaranActual.direccion_transferencia === 'SALIDA' ||
+                  albaranActual.tipo_documento === 'TRANSFERENCIA') && 
+                  !modoEdicion && (
                   <Button 
                     variant="outline"
                     onClick={iniciarEdicion}
@@ -1103,15 +1269,16 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
                       {modoEdicion ? (
                         <select
                           className="w-full text-xs border-0 bg-transparent focus:bg-white focus:border focus:border-blue-300 rounded px-1 py-0.5 text-center"
-                          value={movimiento.cc || 1}
-                          onChange={(e) => actualizarMovimiento(index, 'cc', parseInt(e.target.value))}
+                          value={movimiento.cc || ''}
+                          onChange={(e) => actualizarMovimiento(index, 'cc', e.target.value ? parseInt(e.target.value) : null)}
                         >
+                          <option value="">-</option>
                           <option value={1}>1</option>
                           <option value={2}>2</option>
                           <option value={3}>3</option>
                         </select>
                       ) : (
-                        movimiento.cc || 1
+                        movimiento.cc || '-'
                       )}
                     </td>
                     <td className="border border-gray-400 px-3 py-1">

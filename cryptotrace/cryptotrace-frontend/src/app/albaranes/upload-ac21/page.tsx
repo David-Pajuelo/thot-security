@@ -544,6 +544,37 @@ function UploadAC21PageContent() {
         // Log de respuesta del OCR para ver qué datos extrae
         console.log('📋 [AC21] Respuesta completa del OCR:', JSON.stringify(responseData, null, 2));
         
+        // Log específico de artículos e índices de fila
+        if (responseData.articulos && Array.isArray(responseData.articulos)) {
+          console.log('🔍 [AC21] Artículos recibidos del OCR:', responseData.articulos.length);
+          const indicesExtraidos = responseData.articulos.map((art: any, idx: number) => ({
+            index: idx,
+            indice_fila: art.indice_fila,
+            tipo_indice_fila: typeof art.indice_fila,
+            codigo: art.codigo_producto || art.titulo_corto || 'sin código'
+          }));
+          console.log('🔍 [AC21] Índices de fila extraídos del OCR:', indicesExtraidos);
+          const indicesUnicos = [...new Set(responseData.articulos.map((art: any) => art.indice_fila).filter((x: any) => x != null))].sort((a: any, b: any) => a - b);
+          console.log('🔍 [AC21] Índices únicos (ordenados):', indicesUnicos);
+          // Verificar específicamente si el 44 está presente
+          const tiene44 = responseData.articulos.some((art: any) => {
+            const indice = art.indice_fila;
+            if (typeof indice === 'number') return indice === 44;
+            if (typeof indice === 'string') return parseInt(indice, 10) === 44;
+            return false;
+          });
+          console.log('🔍 [AC21] ¿Tiene índice 44?', tiene44);
+          if (tiene44) {
+            const articulo44 = responseData.articulos.find((art: any) => {
+              const indice = art.indice_fila;
+              if (typeof indice === 'number') return indice === 44;
+              if (typeof indice === 'string') return parseInt(indice, 10) === 44;
+              return false;
+            });
+            console.log('🔍 [AC21] Artículo con índice 44:', articulo44);
+          }
+        }
+        
         // Log de información de debug del backend
         if (responseData._debug) {
           console.log('🔍 [DEBUG BACKEND] Información de debug del OCR:');
@@ -1145,10 +1176,27 @@ function UploadAC21PageContent() {
       // Insertar en la posición indicada (por ejemplo, encima de la fila actual)
       nuevosArticulos.splice(insertIndex, 0, nuevaLinea);
       
-      // Actualizar todos los indice_fila para que vayan en orden secuencial (1, 2, 3, ...)
-      nuevosArticulos.forEach((articulo: any, index: number) => {
-        articulo.indice_fila = index + 1;
-      });
+      // Asignar indice_fila a la nueva línea basándose en el contexto
+      // SIN FALLBACKS - solo usar valores reales del OCR
+      if (insertIndex > 0 && nuevosArticulos[insertIndex - 1]?.indice_fila) {
+        const indiceAnterior = nuevosArticulos[insertIndex - 1].indice_fila;
+        if (typeof indiceAnterior === 'number' && !Number.isNaN(indiceAnterior)) {
+          nuevaLinea.indice_fila = indiceAnterior + 1;
+        } else {
+          nuevaLinea.indice_fila = null; // Sin fallback
+        }
+      } else if (insertIndex < nuevosArticulos.length - 1 && nuevosArticulos[insertIndex + 1]?.indice_fila) {
+        const indiceSiguiente = nuevosArticulos[insertIndex + 1].indice_fila;
+        if (typeof indiceSiguiente === 'number' && !Number.isNaN(indiceSiguiente)) {
+          nuevaLinea.indice_fila = Math.max(1, indiceSiguiente - 1);
+        } else {
+          nuevaLinea.indice_fila = null; // Sin fallback
+        }
+      } else {
+        nuevaLinea.indice_fila = null; // Sin fallback - el usuario debe asignar manualmente
+      }
+      
+      // NO forzar secuencia en los demás artículos - respetar los índices del OCR
       
       return {
         ...prev,
@@ -1432,6 +1480,20 @@ function UploadAC21PageContent() {
       return; // Cancelar todo el proceso
     }
 
+    // VALIDACIÓN CRÍTICA: Todos los artículos deben tener indice_fila válido
+    const articulosSinIndice = productosValidos.filter((index: number) => {
+      const art = processedData.articulos[index];
+      return !art || typeof art.indice_fila !== 'number' || Number.isNaN(art.indice_fila);
+    });
+
+    if (articulosSinIndice.length > 0) {
+      toast.error(
+        `ERROR CRÍTICO: ${articulosSinIndice.length} artículo(s) sin índice de fila válido. El OCR debe extraer el número de la primera columna del documento. No se puede procesar sin esta información.`,
+        { duration: 10000 }
+      );
+      return; // Cancelar todo el proceso
+    }
+
     // Preparar artículos seleccionados para el modal
     const articulosAInsertar = productosValidos.map((index: number) => {
       const art = processedData.articulos[index];
@@ -1456,7 +1518,7 @@ function UploadAC21PageContent() {
         numero_serie_inicio: art.numero_serie_inicio || art.numero_serie || '',
         numero_serie_fin: art.numero_serie_fin || art.numero_serie || '',
         numero_serie: art.numero_serie_inicio || art.numero_serie_fin || art.numero_serie || '',
-        cc: art.cc || 1
+        cc: (art.cc && art.cc.toString().trim() !== '') ? art.cc : '' // CC puede estar vacío - NO usar valor por defecto
       };
     });
 
@@ -1928,20 +1990,64 @@ function UploadAC21PageContent() {
   });
 
   // Calcular información sobre índices de fila detectados y filas faltantes
-  const filaIndices: number[] = (processedData?.articulos || []).map(
-    (art: any, idx: number) =>
-      (typeof art?.indice_fila === 'number' && !Number.isNaN(art.indice_fila))
-        ? art.indice_fila
-        : idx + 1
-  );
+  // SIN FALLBACKS - solo usar indice_fila del OCR
+  const filaIndices: number[] = (processedData?.articulos || [])
+    .map((art: any, idx: number) => {
+      // Verificar todos los tipos posibles de indice_fila
+      const indiceRaw = art?.indice_fila;
+      if (indiceRaw === null || indiceRaw === undefined) {
+        console.warn(`⚠️ [FRONTEND] Artículo en índice ${idx} sin indice_fila:`, art);
+        return null;
+      }
+      
+      // Intentar convertir a número si viene como string
+      let indiceNum: number | null = null;
+      if (typeof indiceRaw === 'number' && !Number.isNaN(indiceRaw)) {
+        indiceNum = indiceRaw;
+      } else if (typeof indiceRaw === 'string' && indiceRaw.trim() !== '') {
+        const parsed = parseInt(indiceRaw.trim(), 10);
+        if (!Number.isNaN(parsed)) {
+          indiceNum = parsed;
+        }
+      }
+      
+      if (indiceNum !== null) {
+        return indiceNum;
+      }
+      
+      console.warn(`⚠️ [FRONTEND] Artículo en índice ${idx} con indice_fila inválido:`, { indiceRaw, tipo: typeof indiceRaw, art });
+      return null;
+    })
+    .filter((idx: number | null): idx is number => idx !== null); // Filtrar nulls
 
+  // Log para debugging
+  if (processedData?.articulos?.length > 0) {
+    console.log('🔍 [FRONTEND] Índices de fila extraídos:', filaIndices);
+    console.log('🔍 [FRONTEND] Total artículos:', processedData.articulos.length);
+    console.log('🔍 [FRONTEND] Índices de fila únicos:', [...new Set(filaIndices)].sort((a, b) => a - b));
+  }
+
+  // Calcular rango visible (solo las filas que realmente están presentes)
+  const minFilaIndex = filaIndices.length > 0 ? Math.min(...filaIndices) : 0;
   const maxFilaIndex = filaIndices.length > 0 ? Math.max(...filaIndices) : 0;
   const filasPresentes = new Set(filaIndices);
+  
+  // Solo detectar filas faltantes en el RANGO VISIBLE (no desde el 1)
+  // Si el documento tiene filas 31-55, solo buscar faltantes entre 31 y 55
   const filasFaltantes: number[] = [];
-  for (let i = 1; i <= maxFilaIndex; i++) {
-    if (!filasPresentes.has(i)) {
-      filasFaltantes.push(i);
+  if (minFilaIndex > 0 && maxFilaIndex > 0) {
+    for (let i = minFilaIndex; i <= maxFilaIndex; i++) {
+      if (!filasPresentes.has(i)) {
+        filasFaltantes.push(i);
+      }
     }
+  }
+  
+  // Log para debugging de filas faltantes
+  if (filasFaltantes.length > 0) {
+    console.log('🔍 [FRONTEND] Filas faltantes detectadas:', filasFaltantes);
+    console.log('🔍 [FRONTEND] Rango visible:', `${minFilaIndex}-${maxFilaIndex}`);
+    console.log('🔍 [FRONTEND] Filas presentes:', [...filasPresentes].sort((a, b) => a - b));
   }
 
   // Función para agregar accesorio
@@ -3098,11 +3204,11 @@ function UploadAC21PageContent() {
                  {/* Aviso si faltan filas según los índices detectados por el OCR */}
                  {filasFaltantes.length > 0 && (
                    <div className="mb-2 text-xs text-yellow-900 bg-yellow-50 border border-yellow-200 rounded px-2 py-1">
-                     Faltan filas en la tabla del AC21:{" "}
+                     ℹ️ Filas faltantes en el rango visible ({minFilaIndex}-{maxFilaIndex}):{" "}
                      <span className="font-semibold">
                        {filasFaltantes.join(", ")}
                      </span>
-                     . Revisa que no se haya omitido ninguna línea del documento original.
+                     . Esto puede ser un salto en la numeración del documento original o una fila omitida por el OCR. Verifica en el documento original.
                    </div>
                  )}
                  <div className="overflow-x-auto">
@@ -3124,9 +3230,10 @@ function UploadAC21PageContent() {
                      <tbody className="bg-white divide-y divide-gray-200">
                        {processedData.articulos?.map((articulo: any, index: number) => {
                         const yaExiste = productosYaEnAlbaran.some((prod: any) => prod.index === index);
+                         // SIN FALLBACK - si no hay indice_fila, es un error del OCR
                          const rowNumber = (typeof articulo?.indice_fila === 'number' && !Number.isNaN(articulo.indice_fila))
                            ? articulo.indice_fila
-                           : index + 1;
+                           : null; // null = error - debe mostrarse claramente
                         return (
                           <tr
                             key={index}
@@ -3143,7 +3250,13 @@ function UploadAC21PageContent() {
                                >
                                  +
                                </button>
-                               {rowNumber}
+                               {rowNumber !== null ? (
+                                 rowNumber
+                               ) : (
+                                 <span className="text-red-600 font-bold" title="ERROR: El OCR no extrajo el índice de fila de este artículo">
+                                   ⚠️
+                                 </span>
+                               )}
                             </td>
                             {/* Título corto/edición (codigo_producto) */}
                             <td className="border border-gray-400 px-2 py-1">
