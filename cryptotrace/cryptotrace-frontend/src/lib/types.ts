@@ -31,6 +31,15 @@ export interface Empresa {
   updated_at?: string;
 }
 
+export interface Cryptocustodio {
+  id: number;
+  empleo_rango: string | null;
+  nombre_apellidos: string;
+  cargo: string | null;
+  empresa: number;
+  empresa_nombre?: string;
+}
+
 export interface ProductoCatalogo {
   id: number;
   codigo_producto: string;

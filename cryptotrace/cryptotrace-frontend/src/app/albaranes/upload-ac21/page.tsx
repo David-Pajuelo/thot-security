@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Upload, Building, ZoomIn, ZoomOut, MoveHorizontal, Pencil, Plus } from "lucide-react";
 import ProtectedRoute from "@/components/protectedRoute";
-import { processAC21Image, saveAC21Data, processAC21Companies, createEmpresa, guardarTipoProducto, apiFetch, ProductoCatalogo, fetchEmpresas, obtenerProductosDeAlbaran, verificarDocumentoExistente, crearPaginaAdicional, guardarEnLineaTemporal } from "@/lib/api";
+import { processAC21Image, saveAC21Data, processAC21Companies, createEmpresa, guardarTipoProducto, apiFetch, ProductoCatalogo, fetchEmpresas, fetchCryptocustodios, obtenerProductosDeAlbaran, verificarDocumentoExistente, crearPaginaAdicional, guardarEnLineaTemporal } from "@/lib/api";
 import { toast } from "sonner";
 import DocumentoExistenteModal from "@/components/albaranes/DocumentoExistenteModal";
 import AC21EntradaModal from "@/components/albaranes/AC21EntradaModal";
 import LineaTemporalModal from "@/components/albaranes/LineaTemporalModal";
+import CryptocustodioForm from "@/components/empresas/CryptocustodioForm";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -123,6 +124,10 @@ function UploadAC21PageContent() {
   const [isEditingEmpresaOrigen, setIsEditingEmpresaOrigen] = useState(false);
   const [isEditingEmpresaDestino, setIsEditingEmpresaDestino] = useState(false);
   const [empresas, setEmpresas] = useState<any[]>([]);
+  const [cryptocustodiosDestino, setCryptocustodiosDestino] = useState<any[]>([]);
+  const [showAddCryptocustodioModal, setShowAddCryptocustodioModal] = useState(false);
+  const [selectedCryptocustodioIdFirmaA, setSelectedCryptocustodioIdFirmaA] = useState<string>('');
+  const [selectedCryptocustodioIdFirmaB, setSelectedCryptocustodioIdFirmaB] = useState<string>('');
 
   // Añadir estado para los tipos de artículos
   const TIPOS_ARTICULO = ['C', 'CC'];
@@ -1966,6 +1971,22 @@ function UploadAC21PageContent() {
     });
   }, [empresas, processedData.empresa_origen?.nombre, processedData.empresa_destino?.nombre]);
 
+  // Cargar cryptocustodios de la empresa destino para rellenar firmas A/B; al cambiar de empresa, limpiar selección
+  useEffect(() => {
+    const id = processedData.empresa_destino?.id;
+    if (!id) {
+      setCryptocustodiosDestino([]);
+      setSelectedCryptocustodioIdFirmaA('');
+      setSelectedCryptocustodioIdFirmaB('');
+      return;
+    }
+    setSelectedCryptocustodioIdFirmaA('');
+    setSelectedCryptocustodioIdFirmaB('');
+    fetchCryptocustodios(Number(id))
+      .then((data) => setCryptocustodiosDestino(Array.isArray(data) ? data : []))
+      .catch(() => setCryptocustodiosDestino([]));
+  }, [processedData.empresa_destino?.id]);
+
   // Estado para el modal de agregar producto manual
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [newProduct, setNewProduct] = useState({
@@ -3612,6 +3633,41 @@ function UploadAC21PageContent() {
                     <div className="flex justify-between items-center mb-2">
                       <h3 className="text-sm font-semibold text-gray-700">15. DESTINATARIO AUTORIZADO DEL MATERIAL DE CIFRA</h3>
                     </div>
+                    {processedData.empresa_destino?.id && (
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <Label className="text-xs">Rellenar desde cryptocustodio:</Label>
+                        <select
+                          className="border rounded px-2 py-1 text-sm"
+                          value={selectedCryptocustodioIdFirmaA}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            setSelectedCryptocustodioIdFirmaA(id);
+                            if (!id) return;
+                            const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
+                            if (cc) {
+                              setProcessedData((prev: any) => ({
+                                ...prev,
+                                firmas: {
+                                  ...prev.firmas,
+                                  firma_a: {
+                                    ...prev.firmas?.firma_a,
+                                    nombre: cc.nombre_apellidos ?? '',
+                                    empleo_rango: cc.empleo_rango ?? '',
+                                    cargo: cc.cargo ?? '',
+                                  },
+                                },
+                              }));
+                            }
+                          }}
+                        >
+                          <option value="">— Seleccionar —</option>
+                          {cryptocustodiosDestino.map((cc: any) => (
+                            <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
+                          ))}
+                        </select>
+                        <button type="button" className="text-xs text-blue-600 hover:underline" onClick={() => setShowAddCryptocustodioModal(true)}>Añadir cryptocustodio</button>
+                      </div>
+                    )}
                     <div className="flex-grow grid grid-cols-2 gap-x-4 gap-y-2">
                       <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">a. Firma</label>
@@ -3669,6 +3725,40 @@ function UploadAC21PageContent() {
                         OTRO
                       </label>
                     </div>
+                    {processedData.empresa_destino?.id && (
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <Label className="text-xs">Rellenar desde cryptocustodio:</Label>
+                        <select
+                          className="border rounded px-2 py-1 text-sm"
+                          value={selectedCryptocustodioIdFirmaB}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            setSelectedCryptocustodioIdFirmaB(id);
+                            if (!id) return;
+                            const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
+                            if (cc) {
+                              setProcessedData((prev: any) => ({
+                                ...prev,
+                                firmas: {
+                                  ...prev.firmas,
+                                  firma_b: {
+                                    ...prev.firmas?.firma_b,
+                                    nombre: cc.nombre_apellidos ?? '',
+                                    empleo_rango: cc.empleo_rango ?? '',
+                                    cargo: cc.cargo ?? '',
+                                  },
+                                },
+                              }));
+                            }
+                          }}
+                        >
+                          <option value="">— Seleccionar —</option>
+                          {cryptocustodiosDestino.map((cc: any) => (
+                            <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className="flex-grow grid grid-cols-2 gap-x-4 gap-y-2">
                        <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">a. Firma</label>
@@ -3780,6 +3870,35 @@ function UploadAC21PageContent() {
                 </Button>
               </div>
             </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal Añadir cryptocustodio (empresa destino) */}
+        <Dialog open={showAddCryptocustodioModal} onOpenChange={setShowAddCryptocustodioModal}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>Añadir cryptocustodio</DialogTitle>
+              <DialogDescription>
+                Añade una persona cryptocustodio para la empresa destino. Podrás rellenar las firmas desde el desplegable.
+              </DialogDescription>
+            </DialogHeader>
+            {processedData.empresa_destino?.id && (
+              <CryptocustodioForm
+                empresaId={Number(processedData.empresa_destino.id)}
+                initialData={{
+                  empleo_rango: processedData.firmas?.firma_a?.empleo_rango ?? "",
+                  nombre_apellidos: processedData.firmas?.firma_a?.nombre ?? "",
+                  cargo: processedData.firmas?.firma_a?.cargo ?? "",
+                }}
+                onSuccess={() => {
+                  fetchCryptocustodios(Number(processedData.empresa_destino?.id))
+                    .then((data) => setCryptocustodiosDestino(Array.isArray(data) ? data : []))
+                    .catch(() => {});
+                  setShowAddCryptocustodioModal(false);
+                }}
+                onCancel={() => setShowAddCryptocustodioModal(false)}
+              />
+            )}
           </DialogContent>
         </Dialog>
 

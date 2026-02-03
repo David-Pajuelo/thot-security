@@ -256,6 +256,30 @@ export const deleteEmpresa = async (id: number): Promise<void> => {
   return apiFetch(`/empresas/${id}/`, { method: 'DELETE' });
 };
 
+// Cryptocustodios
+export const fetchCryptocustodios = async (empresaId?: number): Promise<any[]> => {
+  const url = empresaId != null ? `/cryptocustodios/?empresa=${empresaId}` : '/cryptocustodios/';
+  return apiFetch(url);
+};
+
+export const createCryptocustodio = async (data: { empleo_rango?: string; nombre_apellidos: string; cargo?: string; empresa: number }): Promise<any> => {
+  return apiFetch('/cryptocustodios/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+};
+
+export const updateCryptocustodio = async (id: number, data: Partial<{ empleo_rango: string; nombre_apellidos: string; cargo: string }>): Promise<any> => {
+  return apiFetch(`/cryptocustodios/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+};
+
+export const deleteCryptocustodio = async (id: number): Promise<void> => {
+  return apiFetch(`/cryptocustodios/${id}/`, { method: 'DELETE' });
+};
+
 // AC21 Processing
 export const processAC21Image = async (formData: FormData): Promise<any> => {
   const token = getAuthToken();

@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.utils.crypto import get_random_string
 from django.core.mail import send_mail
 from django.conf import settings
-from .models import CatalogoProducto, Albaran, MovimientoProducto, TipoProducto, LineaTemporalProducto, InventarioProducto, Empresa, UserProfile
+from .models import CatalogoProducto, Albaran, MovimientoProducto, TipoProducto, LineaTemporalProducto, InventarioProducto, Empresa, Cryptocustodio, UserProfile
 
 # ADMIN SIMPLIFICADO - Sin generación automática de contraseñas por ahora
 
@@ -14,11 +14,26 @@ class UserProfileAdmin(admin.ModelAdmin):
     list_filter = ['must_change_password', 'created_at']
     search_fields = ['user__username', 'user__email', 'user__first_name', 'user__last_name']
 
+class CryptocustodioInline(admin.TabularInline):
+    model = Cryptocustodio
+    extra = 0
+    fields = ['empleo_rango', 'nombre_apellidos', 'cargo']
+
+
 @admin.register(Empresa)
 class EmpresaAdmin(admin.ModelAdmin):
     list_display = ['nombre', 'ciudad', 'numero_odmc']
     search_fields = ['nombre', 'numero_odmc']
     list_filter = ['provincia']
+    inlines = [CryptocustodioInline]
+
+
+@admin.register(Cryptocustodio)
+class CryptocustodioAdmin(admin.ModelAdmin):
+    list_display = ['nombre_apellidos', 'empleo_rango', 'cargo', 'empresa']
+    list_filter = ['empresa']
+    search_fields = ['nombre_apellidos', 'empresa__nombre']
+
 
 @admin.register(Albaran)
 class AlbaranAdmin(admin.ModelAdmin):

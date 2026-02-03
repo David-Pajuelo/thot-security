@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import CatalogoProducto, Albaran, MovimientoProducto, TipoProducto, LineaTemporalProducto, InventarioProducto, Empresa, UserProfile
+from .models import CatalogoProducto, Albaran, MovimientoProducto, TipoProducto, LineaTemporalProducto, InventarioProducto, Empresa, Cryptocustodio, UserProfile
 from django.contrib.auth.models import User
 
 class TipoProductoSerializer(serializers.ModelSerializer):
@@ -166,6 +166,15 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'provincia', 'numero_odmc', 'direccion_completa',
             'activa'
         ]
+
+
+class CryptocustodioSerializer(serializers.ModelSerializer):
+    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+
+    class Meta:
+        model = Cryptocustodio
+        fields = ['id', 'empleo_rango', 'nombre_apellidos', 'cargo', 'empresa', 'empresa_nombre']
+
 
 class AlbaranSerializer(serializers.ModelSerializer):
     empresa_origen_info = EmpresaSerializer(source='empresa_origen', read_only=True)

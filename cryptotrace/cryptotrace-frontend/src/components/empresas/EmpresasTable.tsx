@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, Edit, Trash, AlertTriangle } from "lucide-react";
+import { PlusCircle, Edit, Trash, AlertTriangle, Users } from "lucide-react";
 import { fetchEmpresas, deleteEmpresa } from "@/lib/api";
 import { Empresa } from "@/lib/types";
+import CryptocustodiosModal from "./CryptocustodiosModal";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +25,7 @@ export default function EmpresasTable() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedEmpresa, setSelectedEmpresa] = useState<Empresa | undefined>();
   const [empresaToDelete, setEmpresaToDelete] = useState<Empresa | undefined>();
+  const [empresaCryptocustodios, setEmpresaCryptocustodios] = useState<Empresa | null>(null);
 
   const loadEmpresas = async () => {
     try {
@@ -118,6 +120,14 @@ export default function EmpresasTable() {
                   <TableCell>{empresa.numero_odmc || '-'}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Ver cryptocustodios"
+                        onClick={() => setEmpresaCryptocustodios(empresa)}
+                      >
+                        <Users className="w-4 h-4" />
+                      </Button>
                       <Button variant="ghost" size="icon" onClick={() => handleEdit(empresa)}>
                         <Edit className="w-4 h-4" />
                       </Button>
@@ -164,6 +174,14 @@ export default function EmpresasTable() {
           />
         </DialogContent>
       </Dialog>
+
+      {empresaCryptocustodios && (
+        <CryptocustodiosModal
+          empresa={empresaCryptocustodios}
+          open={!!empresaCryptocustodios}
+          onOpenChange={(open) => !open && setEmpresaCryptocustodios(null)}
+        />
+      )}
 
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>

@@ -13,12 +13,12 @@ from django.contrib.auth import authenticate
 from django.http import HttpResponse
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .models import (
-    CatalogoProducto, Albaran, MovimientoProducto, TipoProducto, LineaTemporalProducto, InventarioProducto, Empresa, UserProfile
+    CatalogoProducto, Albaran, MovimientoProducto, TipoProducto, LineaTemporalProducto, InventarioProducto, Empresa, Cryptocustodio, UserProfile
 )
 from .serializers import (
     CatalogoProductoSerializer, AlbaranSerializer, MovimientoProductoSerializer,
     TipoProductoSerializer, LineaTemporalProductoSerializer, InventarioProductoSerializer,
-    EmpresaSerializer, MovimientoProductoBasicoSerializer, CustomTokenObtainPairSerializer, UserProfileSerializer
+    EmpresaSerializer, CryptocustodioSerializer, MovimientoProductoBasicoSerializer, CustomTokenObtainPairSerializer, UserProfileSerializer
 )
 from django.db import models
 import json
@@ -3120,6 +3120,20 @@ class EmpresaViewSet(viewsets.ModelViewSet):
         empresa.activa = False
         empresa.save()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CryptocustodioViewSet(viewsets.ModelViewSet):
+    queryset = Cryptocustodio.objects.all()
+    serializer_class = CryptocustodioSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = Cryptocustodio.objects.select_related('empresa')
+        empresa_id = self.request.query_params.get('empresa')
+        if empresa_id:
+            qs = qs.filter(empresa_id=empresa_id)
+        return qs.order_by('empresa', 'nombre_apellidos')
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

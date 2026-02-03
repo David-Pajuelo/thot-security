@@ -7,7 +7,7 @@ import { ArrowLeft, FileText, Printer, ArrowUpRight, ChevronLeft, ChevronRight, 
 import { Albaran, Empresa } from "@/lib/types";
 import AlbaranMovimientos from "./AlbaranMovimientos";
 import { toast } from "sonner";
-import { obtenerPaginasDocumento, fetchEmpresas } from "@/lib/api";
+import { obtenerPaginasDocumento, fetchEmpresas, fetchCryptocustodios } from "@/lib/api";
 
 // Modal para mostrar la imagen del documento con autenticación
 interface ModalImagenDocumentoProps {
@@ -231,6 +231,9 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
   const [datosEditables, setDatosEditables] = useState<any>({});
   const [guardando, setGuardando] = useState(false);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const [cryptocustodiosDestino, setCryptocustodiosDestino] = useState<any[]>([]);
+  const [selectedCryptocustodioIdFirmaA, setSelectedCryptocustodioIdFirmaA] = useState<string>('');
+  const [selectedCryptocustodioIdFirmaB, setSelectedCryptocustodioIdFirmaB] = useState<string>('');
   
   // Estado para el modal de imagen
   const [modalImagenAbierto, setModalImagenAbierto] = useState(false);
@@ -329,6 +332,27 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
 
     cargarEmpresas();
   }, []);
+
+  // Cargar cryptocustodios de la empresa destino (para rellenar firmas en edición)
+  const empresaDestinoIdRaw = modoEdicion
+    ? (datosEditables.empresa_destino_id ?? albaranActual.empresa_destino)
+    : albaranActual.empresa_destino;
+  const empresaDestinoIdNum = typeof empresaDestinoIdRaw === 'object' && empresaDestinoIdRaw !== null
+    ? (empresaDestinoIdRaw as any)?.id
+    : empresaDestinoIdRaw;
+  useEffect(() => {
+    if (!empresaDestinoIdNum) {
+      setCryptocustodiosDestino([]);
+      setSelectedCryptocustodioIdFirmaA('');
+      setSelectedCryptocustodioIdFirmaB('');
+      return;
+    }
+    setSelectedCryptocustodioIdFirmaA('');
+    setSelectedCryptocustodioIdFirmaB('');
+    fetchCryptocustodios(Number(empresaDestinoIdNum))
+      .then((data) => setCryptocustodiosDestino(Array.isArray(data) ? data : []))
+      .catch(() => setCryptocustodiosDestino([]));
+  }, [empresaDestinoIdNum]);
 
   // Funciones de navegación
   const irPaginaAnterior = () => {
@@ -1605,6 +1629,59 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
               )}
             </div>
           </div>
+
+          {/* Rellenar firmas desde cryptocustodio (solo en edición y si hay empresa destino) */}
+          {modoEdicion && cryptocustodiosDestino.length > 0 && (
+            <div className="px-4 pb-2 flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-medium">Rellenar desde cryptocustodio:</span>
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                value={selectedCryptocustodioIdFirmaA}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedCryptocustodioIdFirmaA(id);
+                  if (!id) return;
+                  const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
+                  if (cc) {
+                    setDatosEditables((prev: any) => ({
+                      ...prev,
+                      firma_a_empleo_rango: cc.empleo_rango ?? '',
+                      firma_a_nombre_apellidos: cc.nombre_apellidos ?? '',
+                      firma_a_cargo: cc.cargo ?? '',
+                    }));
+                  }
+                }}
+              >
+                <option value="">— Firma A —</option>
+                {cryptocustodiosDestino.map((cc: any) => (
+                  <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
+                ))}
+              </select>
+              <select
+                className="border rounded px-2 py-1 text-xs"
+                value={selectedCryptocustodioIdFirmaB}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setSelectedCryptocustodioIdFirmaB(id);
+                  if (!id) return;
+                  const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
+                  if (cc) {
+                    setDatosEditables((prev: any) => ({
+                      ...prev,
+                      firma_b_empleo_rango: cc.empleo_rango ?? '',
+                      firma_b_nombre_apellidos: cc.nombre_apellidos ?? '',
+                      firma_b_cargo: cc.cargo ?? '',
+                    }));
+                  }
+                }}
+              >
+                <option value="">— Firma B —</option>
+                {cryptocustodiosDestino.map((cc: any) => (
+                  <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Campos de firma en dos columnas */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">

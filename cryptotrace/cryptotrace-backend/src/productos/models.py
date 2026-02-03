@@ -115,6 +115,28 @@ class Empresa(models.Model):
     def direccion_completa(self):
         return f"{self.direccion}, {self.codigo_postal} {self.ciudad}, {self.provincia}"
 
+
+class Cryptocustodio(models.Model):
+    """Persona cryptocustodio asociada a una empresa (1-N)."""
+    empleo_rango = models.CharField(max_length=100, blank=True, null=True, verbose_name='Empleo/Rango')
+    nombre_apellidos = models.CharField(max_length=200, verbose_name='Nombre y Apellidos')
+    cargo = models.CharField(max_length=100, blank=True, null=True, verbose_name='Cargo')
+    empresa = models.ForeignKey(
+        Empresa,
+        on_delete=models.CASCADE,
+        related_name='cryptocustodios',
+        verbose_name='Empresa',
+    )
+
+    class Meta:
+        verbose_name = 'Cryptocustodio'
+        verbose_name_plural = 'Cryptocustodios'
+        ordering = ['empresa', 'nombre_apellidos']
+
+    def __str__(self):
+        return f"{self.nombre_apellidos} ({self.empresa.nombre})"
+
+
 class Albaran(models.Model):
     TIPO_DOCUMENTO_CHOICES = [
         ('TRANSFERENCIA', 'Transferencia'),
