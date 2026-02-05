@@ -4,7 +4,7 @@
 
 Este documento lista las migraciones que se han creado en desarrollo local y que deben aplicarse en producción (VPS) cuando se despliegue.
 
-**Última actualización:** 2026-01-26
+**Última actualización:** 2026-02-02
 
 ---
 
@@ -118,6 +118,26 @@ migrations.AlterField(
 
 ---
 
+### 4. `0036_add_cryptocustodio`
+
+**Fecha:** 2026-02-02  
+**Archivo:** `cryptotrace/cryptotrace-backend/src/productos/migrations/0036_add_cryptocustodio.py`
+
+**Descripción:**
+- Crea la tabla `Cryptocustodio` con: `empleo_rango`, `nombre_apellidos`, `cargo`, `empresa` (ForeignKey a Empresa, CASCADE).
+- Permite gestionar personas cryptocustodio por empresa y usarlas en el selector de firmas del AC21 (Firma A/B).
+
+**Operaciones:**
+- `migrations.CreateModel(Cryptocustodio, ...)`
+
+**Impacto:**
+- ✅ **ADITIVA**: Solo crea tabla nueva; no modifica tablas existentes.
+- Requiere backend y frontend actualizados (API `/cryptocustodios/`, selector en upload-ac21 y AC21Detail).
+
+**Dependencias:** Depende de `0035_allow_null_cc_in_movimiento`.
+
+---
+
 ## Orden de Aplicación
 
 Las migraciones deben aplicarse en este orden:
@@ -125,10 +145,12 @@ Las migraciones deben aplicarse en este orden:
 1. `0033_remove_catalogoproducto_tipo_cryptocustodio`
 2. `0034_replace_cc_with_tipo_producto`
 3. `0035_allow_null_cc_in_movimiento`
+4. `0036_add_cryptocustodio`
 
 **Dependencias:**
 - `0034` depende de `0033`
 - `0035` depende de `0034`
+- `0036` depende de `0035`
 
 ---
 
@@ -150,8 +172,8 @@ docker-compose exec backend python manage.py migrate productos
 ### Opción 2: Aplicar migración específica
 
 ```bash
-# Aplicar hasta una migración específica
-docker-compose exec backend python manage.py migrate productos 0035_allow_null_cc_in_movimiento
+# Aplicar hasta una migración específica (ej. solo hasta 0036)
+docker-compose exec backend python manage.py migrate productos 0036_add_cryptocustodio
 ```
 
 ### Opción 3: Verificar estado de migraciones
@@ -190,6 +212,14 @@ Después de aplicar las migraciones, verificar:
    -- Verificar que cc permite NULL
    \d productos_movimientoproducto
    -- El campo 'cc' debe tener 'nullable: true'
+   ```
+
+4. **Migración 0036:**
+   ```sql
+   -- Verificar que existe la tabla Cryptocustodio
+   \dt productos_cryptocustodio
+   \d productos_cryptocustodio
+   -- Debe tener: id, empleo_rango, nombre_apellidos, cargo, empresa_id
    ```
 
 ---

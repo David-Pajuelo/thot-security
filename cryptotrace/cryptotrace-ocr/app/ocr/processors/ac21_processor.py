@@ -495,27 +495,14 @@ class AC21Processor:
             except (ValueError, TypeError):
                 sanitized_article["cantidad"] = 1
             
-            # CC puede ser cualquier valor o estar vacío
+            # CC: aceptar cualquier valor (número o código alfanumérico) tal como viene del OCR; vacío → ""
             cc_value = article.get("cc")
             if cc_value is None:
                 sanitized_article["cc"] = ""
             else:
-                # Mantener como string para permitir cualquier valor
                 cc_str = str(cc_value).strip()
-                # Si después de trim está vacío o es solo símbolos sin número, dejar como ""
-                # Validar que realmente contiene un número (1, 2, 3, etc.)
-                if not cc_str:
-                    sanitized_article["cc"] = ""
-                else:
-                    # Intentar validar que es un número válido
-                    try:
-                        # Si se puede convertir a número, es válido
-                        int(float(cc_str))
-                        sanitized_article["cc"] = cc_str
-                    except (ValueError, TypeError):
-                        # Si no es un número, probablemente son solo símbolos - dejar vacío
-                        print(f"⚠️ [OCR] CC contiene símbolos no numéricos: '{cc_str}', dejando como vacío")
-                        sanitized_article["cc"] = ""
+                # Eliminar solo si está vacío; si tiene contenido (número o alfanumérico), conservarlo
+                sanitized_article["cc"] = cc_str if cc_str else ""
             
             sanitized.append(sanitized_article)
         
@@ -926,13 +913,7 @@ class AC21Processor:
                                 - Si la celda tiene un número visible y claro (ej: "1", "2", "3", "4", etc.), extrae ese número como string.
                                 - Si la celda tiene un número con marcas (ej: "1 ☑", "1 #", "1✓"), extrae SOLO el número, ignorando las marcas.
                                 - Si la celda está vacía, tiene solo símbolos sin número, tiene solo puntos/círculos, o no hay número visible, usa "" (cadena vacía).
-                                - **PROHIBIDO ABSOLUTAMENTE:**
-                                  * NO inventes valores.
-                                  * NO asumas valores por defecto.
-                                  * NO uses valores de otras filas.
-                                  * NO asignes secuencias (1, 2, 3, 4...).
-                                  * NO uses el valor de `indice_fila` para CC.
-                                  * NO asumas que debe haber un valor.
+                                - **PROHIBIDO:** NO inventes valores. NO asumas valores por defecto. NO uses valores de otras filas. NO asumas que debe haber un valor.
                                 - **Si no estás 100% seguro de que hay un número visible y claro, usa "".**
                                 - Si no encuentras la columna CC/ALC en la cabecera, usa "" para TODAS las filas.
                                 - **RECUERDA: Es PERFECTAMENTE NORMAL que CC esté vacío en TODAS las filas. No intentes "completar" valores faltantes.**
@@ -1158,7 +1139,7 @@ class AC21Processor:
                         1. NO inventes datos. Si un campo está vacío o no es visible, usa "" (cadena vacía).
                         2. NO omitas información. Extrae TODO lo que veas, sin excepciones.
                         3. NO asumas valores. Si no ves un número, no pongas "1" por defecto.
-                        4. **CRÍTICO PARA CC**: El campo `cc` puede estar vacío en TODAS las filas. Si la columna CC está vacía o solo tiene símbolos, usa "" para TODAS las filas. NUNCA asignes secuencias (1, 2, 3...) a CC. NUNCA uses el número de `indice_fila` para CC.
+                        4. **CC**: Para CADA fila debes leer la celda de la columna "12. CC"/"12. ALC" y asignar su valor a `cc` (o "" si vacía). Un valor CC por fila; no omitas la columna en ninguna fila. No inventes ni copies de otra fila.
 
                         **PROCESO DE EXTRACCIÓN:**
 
@@ -1221,23 +1202,12 @@ class AC21Processor:
                           * `numero_serie_fin`: Valor de columna "NÚMERO DE SERIE - FIN".
                             - Si está vacío, usa "".
 
-                          * `cc`: **CRÍTICO - EXTRAE EXACTAMENTE LO QUE HAY - PUEDE ESTAR VACÍO EN TODAS LAS FILAS**
-                            - Busca la columna etiquetada "12. CC" (ES) o "12. ALC" (EN) en la cabecera de la tabla.
-                            - **EXTRAE EXACTAMENTE lo que aparece en la celda de esa columna para esta fila:**
-                              * Si hay un número visible y claro (ej: "1", "2", "3", "4", etc.), extrae ese número como string.
-                              * Si hay un número con marcas (ej: "1 ☑", "1 #", "1✓"), extrae SOLO el número, ignorando las marcas.
-                              * Si la celda está vacía, tiene solo símbolos sin número, tiene solo puntos/círculos, o no hay número visible, usa "" (cadena vacía).
-                            - **PROHIBIDO ABSOLUTAMENTE:**
-                              * NO inventes valores.
-                              * NO asumas valores por defecto.
-                              * NO uses valores de otras filas.
-                              * NO asignes secuencias (1, 2, 3, 4...).
-                              * NO uses el valor de `indice_fila` para CC.
-                              * NO asumas que debe haber un valor porque otras filas lo tienen.
-                            - **Si solo ves símbolos, puntos, círculos, marcas de verificación, o la celda está vacía → usa "".**
-                            - Si no encuentras la columna CC/ALC en la cabecera, usa "" para TODAS las filas.
-                            - **CRÍTICO: Si no estás 100% seguro de que hay un número visible y claro, usa "".**
-                            - **RECUERDA: Es PERFECTAMENTE NORMAL que CC esté vacío en TODAS las filas. No intentes "completar" valores faltantes.**
+                          * `cc`: **OBLIGATORIO POR FILA - LEE LA COLUMNA CC/ALC EN CADA FILA**
+                            - Localiza la columna "12. CC" (ES) o "12. ALC" (EN) en la cabecera de la tabla.
+                            - **Para CADA fila que extraigas debes leer explícitamente la celda de ESA fila en la columna CC/ALC.** No omitas la columna CC en ninguna fila. Si hay 20 artículos, debes haber leído 20 celdas CC (una por fila).
+                            - Contenido a extraer: si en la celda hay un número o código visible ("1", "2", "3", "C", "1A", etc.), ponlo como string; si hay número con marcas ("1 ☑"), extrae solo el número; si la celda está vacía o solo tiene símbolos/círculos sin dígito, usa "".
+                            - **PROHIBIDO:** NO inventes. NO copies el valor de otra fila. Cada fila tiene su propia celda; léela.
+                            - Si la columna CC/ALC no existe en la cabecera, usa "" en todas las filas.
 
                         **PASO 3 - VALIDAR ANTES DE RESPONDER:**
                         - Verifica: `len(articulos) == N` (número contado en PASO 1).
@@ -1251,11 +1221,7 @@ class AC21Processor:
                           * Revisa mentalmente cada artículo extraído y compara con la imagen del documento.
                           * Verifica que el contenido de cada fila (código_producto, observaciones, cantidad, numero_serie, cc) coincide EXACTAMENTE con lo que aparece en esa fila del documento.
                           * **CRÍTICO**: Verifica que `observaciones` contiene TODO el texto de la columna OBSERVACIONES/REMARKS, sin omitir nada (excepto si es exactamente igual al título corto).
-                          * **CRÍTICO - VALIDACIÓN DE CC**: 
-                            * Verifica que `cc` contiene exactamente lo que aparece en la columna CC/ALC, o "" si está vacío.
-                            * **RECHAZA cualquier patrón secuencial**: Si ves que CC tiene valores como "1", "2", "3", "4"... en secuencia, REVISA la imagen. Esto es un ERROR - CC debe estar vacío o tener valores específicos del documento, NO secuencias.
-                            * NO debe tener valores inventados, secuenciales, o basados en `indice_fila`.
-                            * Si todas las celdas CC están vacías en el documento, TODAS las filas deben tener `cc: ""`.
+                          * **VALIDACIÓN DE CC (OBLIGATORIA)**: Debe haber exactamente un valor `cc` por artículo (uno por fila). Recorre mentalmente cada fila y confirma que has leído la celda de la columna 12 para esa fila. Si falta `cc` en algún artículo, vuelve a la imagen y asígnale el valor de esa celda (o "" si está vacía).
                           * Si detectas alguna discrepancia, revisa la imagen y corrige antes de responder.
                         - **VALIDACIÓN DE ÍNDICES Y CONTINUIDAD**: 
                           * Los `indice_fila` deben reflejar los números de la primera columna del documento.
@@ -1267,18 +1233,15 @@ class AC21Processor:
                               * Si el documento original tiene una fila visible que NO extrajiste (ej: el documento muestra fila 33 pero tú no la extrajiste), entonces es un ERROR - debes extraerla.
                             * **IMPORTANTE**: Antes de reportar un salto como válido, VERIFICA en la imagen que realmente no existe esa fila en el documento. Si ves una fila en el documento pero no la extrajiste, es un ERROR y debes corregirlo.
                             * Si el documento tiene secuencia continua pero tú extrajiste con saltos, es un ERROR - debes extraer todas las filas visibles.
-                          * **CRÍTICO - SEPARACIÓN DE CAMPOS**: 
-                            * Esta regla de secuencia SOLO aplica a `indice_fila` (la primera columna con números de fila), NO a `cc`.
-                            * El campo `cc` es COMPLETAMENTE INDEPENDIENTE de `indice_fila`.
-                            * El campo `cc` debe extraerse exactamente como aparece en la columna CC/ALC, sin secuencias, sin patrones, sin valores inventados.
-                            * Si `indice_fila` es 1, 2, 3... eso NO significa que `cc` deba ser 1, 2, 3...
-                            * Si `indice_fila` es 1, 2, 5... eso NO significa que `cc` deba seguir ningún patrón.
-                            * **RECUERDA: CC puede estar vacío en TODAS las filas, independientemente de los valores de `indice_fila`.**
-                          * Si la primera columna no tiene número visible, usa secuencia (1, 2, 3...) SOLO para `indice_fila`.
+                          * **SEPARACIÓN DE CAMPOS**: El campo `cc` se extrae de la columna CC/ALC; extrae exactamente lo que aparece en cada celda. Si la primera columna no tiene número visible, usa secuencia (1, 2, 3...) SOLO para `indice_fila`.
 
-                        **ACCESORIOS y EQUIPOS DE PRUEBA:**
-                        - `accesorios`: Lista de objetos con "descripcion" y "cantidad" (solo si existen en el documento).
-                        - `equipos_prueba`: Lista de objetos con "codigo" (solo si existen en el documento).
+                        **ACCESORIOS y EQUIPOS DE PRUEBA (OBLIGATORIO EXTRAER SI ESTÁN EN LA IMAGEN):**
+                        - Estas secciones suelen estar **DEBAJO** de la tabla principal de artículos.
+                        - **ACCESORIOS:** Busca "ACCESORIOS ENTREGADOS CON CADA EQUIPO" (ES) o similar. Tabla con descripción y cantidad. Extrae cada fila como { "descripcion": "...", "cantidad": N }. Si no hay sección o está vacía, devuelve [].
+                        - **EQUIPOS DE PRUEBA:** Busca cualquier etiqueta/título que indique equipos de prueba: "PRUEBAS AICOX", "EQUIPOS PRUEBAS AICOX", "EQUIPOS DE PRUEBA", "TEST EQUIPMENT" (EN), etc. El valor puede aparecer de **dos formas**:
+                          * **(A) UNA SOLA LÍNEA (muy común):** El título/cabecera (ej. "PRUEBAS AICOX") va seguido del **código o valor** en la misma línea o en la línea siguiente. Ejemplo: "PRUEBAS AICOX" y a su derecha o debajo un valor como "ATQH 54" o "XYZ 123". En ese caso extrae ESE valor como **un único** elemento: equipos_prueba = [ { "codigo": "ATQH 54" } ]. No confundas el título con el código: el código es el valor que acompaña al título, no el texto "PRUEBAS AICOX".
+                          * **(B) TABLA CON VARIAS FILAS:** Si hay una tabla de una columna con varios códigos (una fila por equipo), extrae cada fila como { "codigo": "valor" }; devuelve un elemento por fila.
+                        - Si ves la etiqueta de equipos de prueba pero no hay ningún valor/código junto a ella, devuelve []. Si hay al menos un valor (en formato línea única o en tabla), inclúyelo en equipos_prueba. No omitas esta sección por estar al final del documento.
 
                         **FORMATO JSON:**
                         - Un único objeto JSON válido, sin texto adicional.

@@ -1630,56 +1630,62 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
             </div>
           </div>
 
-          {/* Rellenar firmas desde cryptocustodio (solo en edición y si hay empresa destino) */}
-          {modoEdicion && cryptocustodiosDestino.length > 0 && (
+          {/* Rellenar firmas desde cryptocustodio (visible en edición; desplegables si hay empresa destino y cryptocustodios) */}
+          {modoEdicion && (
             <div className="px-4 pb-2 flex flex-wrap items-center gap-2 text-xs">
               <span className="font-medium">Rellenar desde cryptocustodio:</span>
-              <select
-                className="border rounded px-2 py-1 text-xs"
-                value={selectedCryptocustodioIdFirmaA}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setSelectedCryptocustodioIdFirmaA(id);
-                  if (!id) return;
-                  const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
-                  if (cc) {
-                    setDatosEditables((prev: any) => ({
-                      ...prev,
-                      firma_a_empleo_rango: cc.empleo_rango ?? '',
-                      firma_a_nombre_apellidos: cc.nombre_apellidos ?? '',
-                      firma_a_cargo: cc.cargo ?? '',
-                    }));
-                  }
-                }}
-              >
-                <option value="">— Firma A —</option>
-                {cryptocustodiosDestino.map((cc: any) => (
-                  <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
-                ))}
-              </select>
-              <select
-                className="border rounded px-2 py-1 text-xs"
-                value={selectedCryptocustodioIdFirmaB}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setSelectedCryptocustodioIdFirmaB(id);
-                  if (!id) return;
-                  const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
-                  if (cc) {
-                    setDatosEditables((prev: any) => ({
-                      ...prev,
-                      firma_b_empleo_rango: cc.empleo_rango ?? '',
-                      firma_b_nombre_apellidos: cc.nombre_apellidos ?? '',
-                      firma_b_cargo: cc.cargo ?? '',
-                    }));
-                  }
-                }}
-              >
-                <option value="">— Firma B —</option>
-                {cryptocustodiosDestino.map((cc: any) => (
-                  <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
-                ))}
-              </select>
+              {cryptocustodiosDestino.length > 0 ? (
+                <>
+                  <select
+                    className="border rounded px-2 py-1 text-xs bg-white"
+                    value={selectedCryptocustodioIdFirmaA}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setSelectedCryptocustodioIdFirmaA(id);
+                      if (!id) return;
+                      const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
+                      if (cc) {
+                        setDatosEditables((prev: any) => ({
+                          ...prev,
+                          firma_a_empleo_rango: cc.empleo_rango ?? '',
+                          firma_a_nombre_apellidos: cc.nombre_apellidos ?? '',
+                          firma_a_cargo: cc.cargo ?? '',
+                        }));
+                      }
+                    }}
+                  >
+                    <option value="">— Firma A —</option>
+                    {cryptocustodiosDestino.map((cc: any) => (
+                      <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="border rounded px-2 py-1 text-xs bg-white"
+                    value={selectedCryptocustodioIdFirmaB}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setSelectedCryptocustodioIdFirmaB(id);
+                      if (!id) return;
+                      const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
+                      if (cc) {
+                        setDatosEditables((prev: any) => ({
+                          ...prev,
+                          firma_b_empleo_rango: cc.empleo_rango ?? '',
+                          firma_b_nombre_apellidos: cc.nombre_apellidos ?? '',
+                          firma_b_cargo: cc.cargo ?? '',
+                        }));
+                      }
+                    }}
+                  >
+                    <option value="">— Firma B —</option>
+                    {cryptocustodiosDestino.map((cc: any) => (
+                      <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <span className="text-amber-700">Empresa destino sin cryptocustodios o no seleccionada.</span>
+              )}
             </div>
           )}
 

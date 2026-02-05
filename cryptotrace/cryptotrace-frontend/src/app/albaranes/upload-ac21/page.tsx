@@ -126,6 +126,7 @@ function UploadAC21PageContent() {
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [cryptocustodiosDestino, setCryptocustodiosDestino] = useState<any[]>([]);
   const [showAddCryptocustodioModal, setShowAddCryptocustodioModal] = useState(false);
+  const [addCryptocustodioFromFirma, setAddCryptocustodioFromFirma] = useState<'A' | 'B'>('A');
   const [selectedCryptocustodioIdFirmaA, setSelectedCryptocustodioIdFirmaA] = useState<string>('');
   const [selectedCryptocustodioIdFirmaB, setSelectedCryptocustodioIdFirmaB] = useState<string>('');
 
@@ -378,7 +379,7 @@ function UploadAC21PageContent() {
             
             // Calculamos la escala SOLO si la página es pequeña.
             // Si la dimensión corta ya es grande, no reducimos resolución para no perder nitidez.
-            // Objetivo: dimensión corta ~2200px cuando sea necesario (mejor legibilidad de texto y números de serie).
+            // Objetivo: dimensión corta ~2200px (mejor legibilidad de texto y números de serie).
             const targetShortestSize = 2200;
             const scale = shortestDimension < targetShortestSize
               ? targetShortestSize / shortestDimension
@@ -1897,6 +1898,18 @@ function UploadAC21PageContent() {
       .replace(/[\u0300-\u036f]/g, ''); // Eliminar diacríticos
   };
 
+  // Normalizar nombre de persona (para match cryptocustodio)
+  const normalizePersonName = (name: string | null | undefined): string => {
+    if (!name) return '';
+    return name
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/[.,\-_]/g, '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  };
+
   // Función para hacer match de empresa del OCR con empresas existentes
   const matchEmpresa = (ocrEmpresa: any, empresasList: any[]): any | null => {
     if (!ocrEmpresa?.nombre || empresasList.length === 0) return null;
@@ -1926,6 +1939,26 @@ function UploadAC21PageContent() {
       return matchParcial;
     }
 
+    return null;
+  };
+
+  // Match de nombre OCR (firma A/B) con cryptocustodios de la empresa destino (misma lógica que empresas)
+  const matchCryptocustodio = (ocrNombre: string | null | undefined, cryptocustodiosList: any[]): any | null => {
+    if (!ocrNombre?.trim() || cryptocustodiosList.length === 0) return null;
+    const ocrNorm = normalizePersonName(ocrNombre);
+    const matchExacto = cryptocustodiosList.find((cc: any) => normalizePersonName(cc.nombre_apellidos) === ocrNorm);
+    if (matchExacto) {
+      console.log(`✅ [AC21] Match cryptocustodio Firma: "${ocrNombre}" → "${matchExacto.nombre_apellidos}" (ID: ${matchExacto.id})`);
+      return matchExacto;
+    }
+    const matchParcial = cryptocustodiosList.find((cc: any) => {
+      const ccNorm = normalizePersonName(cc.nombre_apellidos);
+      return ocrNorm.includes(ccNorm) || ccNorm.includes(ocrNorm);
+    });
+    if (matchParcial) {
+      console.log(`✅ [AC21] Match parcial cryptocustodio: "${ocrNombre}" → "${matchParcial.nombre_apellidos}" (ID: ${matchParcial.id})`);
+      return matchParcial;
+    }
     return null;
   };
 
@@ -1986,6 +2019,65 @@ function UploadAC21PageContent() {
       .then((data) => setCryptocustodiosDestino(Array.isArray(data) ? data : []))
       .catch(() => setCryptocustodiosDestino([]));
   }, [processedData.empresa_destino?.id]);
+
+  // Auto-match de cryptocustodios: tras rellenar empresa destino (por OCR), buscar si el nombre detectado en Firma A/B existe como cryptocustodio de esa empresa y preseleccionarlo
+  useEffect(() => {
+    if (cryptocustodiosDestino.length === 0 || !processedData.empresa_destino?.id) return;
+
+    const nombreA = processedData.firmas?.firma_a?.nombre;
+    const nombreB = processedData.firmas?.firma_b?.nombre;
+    const matchA = nombreA ? matchCryptocustodio(nombreA, cryptocustodiosDestino) : null;
+    const matchB = nombreB ? matchCryptocustodio(nombreB, cryptocustodiosDestino) : null;
+
+    setSelectedCryptocustodioIdFirmaA((prevA) => {
+      if (prevA) return prevA;
+      return matchA ? String(matchA.id) : '';
+    });
+    setSelectedCryptocustodioIdFirmaB((prevB) => {
+      if (prevB) return prevB;
+      return matchB ? String(matchB.id) : '';
+    });
+
+    // Rellenar campos desde el cryptocustodio encontrado (datos canónicos de BD), solo si hubo match
+    if (matchA || matchB) {
+      setProcessedData((prev: any) => {
+        let updated = { ...prev };
+        let hasChanges = false;
+        if (matchA && prev.firmas?.firma_a) {
+          updated = {
+            ...updated,
+            firmas: {
+              ...updated.firmas,
+              firma_a: {
+                ...updated.firmas.firma_a,
+                nombre: matchA.nombre_apellidos ?? updated.firmas.firma_a.nombre,
+                empleo_rango: matchA.empleo_rango ?? updated.firmas.firma_a.empleo_rango,
+                cargo: matchA.cargo ?? updated.firmas.firma_a.cargo,
+              },
+            },
+          };
+          hasChanges = true;
+        }
+        if (matchB && prev.firmas?.firma_b) {
+          updated = {
+            ...updated,
+            firmas: {
+              ...updated.firmas,
+              firma_b: {
+                ...updated.firmas.firma_b,
+                nombre: matchB.nombre_apellidos ?? updated.firmas.firma_b.nombre,
+                empleo_rango: matchB.empleo_rango ?? updated.firmas.firma_b.empleo_rango,
+                cargo: matchB.cargo ?? updated.firmas.firma_b.cargo,
+              },
+            },
+          };
+          hasChanges = true;
+        }
+        if (hasChanges) console.log('🔄 [AC21] Auto-match de cryptocustodios aplicado');
+        return hasChanges ? updated : prev;
+      });
+    }
+  }, [cryptocustodiosDestino, processedData.empresa_destino?.id, processedData.firmas?.firma_a?.nombre, processedData.firmas?.firma_b?.nombre]);
 
   // Estado para el modal de agregar producto manual
   const [showAddProductModal, setShowAddProductModal] = useState(false);
@@ -3633,41 +3725,45 @@ function UploadAC21PageContent() {
                     <div className="flex justify-between items-center mb-2">
                       <h3 className="text-sm font-semibold text-gray-700">15. DESTINATARIO AUTORIZADO DEL MATERIAL DE CIFRA</h3>
                     </div>
-                    {processedData.empresa_destino?.id && (
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <Label className="text-xs">Rellenar desde cryptocustodio:</Label>
-                        <select
-                          className="border rounded px-2 py-1 text-sm"
-                          value={selectedCryptocustodioIdFirmaA}
-                          onChange={(e) => {
-                            const id = e.target.value;
-                            setSelectedCryptocustodioIdFirmaA(id);
-                            if (!id) return;
-                            const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
-                            if (cc) {
-                              setProcessedData((prev: any) => ({
-                                ...prev,
-                                firmas: {
-                                  ...prev.firmas,
-                                  firma_a: {
-                                    ...prev.firmas?.firma_a,
-                                    nombre: cc.nombre_apellidos ?? '',
-                                    empleo_rango: cc.empleo_rango ?? '',
-                                    cargo: cc.cargo ?? '',
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <Label className="text-xs">Rellenar desde cryptocustodio:</Label>
+                      {processedData.empresa_destino?.id ? (
+                        <>
+                          <select
+                            className="border rounded px-2 py-1 text-sm bg-white"
+                            value={selectedCryptocustodioIdFirmaA}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              setSelectedCryptocustodioIdFirmaA(id);
+                              if (!id) return;
+                              const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
+                              if (cc) {
+                                setProcessedData((prev: any) => ({
+                                  ...prev,
+                                  firmas: {
+                                    ...prev.firmas,
+                                    firma_a: {
+                                      ...prev.firmas?.firma_a,
+                                      nombre: cc.nombre_apellidos ?? '',
+                                      empleo_rango: cc.empleo_rango ?? '',
+                                      cargo: cc.cargo ?? '',
+                                    },
                                   },
-                                },
-                              }));
-                            }
-                          }}
-                        >
-                          <option value="">— Seleccionar —</option>
-                          {cryptocustodiosDestino.map((cc: any) => (
-                            <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
-                          ))}
-                        </select>
-                        <button type="button" className="text-xs text-blue-600 hover:underline" onClick={() => setShowAddCryptocustodioModal(true)}>Añadir cryptocustodio</button>
-                      </div>
-                    )}
+                                }));
+                              }
+                            }}
+                          >
+                            <option value="">— Seleccionar —</option>
+                            {cryptocustodiosDestino.map((cc: any) => (
+                              <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
+                            ))}
+                          </select>
+                          <button type="button" className="text-xs text-blue-600 hover:underline" onClick={() => { setAddCryptocustodioFromFirma('A'); setShowAddCryptocustodioModal(true); }}>Añadir cryptocustodio</button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-amber-700">Selecciona la empresa destino (PARA) arriba para poder elegir un cryptocustodio.</span>
+                      )}
+                    </div>
                     <div className="flex-grow grid grid-cols-2 gap-x-4 gap-y-2">
                       <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">a. Firma</label>
@@ -3725,40 +3821,45 @@ function UploadAC21PageContent() {
                         OTRO
                       </label>
                     </div>
-                    {processedData.empresa_destino?.id && (
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <Label className="text-xs">Rellenar desde cryptocustodio:</Label>
-                        <select
-                          className="border rounded px-2 py-1 text-sm"
-                          value={selectedCryptocustodioIdFirmaB}
-                          onChange={(e) => {
-                            const id = e.target.value;
-                            setSelectedCryptocustodioIdFirmaB(id);
-                            if (!id) return;
-                            const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
-                            if (cc) {
-                              setProcessedData((prev: any) => ({
-                                ...prev,
-                                firmas: {
-                                  ...prev.firmas,
-                                  firma_b: {
-                                    ...prev.firmas?.firma_b,
-                                    nombre: cc.nombre_apellidos ?? '',
-                                    empleo_rango: cc.empleo_rango ?? '',
-                                    cargo: cc.cargo ?? '',
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <Label className="text-xs">Rellenar desde cryptocustodio:</Label>
+                      {processedData.empresa_destino?.id ? (
+                        <>
+                          <select
+                            className="border rounded px-2 py-1 text-sm bg-white"
+                            value={selectedCryptocustodioIdFirmaB}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              setSelectedCryptocustodioIdFirmaB(id);
+                              if (!id) return;
+                              const cc = cryptocustodiosDestino.find((c: any) => String(c.id) === id);
+                              if (cc) {
+                                setProcessedData((prev: any) => ({
+                                  ...prev,
+                                  firmas: {
+                                    ...prev.firmas,
+                                    firma_b: {
+                                      ...prev.firmas?.firma_b,
+                                      nombre: cc.nombre_apellidos ?? '',
+                                      empleo_rango: cc.empleo_rango ?? '',
+                                      cargo: cc.cargo ?? '',
+                                    },
                                   },
-                                },
-                              }));
-                            }
-                          }}
-                        >
-                          <option value="">— Seleccionar —</option>
-                          {cryptocustodiosDestino.map((cc: any) => (
-                            <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
+                                }));
+                              }
+                            }}
+                          >
+                            <option value="">— Seleccionar —</option>
+                            {cryptocustodiosDestino.map((cc: any) => (
+                              <option key={cc.id} value={cc.id}>{cc.nombre_apellidos}</option>
+                            ))}
+                          </select>
+                          <button type="button" className="text-xs text-blue-600 hover:underline" onClick={() => { setAddCryptocustodioFromFirma('B'); setShowAddCryptocustodioModal(true); }}>Añadir cryptocustodio</button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-amber-700">Selecciona la empresa destino (PARA) para Firma B.</span>
+                      )}
+                    </div>
                     <div className="flex-grow grid grid-cols-2 gap-x-4 gap-y-2">
                        <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">a. Firma</label>
@@ -3885,11 +3986,17 @@ function UploadAC21PageContent() {
             {processedData.empresa_destino?.id && (
               <CryptocustodioForm
                 empresaId={Number(processedData.empresa_destino.id)}
-                initialData={{
-                  empleo_rango: processedData.firmas?.firma_a?.empleo_rango ?? "",
-                  nombre_apellidos: processedData.firmas?.firma_a?.nombre ?? "",
-                  cargo: processedData.firmas?.firma_a?.cargo ?? "",
-                }}
+                initialData={addCryptocustodioFromFirma === 'B'
+                  ? {
+                      empleo_rango: processedData.firmas?.firma_b?.empleo_rango ?? "",
+                      nombre_apellidos: processedData.firmas?.firma_b?.nombre ?? "",
+                      cargo: processedData.firmas?.firma_b?.cargo ?? "",
+                    }
+                  : {
+                      empleo_rango: processedData.firmas?.firma_a?.empleo_rango ?? "",
+                      nombre_apellidos: processedData.firmas?.firma_a?.nombre ?? "",
+                      cargo: processedData.firmas?.firma_a?.cargo ?? "",
+                    }}
                 onSuccess={() => {
                   fetchCryptocustodios(Number(processedData.empresa_destino?.id))
                     .then((data) => setCryptocustodiosDestino(Array.isArray(data) ? data : []))
