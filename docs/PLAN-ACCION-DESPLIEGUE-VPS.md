@@ -23,6 +23,25 @@ Aplicar en el backend CryptoTrace, dentro del contenedor, en este orden:
 
 ## 2. Pasos en el VPS (CryptoTrace)
 
+### Si `docker-compose` no está instalado
+
+En el VPS usamos el binario **docker-compose** tal como se describe en `docs/produccion/CONFIGURACION-INICIAL-VPS.md` y `docs/produccion/GUIA-DESPLIEGUE-PRODUCCION-VPS.md`. Si el comando no existe:
+
+**Opción A – Instalar Docker Compose (binario standalone):**
+
+```bash
+curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+docker-compose --version
+```
+
+**Opción B – Usar Docker Compose V2 (plugin):**  
+Si ya tienes Docker y el plugin Compose (`docker compose` con espacio), en todos los pasos sustituye `docker-compose` por `docker compose` (por ejemplo: `docker compose -f docker-compose.prod.yml exec ...`).
+
+En los comandos siguientes se usa `docker-compose -f docker-compose.prod.yml`; si eliges la opción B, cambia a `docker compose -f docker-compose.prod.yml`.
+
+---
+
 ### 2.1 Conectar y ubicar proyecto
 
 ```bash
@@ -32,6 +51,14 @@ ssh root@187.33.154.156
 cd /opt/thot-security/cryptotrace
 # (o la ruta donde esté clonado el repo en el VPS)
 ```
+
+**Opción rápida (ejecutar todo el despliegue desde tu PC):**
+
+```bash
+ssh root@187.33.154.156 'cd /opt/thot-security/cryptotrace && git pull origin development && bash scripts/deploy-vps.sh'
+```
+
+(Si el script no existe aún en el VPS, primero haz `git pull` y luego ejecuta `bash scripts/deploy-vps.sh` dentro de la sesión SSH.)
 
 ### 2.2 Actualizar código desde la rama development
 
@@ -43,8 +70,10 @@ git pull origin development
 
 ### 2.3 Backup de la base de datos (obligatorio antes de migrar)
 
+*(Ajusta usuario y base si en tu `.env.prod` usas otros; por defecto en prod: `cryptotrace_user` / `cryptotrace_db`.)*
+
 ```bash
-docker-compose exec -T db pg_dump -U postgres cryptotrace > backup_pre_despliegue_$(date +%Y%m%d_%H%M%S).sql
+docker-compose -f docker-compose.prod.yml exec -T db pg_dump -U cryptotrace_user cryptotrace_db > backup_pre_despliegue_$(date +%Y%m%d_%H%M%S).sql
 ```
 
 Guardar el archivo en un lugar seguro (ej. copiarlo fuera del servidor).
@@ -52,7 +81,7 @@ Guardar el archivo en un lugar seguro (ej. copiarlo fuera del servidor).
 ### 2.4 Ver estado actual de migraciones
 
 ```bash
-docker-compose exec backend python manage.py showmigrations productos
+docker-compose -f docker-compose.prod.yml exec backend python manage.py showmigrations productos
 ```
 
 Anotar hasta qué migración está aplicada (ej. 0032 o 0035). Si ya está 0035, solo faltará aplicar 0036.
@@ -60,7 +89,7 @@ Anotar hasta qué migración está aplicada (ej. 0032 o 0035). Si ya está 0035,
 ### 2.5 Aplicar migraciones
 
 ```bash
-docker-compose exec backend python manage.py migrate productos
+docker-compose -f docker-compose.prod.yml exec backend python manage.py migrate productos
 ```
 
 Esto aplicará todas las pendientes (0033, 0034, 0035, 0036) en orden.
@@ -68,7 +97,7 @@ Esto aplicará todas las pendientes (0033, 0034, 0035, 0036) en orden.
 ### 2.6 Recolectar estáticos (Django, si aplica)
 
 ```bash
-docker-compose exec backend python manage.py collectstatic --noinput
+docker-compose -f docker-compose.prod.yml exec backend python manage.py collectstatic --noinput
 ```
 
 ### 2.7 Reconstruir y reiniciar contenedores
@@ -80,12 +109,7 @@ docker-compose -f docker-compose.prod.yml build --no-cache
 docker-compose -f docker-compose.prod.yml up -d
 ```
 
-O si en el VPS usan otro compose:
-
-```bash
-docker-compose build backend frontend ocr
-docker-compose up -d
-```
+*(En este proyecto el compose de producción es `docker-compose.prod.yml`; si en tu servidor usas otro archivo, sustituye `-f docker-compose.prod.yml` por el tuyo.)*
 
 ### 2.8 Verificación rápida
 
@@ -113,13 +137,13 @@ No hay migraciones en frontend ni OCR; solo en backend (productos).
 Si tras aplicar 0036 hay que volver atrás:
 
 ```bash
-docker-compose exec backend python manage.py migrate productos 0035_allow_null_cc_in_movimiento
+docker-compose -f docker-compose.prod.yml exec backend python manage.py migrate productos 0035_allow_null_cc_in_movimiento
 ```
 
 Para volver al estado anterior a todas estas migraciones:
 
 ```bash
-docker-compose exec backend python manage.py migrate productos 0032_add_imagen_documento_field
+docker-compose -f docker-compose.prod.yml exec backend python manage.py migrate productos 0032_add_imagen_documento_field
 ```
 
 Luego restaurar el backup de la base de datos si se ha hecho alguna migración destructiva y se necesita recuperar datos.

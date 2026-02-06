@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from django.http import HttpResponse
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .models import (
     CatalogoProducto, Albaran, MovimientoProducto, TipoProducto, LineaTemporalProducto, InventarioProducto, Empresa, Cryptocustodio, UserProfile
 )
@@ -26,12 +26,19 @@ import json
 # Configurar logger
 logger = logging.getLogger(__name__)
 
-# 🔹 Vista personalizada para JWT con información de usuario
+# 🔹 Vista personalizada para JWT con información de usuario (sin throttling para permitir login)
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
-    Vista personalizada para generar tokens JWT con información adicional del usuario
+    Vista personalizada para generar tokens JWT con información adicional del usuario.
+    throttle_classes = [] para evitar 429 en login (AnonRateThrottle en prod).
     """
     serializer_class = CustomTokenObtainPairSerializer
+    throttle_classes = []
+
+
+class CustomTokenRefreshView(TokenRefreshView):
+    """Refresh token sin throttling para no bloquear sesiones válidas."""
+    throttle_classes = []
 
 # 🔹 ModelViewSets para los modelos principales
 class TipoProductoViewSet(viewsets.ModelViewSet):

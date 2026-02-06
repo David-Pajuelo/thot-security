@@ -1,8 +1,7 @@
 from django.contrib import admin
 from django.urls import path, include
 from django.shortcuts import redirect
-from rest_framework_simplejwt.views import TokenRefreshView
-from productos.views import CustomTokenObtainPairView
+from productos.views import CustomTokenObtainPairView, CustomTokenRefreshView
 from django.conf import settings
 from django.conf.urls.static import static
 from django.views.static import serve
@@ -18,7 +17,7 @@ urlpatterns = [
     path('api/', include('productos.urls')),  # Rutas de productos
     path('api/', include('hps_core.urls')),  # Rutas HPS migradas
     path('api/token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),  # Login JWT
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),  # Refresh Token
+    path('api/token/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),  # Refresh Token (sin throttling)
 ]
 
 # Servir archivos media y estáticos en desarrollo
