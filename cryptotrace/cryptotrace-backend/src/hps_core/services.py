@@ -277,6 +277,18 @@ class HpsRequestService:
                 }
             )
 
+        # Notificar a jefes de seguridad cuando se crea usuario por formulario (solicitud, traslado, renovación)
+        if user_created:
+            try:
+                user_name = f"{user.first_name} {user.last_name}".strip() or user.email.split('@')[0].replace('.', ' ').title()
+                email_service.send_new_user_notification_to_security_chiefs(
+                    user_email=user.email,
+                    user_name=user_name,
+                    form_type=form_type,
+                )
+            except Exception as e:
+                logger.exception("Error enviando aviso a jefes de seguridad (no se bloquea la solicitud): %s", e)
+
         return hps_request
 
     @staticmethod

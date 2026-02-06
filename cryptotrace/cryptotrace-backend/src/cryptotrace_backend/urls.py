@@ -14,10 +14,11 @@ def redirect_to_admin(request):
 urlpatterns = [
     path('', redirect_to_admin, name='home'),  # Redirección desde la raíz
     path('admin/', admin.site.urls),
-    path('api/', include('productos.urls')),  # Rutas de productos
-    path('api/', include('hps_core.urls')),  # Rutas HPS migradas
+    # Rutas de token primero (más específicas) para que no las capturen los include('api/')
     path('api/token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),  # Login JWT
     path('api/token/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),  # Refresh Token (sin throttling)
+    path('api/', include('productos.urls')),  # Rutas de productos
+    path('api/', include('hps_core.urls')),  # Rutas HPS migradas
 ]
 
 # Servir archivos media y estáticos en desarrollo

@@ -573,6 +573,49 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @action(detail=True, methods=["post"], url_path="upload-filled-pdf")
+    def upload_filled_pdf(self, request, pk=None):
+        """
+        Subir/reemplazar el PDF rellenado de una solicitud HPS.
+        POST /api/hps/requests/{id}/upload-filled-pdf/
+        Body: multipart/form-data con 'pdf_file' o 'filled_pdf' (archivo PDF)
+        """
+        hps_request = self.get_object()
+        pdf_file = request.FILES.get("pdf_file") or request.FILES.get("filled_pdf")
+        if not pdf_file:
+            return Response(
+                {"detail": "Se requiere un archivo PDF (campo 'pdf_file' o 'filled_pdf')"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not pdf_file.name.lower().endswith(".pdf"):
+            return Response(
+                {"detail": "El archivo debe ser un PDF"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            import os
+            if hps_request.filled_pdf:
+                try:
+                    old_path = hps_request.filled_pdf.path
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
+                except Exception as e:
+                    logger.warning(f"No se pudo eliminar el PDF anterior: {e}")
+            filename = f"hps_request_{hps_request.id}_filled.pdf"
+            hps_request.filled_pdf.save(filename, pdf_file, save=True)
+            hps_request.save(update_fields=["updated_at"])
+            logger.info(f"PDF rellenado subido para solicitud HPS {hps_request.id}")
+            return Response(
+                {"detail": "PDF rellenado subido correctamente", "success": True},
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            logger.exception(f"Error subiendo PDF: {e}")
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
     @action(detail=False, methods=["get"], url_path="pending/list")
     def pending(self, request):
         qs = self.get_queryset().filter(status=models.HpsRequest.RequestStatus.PENDING)

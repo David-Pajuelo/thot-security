@@ -326,3 +326,57 @@ Equipo CryptoTrace HPS
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
+    def send_new_user_notification_to_security_chiefs(
+        self,
+        user_email: str,
+        user_name: str,
+        form_type: str,
+    ) -> bool:
+        """
+        Envía aviso a jefes de seguridad cuando un usuario se registra vía formulario HPS
+        (solicitud, traslado o renovación). El destinatario se configura en NOTIFICATION_SECURITY_CHIEFS_EMAIL.
+        """
+        to_email = (getattr(settings, 'NOTIFICATION_SECURITY_CHIEFS_EMAIL', None) or '').strip()
+        if not to_email:
+            logger.warning("NOTIFICATION_SECURITY_CHIEFS_EMAIL no configurado: no se envía aviso a jefes de seguridad")
+            return False
+        try:
+            form_type_display = form_type if form_type else "solicitud"
+            subject = f"[HPS] Nuevo usuario registrado por formulario ({form_type_display})"
+            text_message = f"""
+Se ha registrado un nuevo usuario a través del formulario HPS ({form_type_display}).
+
+- Email: {user_email}
+- Nombre: {user_name or 'No indicado'}
+
+Revise el panel HPS para más detalles.
+"""
+            html_message = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family: Arial, sans-serif;">
+  <h2>Nuevo usuario registrado (formulario HPS)</h2>
+  <p>Tipo: <strong>{form_type_display}</strong></p>
+  <p><strong>Email:</strong> {user_email}</p>
+  <p><strong>Nombre:</strong> {user_name or 'No indicado'}</p>
+  <p>Revise el panel HPS para más detalles.</p>
+</body>
+</html>
+"""
+            email_msg = EmailMultiAlternatives(
+                subject=subject,
+                body=text_message,
+                from_email=self.from_email,
+                to=[to_email],
+            )
+            if self.reply_to:
+                email_msg.reply_to = [self.reply_to]
+            email_msg.attach_alternative(html_message, "text/html")
+            email_msg.send()
+            logger.info(f"✅ Aviso de nuevo usuario enviado a jefes de seguridad ({to_email})")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error enviando aviso a jefes de seguridad: {str(e)}")
+            return False
+

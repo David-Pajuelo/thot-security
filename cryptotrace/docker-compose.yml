@@ -167,6 +167,7 @@ services:
     env_file:
       - ./cryptotrace-backend/.env
     environment:
+      - DJANGO_SETTINGS_MODULE=cryptotrace_backend.settings_dev
       - DEBUG=True
       - DATABASE_URL=postgres://postgres:postgres@db:5432/cryptotrace
       - DB_NAME=cryptotrace
@@ -206,6 +207,7 @@ services:
     env_file:
       - ./cryptotrace-backend/.env
     environment:
+      - DJANGO_SETTINGS_MODULE=cryptotrace_backend.settings_dev
       - DEBUG=True
       - DATABASE_URL=postgres://postgres:postgres@db:5432/cryptotrace
       - DB_NAME=cryptotrace

@@ -19,7 +19,16 @@ cat cryptotrace-backend/.env | grep OPENAI_API_KEY
 
 Si la API key está dividida en múltiples líneas, edítala para que esté en una sola línea sin saltos.
 
-### 2. Levantar los servicios
+### 2. (Opcional) Reconstruir contenedores
+
+Si has cambiado código o dependencias, reconstruye las imágenes antes de levantar:
+
+```bash
+cd cryptotrace
+docker compose build
+```
+
+### 3. Levantar los servicios
 
 ```bash
 cd cryptotrace
@@ -36,34 +45,55 @@ Esto levantará:
 - **Redis** (puerto 6379)
 - **Celery Worker** y **Celery Beat**
 
-### 3. Ejecutar migraciones
+### 4. Ejecutar migraciones
 
 ```bash
 docker compose exec backend python manage.py migrate
 ```
 
-### 4. Crear superusuario (si es necesario)
+### 5. Crear superusuario (si es necesario)
 
 ```bash
 docker compose exec backend python manage.py createsuperuser
 ```
 
-### 5. Verificar que los servicios estén corriendo
+### 6. Verificar que los servicios estén corriendo
 
 ```bash
 docker compose ps
 ```
 
-### 6. Ver logs del backend
+### 7. Ver logs del backend
 
 ```bash
 docker compose logs backend -f
 ```
 
+## Levantar el frontend HPS (opcional)
+
+El backend HPS está en Django (cryptotrace-backend). El frontend HPS es un proyecto aparte en `hps-system`. Para usarlo en local:
+
+1. **Primero** tener levantada la stack de CryptoTrace (para que exista la red `cryptotrace_default`).
+2. En otra terminal:
+
+```bash
+cd hps-system
+docker compose -f docker-compose.dev.yml --env-file .env.dev up -d
+```
+
+El frontend HPS quedará en **http://localhost:3001**. Debe poder hablar con el backend en http://localhost:8080 (configurado en `REACT_APP_API_URL` del `.env.dev`).
+
+## Probar el envío de correo en local
+
+El sistema envía correos desde el **backend Django** y desde tareas **Celery**. Necesitas **backend**, **redis** y **celery-worker** levantados. En `cryptotrace-backend/.env` deben estar configurados los SMTP_* y, para la notificación a jefes de seguridad, `NOTIFICATION_SECURITY_CHIEFS_EMAIL`.
+
+**Notificación a jefes de seguridad**: al crear un usuario nuevo desde el formulario HPS (solicitud, traslado o renovación) con un token válido, el backend envía un correo a la dirección indicada en `NOTIFICATION_SECURITY_CHIEFS_EMAIL`. Para cambiar el destinatario, edita esa variable en el `.env` y reinicia backend (y celery-worker si aplica).
+
 ## URLs de Desarrollo
 
 - **Backend API**: http://localhost:8080/api
 - **Frontend CryptoTrace**: http://localhost:3000
+- **Frontend HPS**: http://localhost:3001 (si levantaste `hps-system` con docker-compose.dev.yml)
 - **Processing**: http://localhost:5001
 - **OCR**: http://localhost:8002
 - **PDF Generator**: http://localhost:5003

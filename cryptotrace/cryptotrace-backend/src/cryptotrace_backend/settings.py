@@ -315,6 +315,9 @@ HPS_SYSTEM_URL = os.getenv('HPS_SYSTEM_URL')
 # URL del sistema HPS para Next.js (CryptoTrace frontend)
 NEXT_PUBLIC_HPS_SYSTEM_URL = os.getenv('NEXT_PUBLIC_HPS_SYSTEM_URL')
 
+# Notificación: correo al que se envían avisos cuando un usuario se registra vía formulario HPS (solicitud, traslado, renovación)
+NOTIFICATION_SECURITY_CHIEFS_EMAIL = (os.getenv('NOTIFICATION_SECURITY_CHIEFS_EMAIL') or '').strip() or None
+
 # === Celery / Redis (configuración unificada desde hps-system) ===
 # Redis Configuration
 # settings_dev.py y settings_prod.py manejarán los fallbacks/validación según corresponda

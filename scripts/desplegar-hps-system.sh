@@ -68,29 +68,16 @@ echo "📊 Estado de los contenedores:"
 docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 echo ""
 
-# Paso 5: Ejecutar migraciones (si es necesario)
-echo "🗄️  Ejecutando migraciones de base de datos..."
-if docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend alembic upgrade head 2>/dev/null; then
-    echo -e "${GREEN}✓ Migraciones ejecutadas${NC}"
-else
-    echo -e "${YELLOW}⚠️  No se pudieron ejecutar migraciones automáticamente${NC}"
-    echo "Ejecuta manualmente: docker compose -f docker-compose.prod.yml --env-file .env.prod exec backend alembic upgrade head"
-fi
+# Paso 5: Migraciones (HPS está en Django/cryptotrace-backend; no hay backend FastAPI)
+echo "🗄️  Migraciones HPS: se ejecutan en cryptotrace-backend (Django). Si despliegas solo HPS frontend, asegúrate de que cryptotrace-backend esté al día."
 echo ""
 
-# Paso 6: Verificar salud de los servicios
-echo "🏥 Verificando salud de los servicios..."
+# Paso 6: Verificar salud del frontend
+echo "🏥 Verificando salud del frontend..."
 sleep 5
 
-# Verificar backend
-if curl -f http://localhost:8001/health > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ Backend respondiendo correctamente${NC}"
-else
-    echo -e "${YELLOW}⚠️  Backend no responde aún, revisa los logs${NC}"
-fi
-
-# Verificar frontend
-if curl -f http://localhost:3000 > /dev/null 2>&1; then
+# Verificar frontend (puerto 80 dentro del contenedor; mapeado a 3001 en host según compose)
+if curl -f http://localhost:3001 > /dev/null 2>&1 || curl -f http://127.0.0.1:3001 > /dev/null 2>&1; then
     echo -e "${GREEN}✓ Frontend respondiendo correctamente${NC}"
 else
     echo -e "${YELLOW}⚠️  Frontend no responde aún, revisa los logs${NC}"
