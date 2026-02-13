@@ -488,8 +488,8 @@ def get_sample_data():
             {"codigo_producto": "PROD019", "cantidad": 1, "descripcion_producto": "Producto Diecinueve", "numero_serie": "SN019-R"},
             {"codigo_producto": "PROD020", "cantidad": 1, "descripcion_producto": "Producto Veinte", "numero_serie": "SN020-S"},
         ],
-        "flags": { # Para los checkboxes de "Firme y devuelva" y "Para su archivo"
-            "firme_y_devuelva": True,
+        "flags": { # Ningún checkbox marcado por defecto
+            "firme_y_devuelva": False,
             "para_su_archivo": False
         },
         "material_ha_sido": "RECIBIDO", # RECIBIDO, INVENTARIADO, DESTRUIDO

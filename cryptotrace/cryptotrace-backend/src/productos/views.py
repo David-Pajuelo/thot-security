@@ -1162,8 +1162,8 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                 'accesorios_por_pagina': accesorios_por_pagina_pdf if es_multipagina else accesorios_por_pagina,  # Accesorios específicos de cada página PDF
                 'equipos_por_pagina': equipos_por_pagina_pdf if es_multipagina else equipos_por_pagina,  # Equipos específicos de cada página PDF
                 'flags': {
-                    'firme_y_devuelva': False,  # TODO: mapear estos campos cuando estén en el modelo
-                    'para_su_archivo': True
+                    'firme_y_devuelva': False,  # Ningún checkbox marcado por defecto
+                    'para_su_archivo': False
                 },
                 'material_ha_sido': pagina_principal.estado_material or '',  # Mapear del campo estado_material del modelo
                 'destinatario_autorizado': {

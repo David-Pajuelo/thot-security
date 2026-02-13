@@ -526,6 +526,11 @@
             gap: 4px;
             width: 30%;
         }
+        .copias-container.copias-stack {
+            width: 100%;
+            border: none;
+            padding: 8px 0;
+        }
         .copia-item {
             display: flex;
             align-items: center;
@@ -935,19 +940,21 @@
             </div>
         </div>
 
-        <!-- COPIA 1 y COPIA 2 -->
+        <!-- COPIA 1 / COPIA 2 (solo en la última página) -->
+        {% if pagina_actual == total_paginas %}
         <div class="copias-section">
-            <div class="copias-container">
+            <div class="copias-container copias-stack">
                 <div class="copia-item">
-                    <span class="checkbox-square">{% if flags.copia1 %}X{% endif %}</span>
+                    <span class="checkbox-square">{% if flags.firme_y_devuelva or flags.copia1 %}X{% endif %}</span>
                     <span><strong>COPIA 1 -</strong> Firmar y devolver al remitente</span>
                 </div>
                 <div class="copia-item">
-                    <span class="checkbox-square">{% if flags.copia2 %}X{% endif %}</span>
+                    <span class="checkbox-square">{% if flags.para_su_archivo or flags.copia2 %}X{% endif %}</span>
                     <span><strong>COPIA 2 -</strong> Para su archivo</span>
                 </div>
             </div>
-                            </div>
+        </div>
+        {% endif %}
 
         <!-- 14, 15, 16. Material ha sido / Destinatario autorizado -->
         <div class="material-section">
