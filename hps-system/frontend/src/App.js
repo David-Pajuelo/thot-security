@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import { useAuthStore } from './store/authStore';
 import { useSessionPersistence } from './hooks/useSessionPersistence';
+import { useIdleTimeout } from './hooks/useIdleTimeout';
 import PrivateRoute, { PublicRoute, AdminRoute, AdminSecurityRoute } from './components/PrivateRoute';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
@@ -138,6 +139,8 @@ const ChangePasswordModalWrapper = () => {
   );
 };
 
+const IDLE_LOGOUT_MINUTES = 15;
+
 function App() {
   const { 
     initializeAuth, 
@@ -145,11 +148,34 @@ function App() {
     loading, 
     verifying, 
     user, 
+    logout,
+    clearSessionOnly,
     showChangePasswordModal, 
     closeChangePasswordModal 
   } = useAuthStore();
   const [isInitialized, setIsInitialized] = React.useState(false);
-  
+
+  const handleIdle = useCallback(() => {
+    logout();
+    const base = process.env.PUBLIC_URL || '';
+    window.location.href = base ? `${base}/login` : '/login';
+  }, [logout]);
+
+  useIdleTimeout(isAuthenticated, IDLE_LOGOUT_MINUTES, handleIdle);
+
+  // Cerrar sesión en HPS cuando CryptoTrace hace logout (iframe limpia nuestro localStorage → storage event)
+  useEffect(() => {
+    const handleStorage = (e) => {
+      if ((e.key === 'accessToken' || e.key === 'user') && (e.newValue === null || e.newValue === '')) {
+        clearSessionOnly();
+        const base = process.env.PUBLIC_URL || '';
+        window.location.href = base ? `${base}/login` : '/login';
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [clearSessionOnly]);
+
   // Usar el hook de persistencia de sesión
   useSessionPersistence();
 

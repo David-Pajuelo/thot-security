@@ -160,6 +160,19 @@ const useAuthStore = create(
         }
       },
 
+      /** Solo limpia estado local (para cuando el otro sistema hace logout y recibimos storage event). No llama API ni abre iframe. */
+      clearSessionOnly: () => {
+        set({
+          isAuthenticated: false,
+          user: null,
+          token: null,
+          loading: false,
+          verifying: false,
+          error: null,
+          showChangePasswordModal: false
+        });
+      },
+
       logout: async () => {
         set({ loading: true });
         

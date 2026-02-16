@@ -1,19 +1,49 @@
 // API utility functions for CryptoTrace frontend
+// Sesión: ver docs/ANALISIS-Y-PLAN-MEJORA-SESION-USUARIO.md
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
 const PROCESSING_URL = process.env.NEXT_PUBLIC_PROCESSING_URL || 'http://localhost:5001';
 const OCR_URL = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000';
 
-// Helper function to get auth token
-const getAuthToken = (): string | null => {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('accessToken');
-};
+const TOKEN_KEYS = ['accessToken', 'refreshToken', 'hps_token', 'hps_refresh_token', 'user', 'hps_user', 'hps_saved_email'] as const;
 
-// Helper function to refresh token
-const refreshToken = async (): Promise<boolean> => {
+/** Limpia todos los datos de sesión y redirige a login. Usar cuando el refresh falle o la sesión sea inválida. */
+export function clearSessionAndRedirect(): void {
+  if (typeof window === 'undefined') return;
+  for (const key of TOKEN_KEYS) {
+    localStorage.removeItem(key);
+  }
+  const base = typeof window !== 'undefined' && window.location.pathname.startsWith('/cryptotrace') ? '/cryptotrace' : '';
+  window.location.href = base ? `${base}/login` : '/login';
+}
+
+// Helper function to get auth token (compatibilidad con hps_token)
+export function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
+}
+
+/** Devuelve la fecha de expiración del JWT (claim exp) en segundos, o null si no se puede leer. */
+export function getTokenExpiration(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Minutos antes de expirar para hacer el refresh proactivo. */
+const PROACTIVE_REFRESH_MINUTES = 5;
+
+/** Intenta renovar el access token. Devuelve true si se renovó; false si no hay refresh o el refresh falla. */
+export async function refreshTokenAsync(): Promise<boolean> {
+  return doRefreshToken();
+}
+
+async function doRefreshToken(): Promise<boolean> {
   if (typeof window === 'undefined') return false;
-  const refresh = localStorage.getItem('refreshToken');
+  const refresh = localStorage.getItem('refreshToken') || localStorage.getItem('hps_refresh_token');
   if (!refresh) return false;
 
   try {
@@ -25,14 +55,95 @@ const refreshToken = async (): Promise<boolean> => {
 
     if (response.ok) {
       const data = await response.json();
-      localStorage.setItem('accessToken', data.access);
+      const access = data.access;
+      const newRefresh = data.refresh;
+      if (access) {
+        localStorage.setItem('accessToken', access);
+        localStorage.setItem('hps_token', access);
+      }
+      if (newRefresh) {
+        localStorage.setItem('refreshToken', newRefresh);
+        localStorage.setItem('hps_refresh_token', newRefresh);
+      }
       return true;
     }
   } catch (error) {
     console.error('Error refreshing token:', error);
   }
   return false;
-};
+}
+
+/**
+ * fetch con autenticación: añade Bearer, ante 401 intenta refresh y reintenta una vez.
+ * Si el refresh falla, limpia sesión y redirige a /login (no retorna).
+ * Usar para peticiones que necesitan URL completa (blob, HTML, etc.).
+ */
+export async function fetchWithAuth(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  options?: { skipRetry?: boolean }
+): Promise<Response> {
+  const skipRetry = options?.skipRetry ?? false;
+  const token = getAuthToken();
+  const headers = new Headers(init?.headers);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  let response = await fetch(input, { ...init, headers });
+
+  if (response.status === 401 && token && !skipRetry) {
+    const refreshed = await doRefreshToken();
+    if (refreshed) {
+      const newToken = getAuthToken();
+      if (newToken) {
+        headers.set('Authorization', `Bearer ${newToken}`);
+        return fetch(input, { ...init, headers });
+      }
+    }
+    clearSessionAndRedirect();
+    throw new Error('Sesión expirada. Redirigiendo al login.');
+  }
+
+  return response;
+}
+
+/**
+ * Programa un refresh proactivo del access token X minutos antes de que expire.
+ * Si el refresh falla, limpia sesión y redirige a login.
+ * @returns Función de limpieza (cancelar el programado).
+ */
+export function scheduleProactiveRefresh(): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  const token = getAuthToken();
+  if (!token) return () => {};
+
+  const exp = getTokenExpiration(token);
+  if (!exp) return () => {};
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const delaySec = exp - nowSec - PROACTIVE_REFRESH_MINUTES * 60;
+  if (delaySec <= 0) {
+    // Ya está próximo a expirar o expirado; intentar refresh ya
+    doRefreshToken().then((ok) => {
+      if (!ok) clearSessionAndRedirect();
+      else window.dispatchEvent(new Event('tokenUpdated'));
+    });
+    return () => {};
+  }
+
+  const timeoutId = window.setTimeout(async () => {
+    const ok = await doRefreshToken();
+    if (!ok) {
+      clearSessionAndRedirect();
+      return;
+    }
+    window.dispatchEvent(new Event('tokenUpdated'));
+    // Res programar con el nuevo token
+    scheduleProactiveRefresh();
+  }, delaySec * 1000);
+
+  return () => window.clearTimeout(timeoutId);
+}
 
 // Generic API fetch function with auth
 export const apiFetch = async (
@@ -54,9 +165,9 @@ export const apiFetch = async (
     headers,
   });
 
-  // If unauthorized, try to refresh token
+  // If unauthorized, try to refresh token; if refresh fails, clear session and redirect to login
   if (response.status === 401 && token) {
-    const refreshed = await refreshToken();
+    const refreshed = await doRefreshToken();
     if (refreshed) {
       const newToken = getAuthToken();
       if (newToken) {
@@ -66,6 +177,10 @@ export const apiFetch = async (
           headers,
         });
       }
+    }
+    if (response.status === 401) {
+      clearSessionAndRedirect();
+      throw new Error('Sesión expirada. Redirigiendo al login.');
     }
   }
 

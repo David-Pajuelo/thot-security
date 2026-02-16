@@ -8,14 +8,23 @@
 <body>
     <script>
         // Escuchar mensajes desde CryptoTrace
-        window.addEventListener('message', function(event) {
-            // Verificar origen para seguridad
-            // Placeholder que será reemplazado en tiempo de build
+        // Origen permitido: reemplazado en build; en dev sin inyección usamos fallback por puerto
+        function getAllowedOrigin() {
             const cryptoTraceUrl = '__CRYPTOTRACE_URL__';
-            const allowedOrigin = new URL(cryptoTraceUrl).origin;
-            
+            try {
+                if (cryptoTraceUrl.indexOf('__') !== -1) {
+                    // Placeholder no reemplazado (dev sin prebuild): permitir localhost:3000
+                    return (window.location.port === '3001') ? 'http://localhost:3000' : window.location.origin;
+                }
+                return new URL(cryptoTraceUrl).origin;
+            } catch (e) {
+                return (window.location.port === '3001') ? 'http://localhost:3000' : window.location.origin;
+            }
+        }
+        window.addEventListener('message', function(event) {
+            const allowedOrigin = getAllowedOrigin();
             if (event.origin !== allowedOrigin) {
-                console.log('[token-sync] Origen no permitido:', event.origin);
+                console.log('[token-sync] Origen no permitido:', event.origin, 'esperado:', allowedOrigin);
                 return;
             }
             
@@ -60,8 +69,9 @@
                     type: 'LOGOUT_SYNC_RESPONSE',
                     success: true
                 }, event.origin);
-                // Redirigir a login
-                window.location.href = '/login';
+                // Redirigir a login (respetar base path ej. /hps en producción)
+                var base = (window.location.pathname.indexOf('/hps') !== -1) ? '/hps' : '';
+                window.location.href = base ? base + '/login' : '/login';
             }
         });
         

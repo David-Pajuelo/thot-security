@@ -26,6 +26,7 @@
     "zustand": "^4.3.6"
   },
   "scripts": {
+    "prestart": "node scripts/inject-env-html.js",
     "start": "react-scripts start",
     "prebuild": "node scripts/inject-env-html.js",
     "build": "react-scripts build",
