@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Package, FileText, Database, Building, Settings, User } from "lucide-react";
 import { usePathname } from "next/navigation";
+import { scheduleProactiveRefresh, clearSessionAndRedirect } from "@/lib/api";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -82,9 +83,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     // Nota: La sincronización de tokens se hace mediante iframe + postMessage
     // cuando se accede directamente a CryptoTrace. No es necesario escuchar aquí.
 
-    // 🔥 Escuchar cambios en localStorage (para cuando se actualice el token)
+    // 🔥 Escuchar cambios en localStorage (actualizar estado o cerrar sesión si el otro sistema hizo logout)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === "accessToken") {
+        if (e.newValue === null || e.newValue === "") {
+          // Token eliminado por otro contexto (p. ej. logout en HPS vía iframe) → cerrar sesión aquí también
+          if (pathname !== "/login") {
+            clearSessionAndRedirect();
+          }
+          return;
+        }
         updateUserState();
       }
     };
@@ -146,12 +154,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         window.dispatchEvent(new Event('tokenUpdated'));
         console.log('[Layout] ✅ Estado actualizado y evento tokenUpdated disparado');
         
-        // Si estamos en la página de login, redirigir automáticamente
-        if (window.location.pathname === '/login') {
+        // Si estamos en la página de login, redirigir automáticamente (respetar basePath en producción)
+        const path = window.location.pathname;
+        const isLoginPage = path === '/login' || path === '/cryptotrace/login';
+        if (isLoginPage) {
           console.log('[Layout] Estamos en /login, redirigiendo a /productos...');
-          // Pequeño delay para asegurar que el estado se actualice
+          const base = path.startsWith('/cryptotrace') ? '/cryptotrace' : '';
           setTimeout(() => {
-            window.location.href = '/productos';
+            window.location.href = base ? `${base}/productos` : '/productos';
           }, 100);
         }
       } else {
@@ -170,7 +180,46 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       window.removeEventListener("tokenUpdated", handleTokenUpdate);
       window.removeEventListener("message", handleMessage);
     };
-  }, []);
+  }, [pathname]);
+
+  // Refresh proactivo del token X min antes de expirar (Fase 2 sesión)
+  const proactiveCleanupRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const token = typeof window !== "undefined" && (localStorage.getItem("accessToken") || localStorage.getItem("hps_token"));
+    if (!token) return;
+    proactiveCleanupRef.current = scheduleProactiveRefresh();
+    const onTokenUpdated = () => {
+      proactiveCleanupRef.current();
+      proactiveCleanupRef.current = scheduleProactiveRefresh();
+    };
+    window.addEventListener("tokenUpdated", onTokenUpdated);
+    return () => {
+      proactiveCleanupRef.current();
+      window.removeEventListener("tokenUpdated", onTokenUpdated);
+    };
+  }, [isAuthenticated]);
+
+  // Cierre de sesión por inactividad (Fase 6 sesión; opcional, 15 min)
+  const IDLE_MINUTES = 15;
+  const idleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const resetIdleTimer = () => {
+      if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
+      idleTimeoutRef.current = setTimeout(() => {
+        clearSessionAndRedirect();
+      }, IDLE_MINUTES * 60 * 1000);
+    };
+
+    resetIdleTimer();
+    const events = ["mousedown", "mousemove", "keydown", "scroll", "touchstart"];
+    events.forEach((e) => window.addEventListener(e, resetIdleTimer));
+    return () => {
+      if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
+      events.forEach((e) => window.removeEventListener(e, resetIdleTimer));
+    };
+  }, [isAuthenticated]);
 
   // 🔥 NUEVO: Actualizar estado cuando cambia la ruta (para detectar después del login)
   useEffect(() => {
@@ -203,8 +252,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new Event('tokenUpdated'));
     
     // Pequeño delay antes de redirigir para asegurar que se actualiza el estado
+    // En producción (basePath /cryptotrace) redirigir a /cryptotrace/login para no dar 404 en nginx
+    const loginPath =
+      typeof window !== "undefined" && window.location.pathname.startsWith("/cryptotrace")
+        ? "/cryptotrace/login"
+        : "/login";
     setTimeout(() => {
-      window.location.href = "/login";
+      window.location.href = loginPath;
     }, 100);
   };
 
