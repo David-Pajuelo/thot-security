@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Upload, Building, ZoomIn, ZoomOut, MoveHorizontal, Pencil, Plus } from "lucide-react";
@@ -129,6 +129,8 @@ function UploadAC21PageContent() {
   const [addCryptocustodioFromFirma, setAddCryptocustodioFromFirma] = useState<'A' | 'B'>('A');
   const [selectedCryptocustodioIdFirmaA, setSelectedCryptocustodioIdFirmaA] = useState<string>('');
   const [selectedCryptocustodioIdFirmaB, setSelectedCryptocustodioIdFirmaB] = useState<string>('');
+  // Ref para ejecutar auto-match de cryptocustodios solo una vez al cargar la lista (evita que al escribir en nombre se sobrescriba)
+  const cryptocustodioAutoMatchDoneRef = useRef<string | null>(null);
 
   // Añadir estado para los tipos de artículos
   const TIPOS_ARTICULO = ['C', 'CC'];
@@ -2011,34 +2013,34 @@ function UploadAC21PageContent() {
       setCryptocustodiosDestino([]);
       setSelectedCryptocustodioIdFirmaA('');
       setSelectedCryptocustodioIdFirmaB('');
+      cryptocustodioAutoMatchDoneRef.current = null;
       return;
     }
     setSelectedCryptocustodioIdFirmaA('');
     setSelectedCryptocustodioIdFirmaB('');
+    cryptocustodioAutoMatchDoneRef.current = null; // Permitir auto-match al cargar la nueva lista
     fetchCryptocustodios(Number(id))
       .then((data) => setCryptocustodiosDestino(Array.isArray(data) ? data : []))
       .catch(() => setCryptocustodiosDestino([]));
   }, [processedData.empresa_destino?.id]);
 
-  // Auto-match de cryptocustodios: tras rellenar empresa destino (por OCR), buscar si el nombre detectado en Firma A/B existe como cryptocustodio de esa empresa y preseleccionarlo
+  // Auto-match de cryptocustodios: solo UNA VEZ al cargar la lista de cryptocustodios (tras elegir empresa destino).
+  // Usa los nombres que haya en ese momento (p. ej. del OCR). No se vuelve a ejecutar al escribir en nombre/empleo/cargo,
+  // para permitir edición libre sin que el campo se sobrescriba por un match parcial.
   useEffect(() => {
     if (cryptocustodiosDestino.length === 0 || !processedData.empresa_destino?.id) return;
+    const idKey = String(processedData.empresa_destino.id);
+    if (cryptocustodioAutoMatchDoneRef.current === idKey) return;
+    cryptocustodioAutoMatchDoneRef.current = idKey;
 
     const nombreA = processedData.firmas?.firma_a?.nombre;
     const nombreB = processedData.firmas?.firma_b?.nombre;
     const matchA = nombreA ? matchCryptocustodio(nombreA, cryptocustodiosDestino) : null;
     const matchB = nombreB ? matchCryptocustodio(nombreB, cryptocustodiosDestino) : null;
 
-    setSelectedCryptocustodioIdFirmaA((prevA) => {
-      if (prevA) return prevA;
-      return matchA ? String(matchA.id) : '';
-    });
-    setSelectedCryptocustodioIdFirmaB((prevB) => {
-      if (prevB) return prevB;
-      return matchB ? String(matchB.id) : '';
-    });
+    setSelectedCryptocustodioIdFirmaA(matchA ? String(matchA.id) : '');
+    setSelectedCryptocustodioIdFirmaB(matchB ? String(matchB.id) : '');
 
-    // Rellenar campos desde el cryptocustodio encontrado (datos canónicos de BD), solo si hubo match
     if (matchA || matchB) {
       setProcessedData((prev: any) => {
         let updated = { ...prev };
@@ -2073,11 +2075,11 @@ function UploadAC21PageContent() {
           };
           hasChanges = true;
         }
-        if (hasChanges) console.log('🔄 [AC21] Auto-match de cryptocustodios aplicado');
+        if (hasChanges) console.log('🔄 [AC21] Auto-match de cryptocustodios aplicado (una vez al cargar lista)');
         return hasChanges ? updated : prev;
       });
     }
-  }, [cryptocustodiosDestino, processedData.empresa_destino?.id, processedData.firmas?.firma_a?.nombre, processedData.firmas?.firma_b?.nombre]);
+  }, [cryptocustodiosDestino, processedData.empresa_destino?.id]);
 
   // Estado para el modal de agregar producto manual
   const [showAddProductModal, setShowAddProductModal] = useState(false);
