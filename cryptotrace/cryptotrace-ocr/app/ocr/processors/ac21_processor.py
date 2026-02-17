@@ -666,7 +666,7 @@ class AC21Processor:
             header_response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=header_messages,
-                max_tokens=2000,  # Tokens para extracción de cabecera, empresas y firmas
+                max_tokens=3000,  # Tokens para extracción de cabecera, empresas y firmas (margen para JSON largo)
                 temperature=0,
                 response_format={"type": "json_object"}
             )
