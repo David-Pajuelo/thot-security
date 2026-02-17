@@ -99,19 +99,25 @@ class AC21Processor:
             original_size = img.size
             print(f"📐 [PREPROCESS] Tamaño original: {original_size[0]}x{original_size[1]}")
             
-            # Aumentar resolución si es muy pequeña (< 2000px de ancho)
-            if img.width < 2000:
-                scale_factor = 2000 / img.width
+            # Aumentar resolución si es muy pequeña (< 2400px de ancho) para mejor lectura OCR
+            if img.width < 2400:
+                scale_factor = 2400 / img.width
                 new_size = (int(img.width * scale_factor), int(img.height * scale_factor))
                 img = img.resize(new_size, Image.LANCZOS)
                 print(f"🔍 [PREPROCESS] Resolución aumentada: {new_size[0]}x{new_size[1]} (factor: {scale_factor:.2f}x)")
             
-            # Mejorar contraste
+            # Mejorar contraste y nitidez
             try:
                 from PIL import ImageEnhance
                 enhancer = ImageEnhance.Contrast(img)
-                img = enhancer.enhance(1.3)  # Aumentar contraste 30%
-                print("✨ [PREPROCESS] Contraste mejorado (+30%)")
+                img = enhancer.enhance(1.4)  # Aumentar contraste 40% para texto más legible
+                print("✨ [PREPROCESS] Contraste mejorado (+40%)")
+                try:
+                    sharpener = ImageEnhance.Sharpness(img)
+                    img = sharpener.enhance(1.2)  # Nitidez +20% para bordes de texto
+                    print("✨ [PREPROCESS] Nitidez mejorada (+20%)")
+                except Exception as _:
+                    pass
             except Exception as e:
                 print(f"⚠️ [PREPROCESS] Error mejorando contraste: {e}")
             
@@ -705,7 +711,7 @@ class AC21Processor:
             items_response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=items_messages,
-                max_tokens=10000,  # Tokens para capturar todas las líneas (hasta 35 artículos con datos completos)
+                max_tokens=14000,  # Tokens para capturar todas las líneas (documentos largos, múltiples páginas)
                 temperature=0,
                 response_format={"type": "json_object"}
             )
@@ -995,7 +1001,8 @@ class AC21Processor:
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
+                            "url": f"data:image/jpeg;base64,{image_base64}",
+                            "detail": "high"
                         }
                     }
                 ]
@@ -1114,7 +1121,8 @@ class AC21Processor:
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
+                            "url": f"data:image/jpeg;base64,{image_base64}",
+                            "detail": "high"
                         }
                     }
                 ]
@@ -1263,7 +1271,8 @@ class AC21Processor:
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
+                            "url": f"data:image/jpeg;base64,{image_base64}",
+                            "detail": "high"
                         }
                     }
                 ]
@@ -1308,7 +1317,7 @@ class AC21Processor:
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                max_tokens=2500,  # Tokens para reparación de JSON
+                max_tokens=3500,  # Tokens para reparación de JSON (margen para respuestas largas)
                 temperature=0,
                 response_format={"type": "json_object"}
             )
