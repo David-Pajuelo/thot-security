@@ -86,44 +86,48 @@ class AC21Processor:
     def preprocess_image(self, image_bytes: bytes) -> bytes:
         """
         Preprocesa la imagen para mejorar la calidad del OCR:
-        - Aumenta resolución si es muy pequeña
-        - Mejora contraste
-        - Reduce ruido (opcional)
+        - Aumenta resolución si es muy pequeña (umbral 2400px para mejor lectura de texto)
+        - Mejora contraste y nitidez
+        - Salida PNG con menor compresión para mayor calidad
         """
         if Image is None:
             print("⚠️ PIL no disponible, saltando preprocesamiento")
             return image_bytes
         
         try:
+            from PIL import ImageEnhance
+
             img = Image.open(BytesIO(image_bytes)).convert("RGB")
             original_size = img.size
             print(f"📐 [PREPROCESS] Tamaño original: {original_size[0]}x{original_size[1]}")
             
-            # Aumentar resolución si es muy pequeña (< 2400px de ancho) para mejor lectura OCR
-            if img.width < 2400:
-                scale_factor = 2400 / img.width
+            # Aumentar resolución si es muy pequeña (< 2400px de ancho) para mejor precisión del modelo
+            min_width = 2400
+            if img.width < min_width:
+                scale_factor = min_width / img.width
                 new_size = (int(img.width * scale_factor), int(img.height * scale_factor))
                 img = img.resize(new_size, Image.LANCZOS)
                 print(f"🔍 [PREPROCESS] Resolución aumentada: {new_size[0]}x{new_size[1]} (factor: {scale_factor:.2f}x)")
             
-            # Mejorar contraste y nitidez
+            # Mejorar contraste (más que antes para texto escaneado)
             try:
-                from PIL import ImageEnhance
                 enhancer = ImageEnhance.Contrast(img)
-                img = enhancer.enhance(1.4)  # Aumentar contraste 40% para texto más legible
-                print("✨ [PREPROCESS] Contraste mejorado (+40%)")
-                try:
-                    sharpener = ImageEnhance.Sharpness(img)
-                    img = sharpener.enhance(1.2)  # Nitidez +20% para bordes de texto
-                    print("✨ [PREPROCESS] Nitidez mejorada (+20%)")
-                except Exception as _:
-                    pass
+                img = enhancer.enhance(1.45)  # +45% contraste para mayor legibilidad
+                print("✨ [PREPROCESS] Contraste mejorado (+45%)")
             except Exception as e:
                 print(f"⚠️ [PREPROCESS] Error mejorando contraste: {e}")
             
-            # Convertir de vuelta a bytes
+            # Aumentar nitidez para bordes de texto
+            try:
+                enhancer = ImageEnhance.Sharpness(img)
+                img = enhancer.enhance(1.25)
+                print("✨ [PREPROCESS] Nitidez mejorada (+25%)")
+            except Exception as e:
+                print(f"⚠️ [PREPROCESS] Error mejorando nitidez: {e}")
+            
+            # Convertir de vuelta a bytes (PNG con menos compresión = más calidad)
             output = BytesIO()
-            img.save(output, format="PNG", optimize=True)
+            img.save(output, format="PNG", optimize=True, compress_level=3)
             processed_bytes = output.getvalue()
             print(f"✅ [PREPROCESS] Preprocesamiento completado: {len(processed_bytes)} bytes")
             return processed_bytes
@@ -666,7 +670,7 @@ class AC21Processor:
             header_response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=header_messages,
-                max_tokens=3000,  # Tokens para extracción de cabecera, empresas y firmas (margen para JSON largo)
+                max_tokens=3500,  # Más margen para cabecera, empresas y firmas (mejor precisión)
                 temperature=0,
                 response_format={"type": "json_object"}
             )
@@ -711,7 +715,7 @@ class AC21Processor:
             items_response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=items_messages,
-                max_tokens=14000,  # Tokens para capturar todas las líneas (documentos largos, múltiples páginas)
+                max_tokens=16000,  # Más margen para tablas largas y campos detallados (mejor precisión)
                 temperature=0,
                 response_format={"type": "json_object"}
             )
@@ -752,10 +756,10 @@ class AC21Processor:
             # 5. Post-procesar los datos para corregir errores y mapear
             print("🔄 Post-procesando datos combinados...")
             processed_data = self._post_process_data(raw_data)
-
+            
             # 6. Combinar con plantilla para asegurar estructura final
             result = self.merge_with_template(processed_data)
-
+            
             # 7. Sanitizar listas
             if "articulos" in result:
                 result["articulos"] = self.sanitize_article_data(result.get("articulos"))
@@ -801,9 +805,9 @@ class AC21Processor:
                 "empresa_destino_raw_ocr": raw_empresa_destino if 'raw_empresa_destino' in locals() else {},
             }
             result["_debug"] = debug_info
-
+            
             return result
-
+            
         except Exception as e:
             print(f"❌ Error en el procesamiento: {str(e)}")
             print(f"📚 Stack trace: {traceback.format_exc()}")
@@ -825,7 +829,7 @@ class AC21Processor:
                         1.  **Cabecera**: Extrae los campos de la parte superior:
                             - `tipo_transaccion`: **CRÍTICO** - Tipo de transacción. **BUSCA ESPECÍFICAMENTE EL PUNTO 1**: Busca "1." seguido de las opciones: "TRANSFER", "INVENTORY", "DESTRUCTION", "HAND RECEIPT", "OTHER" (INGLÉS) o "TRANSFERENCIA", "INVENTARIO", "DESTRUCCION", "RECIBO EN MANO", "OTRO" (ESPAÑOL). Detecta qué casilla está marcada (✓, X, o cualquier marca visible) en el punto 1. **IMPORTANTE**: Solo una casilla debe estar marcada. Si ninguna está marcada o no puedes detectarlo, devuelve `"transferencia"` como valor por defecto. Devuelve el valor como string: `"transferencia"`, `"inventario"`, `"destruccion"`, `"recibo_en_mano"`, o `"otro"`. Si no encuentras ninguna marca, usa `"transferencia"` como valor por defecto.
                             - `numero_registro_salida`: **CRÍTICO** - Número de registro de salida. Este es un NÚMERO o CÓDIGO alfanumérico (ej: "SA2024-0001", "12345", etc.), **NO es una FECHA, NO es "DATE OF REPORT", NO es "DATE OF TRANSACTION"**. **BUSCA ESPECÍFICAMENTE EL PUNTO 4**: Busca "4." seguido de "Nº Registro de Salida" (ESPAÑOL) o "Outgoing Number" (INGLÉS). Etiquetas en ESPAÑOL: "4. Nº Registro de Salida", "Nº Registro de Salida", "Número Registro Salida", "Registro Salida". Etiquetas en INGLÉS: "4. Outgoing Number", "Outgoing No.", "Exit Registration Number", "Registration Number", "Exit Reg. No.", "Reg. No.". **⚠️⚠️⚠️ CRÍTICO - NO CONFUNDAS CON FECHAS**: Si encuentras una fecha (formato YYYY-MM-DD, DD/MM/YYYY, o similar) en el punto 4, NO la uses. Las fechas pertenecen a los puntos 3 (DATE OF REPORT) y 5 (DATE OF TRANSACTION), NO al punto 4. **IMPORTANTE**: Si en el punto 4 no encuentras ningún valor o el campo está vacío, usa una cadena vacía "". NO inventes valores. Si encuentras una fecha, NO la uses aquí. Si encuentras una dirección completa (con calle, número, ciudad), NO la uses aquí. Si no encuentras un número de registro de salida en el punto 4, usa una cadena vacía "".
-                            - `fecha_informe`: **CRÍTICO** - Fecha del informe. **BUSCA ESPECÍFICAMENTE EL PUNTO 3**: Busca "3." seguido de "DATE OF REPORT" o "Fecha del Informe". Etiquetas en ESPAÑOL: "3. Fecha del Informe", "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Etiquetas en INGLÉS: "3. DATE OF REPORT", "3. Report Date", "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15") o DD-MM-YYYY (ej: "15-12-2024"). Devuélvela tal como aparece en el documento. NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha. Si no encuentras una fecha en el punto 3, usa una cadena vacía "".
+                            - `fecha_informe`: **CRÍTICO** - Fecha del informe. **BUSCA ESPECÍFICAMENTE EL PUNTO 3**: Busca "3." seguido de "DATE OF REPORT" o "Fecha del Informe". Etiquetas en ESPAÑOL: "3. Fecha del Informe", "Fecha del Informe", "Fecha Informe", "Fecha Informe:". Etiquetas en INGLÉS: "3. DATE OF REPORT", "3. Report Date", "Report Date", "Date of Report", "Report Date:", "Date:". **IMPORTANTE**: Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15"). NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha. Si no encuentras una fecha en el punto 3, usa una cadena vacía "".
                             - `numero_registro_entrada`: **CRÍTICO** - Número de registro de entrada. Este es un NÚMERO o CÓDIGO alfanumérico, **NO es una FECHA, NO es "DATE OF REPORT", NO es "DATE OF TRANSACTION", NO es un número ODMC, NO es "ACCT. NO", NO es el número ODMC de ninguna empresa**. **BUSCA ESPECÍFICAMENTE EL PUNTO 6**: Busca "6." seguido de "Nº Registro de Entrada" (ESPAÑOL) o "Incoming Number" (INGLÉS). Etiquetas en ESPAÑOL: "6. Nº Registro de Entrada", "Nº Registro de Entrada", "Registro Entrada". Etiquetas en INGLÉS: "6. Incoming Number", "Incoming No.", "Entry Registration Number", "Entry Reg. No.". **⚠️⚠️⚠️ CRÍTICO - NO CONFUNDAS CON FECHAS**: Si encuentras una fecha (formato YYYY-MM-DD, DD/MM/YYYY, o similar) en el punto 6, NO la uses. Las fechas pertenecen a los puntos 3 (DATE OF REPORT) y 5 (DATE OF TRANSACTION), NO al punto 6. **⚠️⚠️⚠️ CRÍTICO - NO CONFUNDAS CON ODMC**: Si encuentras un número que está en la sección de empresas (junto a "ACCT. NO" o "ODMC"), ese número pertenece a `numero_odmc` de la empresa, NO a `numero_registro_entrada`. Ejemplos de números ODMC que NO debes usar aquí: "000303", "EMAD-004-E08", "02.01.06.21", etc. **IMPORTANTE**: Si en el punto 6 no encuentras ningún valor o el campo está vacío, usa una cadena vacía "". NO inventes valores. Si encuentras una fecha, NO la uses aquí. Si encuentras "ACCT. NO" o un número ODMC, NO lo uses aquí. Si no encuentras un número de registro de entrada en el punto 6, usa una cadena vacía "".
                             - `fecha_transaccion`: **🔥 CRÍTICO - ESTE CAMPO ES PRIORITARIO** - Fecha de la transacción. **⚠️⚠️⚠️ ATENCIÓN: Este campo es DIFERENTE de "Fecha del Informe" / "Date of Report". NO los confundas. ⚠️⚠️⚠️** 
                           
@@ -837,7 +841,7 @@ class AC21Processor:
                              - Si ves "3." seguido de "DATE OF REPORT" o "Fecha del Informe" → esa fecha va a `fecha_informe` (punto 3)
                              - Si ves "5." seguido de "DATE OF TRANSACTION" / "DATE OF TRASACTION" / "Fecha de la Transacción" → esa fecha va a `fecha_transaccion` (punto 5)
                           5. **BUSCA ACTIVAMENTE EL PUNTO 5**: Escanea la cabecera buscando específicamente "5." seguido de "DATE OF" o "FECHA DE" y luego una fecha. Esa fecha es `fecha_transaccion`.
-                          6. Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15") o DD-MM-YYYY (ej: "15-12-2024"). Devuélvela tal como aparece en el documento.
+                          6. Este campo debe contener SOLO una FECHA en formato YYYY-MM-DD (ej: "2024-12-15").
                           7. NO uses números ODMC, códigos, ni ningún otro valor que no sea una fecha.
                           8. **SI ENCUENTRAS una fecha en el punto 5 (junto a "5." y "Transaction"/"Transacción"/"Trasaction"), esa es `fecha_transaccion`.**
                           9. Si NO encuentras ninguna fecha en el punto 5, usa una cadena vacía "" en lugar de inventar una fecha.
@@ -968,9 +972,9 @@ class AC21Processor:
                           "cabecera": {
                             "tipo_transaccion": "String (valores posibles: 'transferencia', 'inventario', 'destruccion', 'recibo_en_mano', 'otro')",
                             "numero_registro_salida": "String",
-                            "fecha_informe": "String (YYYY-MM-DD o DD-MM-YYYY)",
+                            "fecha_informe": "String (YYYY-MM-DD)",
                             "numero_registro_entrada": "String",
-                            "fecha_transaccion": "String (YYYY-MM-DD o DD-MM-YYYY)",
+                            "fecha_transaccion": "String (YYYY-MM-DD)",
                           },
                           "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
                           "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
@@ -1001,8 +1005,7 @@ class AC21Processor:
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}",
-                            "detail": "high"
+                            "url": f"data:image/jpeg;base64,{image_base64}"
                         }
                     }
                 ]
@@ -1044,12 +1047,12 @@ class AC21Processor:
                           - Si está vacío o no es visible, usa "".
 
                         * `fecha_informe`: Busca "3." seguido de "DATE OF REPORT" (EN) o "Fecha del Informe" (ES).
-                          - Extrae SOLO la fecha en formato YYYY-MM-DD o DD-MM-YYYY (devuélvela tal como aparece).
+                          - Extrae SOLO la fecha en formato YYYY-MM-DD.
                           - NO uses números ODMC, códigos, ni otros valores.
                           - Si no hay fecha visible, usa "".
 
                         * `fecha_transaccion`: Busca "5." seguido de "DATE OF TRANSACTION" (EN) o "Fecha de la Transacción" (ES).
-                          - Extrae SOLO la fecha en formato YYYY-MM-DD o DD-MM-YYYY (devuélvela tal como aparece).
+                          - Extrae SOLO la fecha en formato YYYY-MM-DD.
                           - NO confundas con fecha_informe (punto 3).
                           - Si no hay fecha visible, usa "".
 
@@ -1094,9 +1097,9 @@ class AC21Processor:
                           "cabecera": {
                             "tipo_transaccion": "String (valores posibles: 'transferencia', 'inventario', 'destruccion', 'recibo_en_mano', 'otro')",
                             "numero_registro_salida": "String",
-                            "fecha_informe": "String (YYYY-MM-DD o DD-MM-YYYY)",
+                            "fecha_informe": "String (YYYY-MM-DD)",
                             "numero_registro_entrada": "String",
-                            "fecha_transaccion": "String (YYYY-MM-DD o DD-MM-YYYY)",
+                            "fecha_transaccion": "String (YYYY-MM-DD)",
                           },
                           "empresa_origen": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
                           "empresa_destino": { "nombre": "String", "direccion": "String", "codigo_postal": "String", "ciudad": "String", "provincia": "String", "numero_odmc": "String" },
@@ -1121,8 +1124,7 @@ class AC21Processor:
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}",
-                            "detail": "high"
+                            "url": f"data:image/jpeg;base64,{image_base64}"
                         }
                     }
                 ]
@@ -1271,8 +1273,7 @@ class AC21Processor:
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}",
-                            "detail": "high"
+                            "url": f"data:image/jpeg;base64,{image_base64}"
                         }
                     }
                 ]
@@ -1317,7 +1318,7 @@ class AC21Processor:
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                max_tokens=3500,  # Tokens para reparación de JSON (margen para respuestas largas)
+                max_tokens=4000,  # Más margen para reparación de JSON complejo
                 temperature=0,
                 response_format={"type": "json_object"}
             )
@@ -1583,6 +1584,6 @@ class AC21Processor:
         except Exception as e:
             print(f"⚠️ [VALIDATION] Error en validación: {str(e)}")
             return None
-    
+
     def _get_openai_client(self):
         return OpenAI(api_key=self.api_key)
