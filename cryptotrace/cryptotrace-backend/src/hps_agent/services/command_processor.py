@@ -383,7 +383,7 @@ class CommandProcessor:
             return None
     
     async def _consultar_hps_equipo(self, user_context: Dict[str, Any]) -> Dict[str, Any]:
-        """Consultar HPS del equipo del usuario (para team_lead, jefe_seguridad y jefe_seguridad_suplente)"""
+        """Consultar HPS del equipo del usuario (para admin, team_lead, jefe_seguridad y jefe_seguridad_suplente)"""
         user_id = user_context.get("id")
         user_role = user_context.get("role", "").lower()
         
@@ -392,12 +392,12 @@ class CommandProcessor:
         if hps_role:
             user_role = hps_role.lower()
         
-        # Solo team_lead, jefe_seguridad y jefe_seguridad_suplente pueden consultar HPS de su equipo
-        allowed_roles = ["team_lead", "jefe_seguridad", "jefe_seguridad_suplente"]
+        # Admin, team_lead, jefe_seguridad y jefe_seguridad_suplente pueden consultar HPS de su equipo
+        allowed_roles = ["admin", "team_lead", "jefe_seguridad", "jefe_seguridad_suplente"]
         if user_role not in allowed_roles:
             return {
                 "tipo": "error",
-                "mensaje": "❌ Solo los jefes de equipo, jefes de seguridad y jefes de seguridad suplentes pueden consultar las HPS de su equipo."
+                "mensaje": "❌ Solo administradores, jefes de equipo y jefes de seguridad pueden consultar las HPS de su equipo."
             }
         
         try:
