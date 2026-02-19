@@ -23,6 +23,11 @@ export function getAuthToken(): string | null {
   return localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
 }
 
+/** Nombre de archivo para enviar imagen (File o Blob) en FormData; evita "blob" sin extensión. */
+function nombreArchivoImagen(imagen: File | Blob): string {
+  return imagen instanceof File ? imagen.name : 'documento.png';
+}
+
 /** Devuelve la fecha de expiración del JWT (claim exp) en segundos, o null si no se puede leer. */
 export function getTokenExpiration(token: string): number | null {
   try {
@@ -33,7 +38,7 @@ export function getTokenExpiration(token: string): number | null {
   }
 }
 
-/** Minutos antes de expirar para hacer el refresh proactivo. */
+/** Minutos antes de expirar el access token para hacer el refresh proactivo. El lifetime del token se configura en backend (p. ej. 2 h). */
 const PROACTIVE_REFRESH_MINUTES = 5;
 
 /** Intenta renovar el access token. Devuelve true si se renovó; false si no hay refresh o el refresh falla. */
@@ -438,15 +443,12 @@ export const processAC21Companies = async (formData: FormData): Promise<any> => 
   return response.json();
 };
 
-export const saveAC21Data = async (data: any, imagen?: File): Promise<any> => {
+export const saveAC21Data = async (data: any, imagen?: File | Blob): Promise<any> => {
   const token = getAuthToken();
-  
-  // Si hay imagen, usar FormData; si no, usar JSON
   if (imagen) {
     const formData = new FormData();
-    // El backend espera los datos en un campo 'data' cuando es FormData
     formData.append('data', JSON.stringify(data));
-    formData.append('imagen_documento', imagen);
+    formData.append('imagen_documento', imagen, nombreArchivoImagen(imagen));
 
     const headers: HeadersInit = {};
     if (token) {
@@ -535,14 +537,12 @@ export const procesarAlbaran = async (): Promise<any> => {
 };
 
 // Procesar AC21 directamente sin usar línea temporal (nuevo flujo)
-export const procesarAlbaranDirecto = async (data: any, imagen?: File): Promise<any> => {
+export const procesarAlbaranDirecto = async (data: any, imagen?: File | Blob): Promise<any> => {
   const token = getAuthToken();
-  
-  // Si hay imagen, usar FormData; si no, usar JSON
   if (imagen) {
     const formData = new FormData();
     formData.append('data', JSON.stringify(data));
-    formData.append('imagen_documento', imagen);
+    formData.append('imagen_documento', imagen, nombreArchivoImagen(imagen));
 
     const headers: HeadersInit = {};
     if (token) {
@@ -574,14 +574,12 @@ export const procesarAlbaranDirecto = async (data: any, imagen?: File): Promise<
 };
 
 // Guardar productos en línea temporal sin crear albarán (para AC21 de ENTRADA)
-export const guardarEnLineaTemporal = async (data: any, imagen?: File): Promise<any> => {
+export const guardarEnLineaTemporal = async (data: any, imagen?: File | Blob): Promise<any> => {
   const token = getAuthToken();
-  
-  // Si hay imagen, usar FormData; si no, usar JSON
   if (imagen) {
     const formData = new FormData();
     formData.append('data', JSON.stringify(data));
-    formData.append('imagen_documento', imagen);
+    formData.append('imagen_documento', imagen, nombreArchivoImagen(imagen));
 
     const headers: HeadersInit = {};
     if (token) {

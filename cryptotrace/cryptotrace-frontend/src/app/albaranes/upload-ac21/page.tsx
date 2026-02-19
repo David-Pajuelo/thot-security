@@ -1530,7 +1530,13 @@ function UploadAC21PageContent() {
       };
     });
 
-    // Preparar datos completos del AC21 para el modal
+    // Imagen para guardar: la procesada (canvas/OCR) si existe; si no, el archivo original solo si es imagen (nunca PDF)
+    const imagenParaEnviar: File | undefined = imagenParaGuardar
+      ? new File([imagenParaGuardar], (selectedFile?.name || "documento").replace(/\.pdf$/i, ".png"), { type: imagenParaGuardar.type || "image/png" })
+      : selectedFile?.type?.startsWith("image/")
+        ? selectedFile
+        : undefined;
+
     const ac21Data = {
       cabecera: processedData.cabecera,
       empresa_origen: processedData.empresa_origen,
@@ -1539,8 +1545,8 @@ function UploadAC21PageContent() {
       accesorios: processedData.accesorios || [],
       equipos_prueba: processedData.equipos_prueba || [],
       firmas: processedData.firmas || {},
-      observaciones: processedData.observaciones || '',
-      imagen: selectedFile || undefined // Pasar el archivo original
+      observaciones: processedData.observaciones || "",
+      imagen: imagenParaEnviar,
     };
 
     // Guardar datos para el modal

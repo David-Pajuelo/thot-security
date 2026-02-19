@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchTiposProducto, procesarAlbaranDirecto } from "@/lib/api";
+import { fetchTiposProducto, procesarAlbaranDirecto, procesarAlbaran, fetchProductosAgrupados } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -34,7 +34,7 @@ interface GestionLineaTemporalProps {
     equipos_prueba: any[];
     firmas: any;
     observaciones: string;
-    imagen?: File;
+    imagen?: File | Blob;
   };
 }
 
@@ -155,21 +155,43 @@ export default function GestionLineaTemporal({ onClose, ac21Data }: GestionLinea
 
   useEffect(() => {
     const inicializar = async () => {
-      const tiposCargados = await fetchTiposProducto();
-      setTipos(tiposCargados);
-      
-      if (ac21Data && ac21Data.articulos) {
-        // Extraer códigos únicos de los artículos y cargar tipos desde catálogo
-        const codigos = await extraerCodigosUnicos(ac21Data.articulos, tiposCargados);
-        setCodigosTipificados(codigos);
-        console.log("[GestionLineaTemporal] Códigos únicos extraídos con tipos:", codigos);
-      } else {
-        // Si no hay datos desde props, mantener comportamiento antiguo (cargar desde BD)
-        // Esto es para compatibilidad con otros flujos
-        setError("No hay datos del AC21 para procesar");
+      setLoading(true);
+      setError(null);
+      try {
+        const tiposCargados = await fetchTiposProducto();
+        setTipos(tiposCargados);
+
+        if (ac21Data && ac21Data.articulos) {
+          // Flujo AC21: datos en memoria desde el modal de Subir AC21
+          const codigos = await extraerCodigosUnicos(ac21Data.articulos, tiposCargados);
+          setCodigosTipificados(codigos);
+          console.log("[GestionLineaTemporal] Flujo AC21: códigos extraídos:", codigos.length);
+        } else {
+          // Flujo Excel / línea temporal: cargar desde API (productos ya en bulk_create)
+          const data = await fetchProductosAgrupados();
+          const productos = data?.productos ?? [];
+          const codigos: CodigoTipificado[] = (productos as any[]).map((p: any) => ({
+            codigo_producto: p.codigo_producto || '',
+            descripcion: p.descripcion || p.observaciones || '',
+            tipo_producto_id: p.tipo_producto_id ?? p.tipo_catalogo_id ?? null,
+            tipo_producto_nombre: p.tipo_producto_nombre ?? p.tipo_catalogo_nombre ?? null,
+            tipo_catalogo_id: p.tipo_catalogo_id ?? null,
+            tipo_catalogo_nombre: p.tipo_catalogo_nombre ?? null
+          }));
+          setCodigosTipificados(codigos);
+          console.log("[GestionLineaTemporal] Flujo línea temporal (Excel): productos cargados:", codigos.length);
+          if (codigos.length === 0) {
+            setError(null); // No error, solo vacío
+          }
+        }
+      } catch (e) {
+        console.error("[GestionLineaTemporal] Error inicializando:", e);
+        setError(ac21Data ? "No hay datos del AC21 para procesar" : "Error al cargar la línea temporal");
+      } finally {
+        setLoading(false);
       }
     };
-    
+
     inicializar();
   }, [ac21Data]);
 
@@ -221,6 +243,32 @@ export default function GestionLineaTemporal({ onClose, ac21Data }: GestionLinea
     console.log(`[GestionLineaTemporal] Tipo asignado: ${codigoProducto} → ${tipoSeleccionado?.nombre || 'NINGUNO'}`);
   };
 
+  /** Flujo Excel / línea temporal: procesar lo que ya está en la BD (tipos ya guardados vía actualizar-cc) */
+  const handleProcesarLineaTemporal = async () => {
+    if (codigosTipificados.length === 0) {
+      setMensaje('❌ No hay productos en la línea temporal para procesar.');
+      setTimeout(() => setMensaje(null), 3000);
+      return;
+    }
+    try {
+      setLoading(true);
+      setMensaje(null);
+      const result = await procesarAlbaran();
+      console.log('✅ [GestionLineaTemporal] Línea temporal procesada:', result);
+      toast.success(result?.detail || result?.message || 'Albarán guardado en inventario correctamente.');
+      setTimeout(() => router.push('/albaranes'), 1500);
+    } catch (error: any) {
+      console.error('❌ Error procesando línea temporal:', error);
+      const errorMessage = error?.message || error?.detail || 'Error desconocido';
+      toast.error(`Error al procesar: ${errorMessage}`);
+      setMensaje(`❌ ${errorMessage}`);
+      setTimeout(() => setMensaje(null), 5000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** Flujo AC21: procesar con datos en memoria y opcional imagen (procesar_directo) */
   const handleProcesarAlbaran = async () => {
     if (!ac21Data) {
       setMensaje('❌ No hay datos del AC21 para procesar.');
@@ -228,7 +276,6 @@ export default function GestionLineaTemporal({ onClose, ac21Data }: GestionLinea
       return;
     }
 
-    // Verificar que hay códigos para procesar
     if (codigosTipificados.length === 0) {
       setMensaje('❌ No hay códigos para procesar.');
       setTimeout(() => setMensaje(null), 3000);
@@ -239,14 +286,12 @@ export default function GestionLineaTemporal({ onClose, ac21Data }: GestionLinea
       setLoading(true);
       setMensaje(null);
 
-      // 1. Crear mapa de código → tipo_producto_id desde la tipificación
       const codigoATipo = new Map(
         codigosTipificados
           .filter((c) => c.tipo_producto_id !== null)
           .map((c) => [c.codigo_producto, c.tipo_producto_id!])
       );
 
-      // 2. Construir payload completo con todos los artículos
       const payload = {
         cabecera: ac21Data.cabecera,
         empresa_origen: ac21Data.empresa_origen,
@@ -254,15 +299,14 @@ export default function GestionLineaTemporal({ onClose, ac21Data }: GestionLinea
         articulos: ac21Data.articulos.map((art) => {
           const codigo = art.codigo_producto || art.titulo_corto || '';
           const numeroSerie = art.numero_serie_inicio || art.numero_serie_fin || art.numero_serie || '';
-          
           return {
             codigo_producto: codigo,
             numero_serie: numeroSerie,
             cantidad: art.cantidad || 1,
             descripcion: art.observaciones || art.descripcion || '',
-            tipo_producto_id: codigoATipo.get(codigo) || null, // Tipo asignado en modal
+            tipo_producto_id: codigoATipo.get(codigo) || null,
             observaciones: art.observaciones || '',
-            cc: (art.cc && art.cc.toString().trim() !== '') ? art.cc : '' // CC del OCR - NO usar valor por defecto si está vacío
+            cc: (art.cc && art.cc.toString().trim() !== '') ? art.cc : ''
           };
         }),
         accesorios: ac21Data.accesorios || [],
@@ -271,30 +315,19 @@ export default function GestionLineaTemporal({ onClose, ac21Data }: GestionLinea
         observaciones: ac21Data.observaciones || ''
       };
 
-      console.log('🔄 [FRONTEND] Enviando payload a procesar_directo:', payload);
-
-      // 3. Llamar a procesar_directo
       const result = await procesarAlbaranDirecto(payload, ac21Data.imagen);
-      console.log('✅ [FRONTEND] Respuesta del backend:', result);
 
-      // 4. Si existe documento, mostrar modal de decisión
       if (result.documento_existente && result.requiere_decision) {
-        console.log('[GestionLineaTemporal] Documento existente detectado, mostrando modal de decisión');
         setDocumentoExistente(result.documento_existente);
         setShowDocumentoExistenteModal(true);
         setLoading(false);
         return;
       }
 
-      // 5. Si no existe, mostrar éxito y cerrar
       toast.success(`AC21 procesado correctamente (ID: ${result.albaran_id}, Número: ${result.albaran_numero || 'N/A'})`);
-      
       setTimeout(() => {
-        if (onClose) {
-          onClose();
-        } else {
-          router.push('/albaranes/upload-ac21');
-        }
+        if (onClose) onClose();
+        else router.push('/albaranes/upload-ac21');
       }, 1000);
     } catch (error: any) {
       console.error('❌ Error procesando el albarán:', error);
@@ -385,58 +418,70 @@ export default function GestionLineaTemporal({ onClose, ac21Data }: GestionLinea
         </div>
       )}
 
-      {/* Botón Volver - Solo mostrar si no está en modal (no hay onClose) */}
+      {/* Botón Volver - Solo si no está en modal */}
       {!onClose && (
         <div className="mb-4">
           <Button
-            onClick={() => router.push('/albaranes/upload-ac21')}
+            onClick={() => router.push(ac21Data ? '/albaranes/upload-ac21' : '/albaranes')}
             variant="outline"
             className="flex items-center gap-2"
           >
             <ArrowLeft className="w-4 h-4" />
-            Volver al procesamiento de AC21
+            {ac21Data ? 'Volver al procesamiento de AC21' : 'Volver a Entradas'}
           </Button>
         </div>
       )}
 
       {loading && <p>Cargando...</p>}
       {error && <p className="text-red-500">{error}</p>}
-      
-      {!loading && !error && ac21Data && (
+
+      {/* Flujo AC21: datos en memoria. Flujo Excel/línea temporal: datos cargados desde API */}
+      {!loading && !error && codigosTipificados.length > 0 && (
         <>
           <p className="mb-4 text-sm text-gray-600">
-            Asigna un Tipo de Cryptocustodio (CC) a cada código único del AC21. 
-            Esta asignación se guardará en el catálogo de productos.
+            {ac21Data
+              ? 'Asigna un Tipo de Cryptocustodio (CC) a cada código único del AC21. Esta asignación se guardará en el catálogo de productos.'
+              : 'Asigna el tipo de producto (tipo_producto) a cada código. Los tipos se guardan en el catálogo y se usarán al procesar el albarán en inventario.'}
           </p>
-          
-          <LineaTemporalTable 
+
+          <LineaTemporalTable
             productos={productosParaTabla}
             tipos={tipos}
             tipoAlbaran="inventario"
             onGuardarTipo={handleGuardarTipo}
-            onTipoAlbaranChange={() => {}} // No se usa en el nuevo flujo
+            onTipoAlbaranChange={() => {}}
           />
 
           <div className="mt-6 flex justify-center">
-            <Button
-              onClick={handleProcesarAlbaran}
-              disabled={codigosTipificados.length === 0}
-              className={`px-6 py-3 font-semibold rounded-lg transition 
-                ${codigosTipificados.length > 0 
-                  ? 'bg-green-500 text-white hover:bg-green-600' 
-                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'}
-              `}
-            >
-              🚀 Procesar AC21
-            </Button>
+            {ac21Data ? (
+              <Button
+                onClick={handleProcesarAlbaran}
+                disabled={codigosTipificados.length === 0}
+                className={`px-6 py-3 font-semibold rounded-lg transition ${codigosTipificados.length > 0 ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+              >
+                🚀 Procesar AC21
+              </Button>
+            ) : (
+              <Button
+                onClick={handleProcesarLineaTemporal}
+                disabled={codigosTipificados.length === 0}
+                className={`px-6 py-3 font-semibold rounded-lg transition ${codigosTipificados.length > 0 ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+              >
+                Procesar albarán y guardar en inventario
+              </Button>
+            )}
           </div>
-
-          {codigosTipificados.length === 0 && (
-            <p className="text-red-500 text-center mt-2">
-              ⚠️ No hay códigos para procesar.
-            </p>
-          )}
         </>
+      )}
+
+      {/* Sin productos: mensaje según flujo */}
+      {!loading && !error && codigosTipificados.length === 0 && !ac21Data && (
+        <p className="text-gray-600 text-center py-6">
+          No hay productos en la línea temporal. Sube un archivo Excel desde Entradas o procesa un AC21 para tipificar y guardar en inventario.
+        </p>
+      )}
+      {!loading && !error && codigosTipificados.length === 0 && ac21Data && (
+        <p className="text-red-500 text-center mt-2">⚠️ No hay códigos para procesar.</p>
       )}
 
       {/* Modal de documento existente */}

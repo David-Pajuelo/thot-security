@@ -13,7 +13,7 @@ from django.contrib.auth import authenticate
 from django.http import HttpResponse
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .models import (
-    CatalogoProducto, Albaran, MovimientoProducto, TipoProducto, LineaTemporalProducto, InventarioProducto, Empresa, Cryptocustodio, UserProfile
+    CatalogoProducto, Albaran, MovimientoProducto, TipoProducto, LineaTemporalProducto, InventarioProducto, Empresa, Cryptocustodio, UserProfile,
 )
 from .serializers import (
     CatalogoProductoSerializer, AlbaranSerializer, MovimientoProductoSerializer,
@@ -25,6 +25,33 @@ import json
 
 # Configurar logger
 logger = logging.getLogger(__name__)
+
+
+def _extension_imagen_segura(nombre_archivo):
+    """Devuelve extensión de imagen válida (.jpg, .jpeg, .png, .webp); por defecto 'jpg' si viene 'blob' o vacío."""
+    if not nombre_archivo or not getattr(nombre_archivo, 'split', None):
+        return 'jpg'
+    ext = (nombre_archivo.split('.')[-1] or '').lower()
+    if ext in ('jpg', 'jpeg', 'png', 'webp'):
+        return ext
+    return 'jpg'
+
+
+def _bytes_son_imagen_valida(raw_bytes):
+    """True si los bytes parecen una imagen (JPEG/PNG/WebP). False para PDF u otro formato."""
+    if not raw_bytes or len(raw_bytes) < 12:
+        return False
+    magic = raw_bytes[:12]
+    if magic.startswith(b'%PDF'):
+        return False
+    if magic[:3] == b'\xff\xd8\xff':
+        return True
+    if magic[:8] == b'\x89PNG\r\n\x1a\n':
+        return True
+    if magic[:4] == b'RIFF' and magic[8:12] == b'WEBP':
+        return True
+    return False
+
 
 # 🔹 Vista personalizada para JWT con información de usuario (sin throttling para permitir login)
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -318,9 +345,6 @@ class AlbaranViewSet(viewsets.ModelViewSet):
         return queryset
 
     def create(self, request, *args, **kwargs):
-        print(f"DEBUG AC21: request.data={request.data}")
-        print(f"DEBUG AC21: request.content_type={request.content_type}")
-        
         # Manejar FormData (cuando se envía imagen)
         parsed_data = request.data
         if 'multipart/form-data' in request.content_type:
@@ -375,7 +399,6 @@ class AlbaranViewSet(viewsets.ModelViewSet):
             cabecera.get('numero_registro_entrada'),
             cabecera.get('numero_registro_salida')
         )
-        print(f"DEBUG AC21: numero extraído (robusto)={numero}")
         if not numero:
             return Response({'error': 'No se encontró número de registro en el AC21. El payload debe incluir un campo "numero_registro_salida" o equivalente.'}, status=status.HTTP_400_BAD_REQUEST)
         # Si el frontend pide agregar productos a un albarán existente
@@ -1482,34 +1505,53 @@ class AlbaranViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='imagen-documento', permission_classes=[IsAuthenticated])
     def obtener_imagen_documento(self, request, pk=None):
         """
-        Devuelve la imagen del documento AC21 asociada al albarán
+        Devuelve la imagen del documento AC21 asociada al albarán.
+        Lee desde MEDIA_ROOT + nombre para evitar diferencias de storage/path.
         """
+        import os
+        from django.http import HttpResponse
+        import mimetypes
+        from django.conf import settings
+
         albaran = self.get_object()
-        
+
         if not albaran.imagen_documento:
             return Response({"detail": "Este albarán no tiene imagen de documento asociada."}, status=404)
-        
+
+        # Ruta en disco: siempre MEDIA_ROOT + nombre (evita desajustes con .path del storage)
+        rel_name = albaran.imagen_documento.name
+        file_path = os.path.join(settings.MEDIA_ROOT, rel_name)
+
         try:
-            from django.http import FileResponse
-            import mimetypes
-            
-            # Determinar el tipo MIME basado en la extensión
-            content_type, _ = mimetypes.guess_type(albaran.imagen_documento.name)
-            if not content_type:
-                content_type = 'image/jpeg'  # Por defecto
-            
-            # Abrir el archivo y devolver respuesta
-            response = FileResponse(
-                albaran.imagen_documento.open('rb'),
-                content_type=content_type
-            )
-            response['Content-Disposition'] = f'inline; filename="{albaran.imagen_documento.name}"'
-            
+            if not os.path.exists(file_path):
+                logger.warning("Imagen documento no encontrada en disco: %s", file_path)
+                return Response(
+                    {"detail": "El archivo de imagen no se encuentra en el servidor."},
+                    status=404,
+                )
+
+            with open(file_path, 'rb') as f:
+                content = f.read()
+
+            if not content or len(content) < 100:
+                return Response(
+                    {"detail": "El archivo de imagen está vacío o no es válido."},
+                    status=404,
+                )
+
+            content_type, _ = mimetypes.guess_type(rel_name)
+            if not content_type or not content_type.startswith('image/'):
+                content_type = 'image/jpeg'
+
+            response = HttpResponse(content, content_type=content_type)
+            response['Content-Disposition'] = f'inline; filename="{os.path.basename(rel_name)}"'
+            response['Content-Length'] = len(content)
             return response
-            
+
         except FileNotFoundError:
             return Response({"detail": "El archivo de imagen no se pudo encontrar."}, status=404)
         except Exception as e:
+            logger.exception("Error al servir imagen documento albaran_id=%s path=%s", pk, file_path)
             return Response({"detail": f"Error al servir la imagen: {str(e)}"}, status=500)
 
     def _procesar_accesorios(self, accesorios_data):
@@ -1743,12 +1785,22 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
         
         # Detectar si es FormData (con imagen) o JSON
         imagen_documento = None
+        imagen_documento_bytes = None  # leer en memoria para evitar stream consumido
         if 'multipart/form-data' in request.content_type:
             print("🖼️ [BACKEND] Recibiendo FormData con imagen")
-            # Extraer imagen del FormData
             imagen_documento = request.FILES.get('imagen_documento')
             if imagen_documento:
-                print(f"🖼️ [BACKEND] Imagen recibida: {imagen_documento.name}, {imagen_documento.size} bytes, {imagen_documento.content_type}")
+                try:
+                    imagen_documento_bytes = imagen_documento.read()
+                    if imagen_documento_bytes and not _bytes_son_imagen_valida(imagen_documento_bytes):
+                        if imagen_documento_bytes[:4] == b'%PDF':
+                            logger.warning("bulk_create: imagen ignorada (PDF)")
+                        imagen_documento_bytes = None
+                    elif imagen_documento_bytes:
+                        logger.info("bulk_create: imagen leída %s bytes", len(imagen_documento_bytes))
+                except Exception as e:
+                    logger.exception("Error leyendo imagen en bulk_create")
+                    imagen_documento_bytes = None
             
             # Extraer datos JSON del FormData
             data_str = request.data.get('data')
@@ -1899,38 +1951,34 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             registros_creados.append(registro)
             print(f"✅ [BACKEND] Registro temporal creado: ID={registro.id}")
 
-        # Si tenemos imagen de documento, guardarla temporalmente
+        # Si tenemos imagen de documento (bytes ya leídos), guardarla temporalmente
         imagen_temporal_path = None
-        if imagen_documento:
+        if imagen_documento_bytes and len(imagen_documento_bytes) >= 100:
             import os
-            import tempfile
             from django.conf import settings
             
             print("🖼️ [BACKEND] Imagen presente - guardando temporalmente")
             
-            # Crear directorio temporal si no existe
             temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp_documentos')
             os.makedirs(temp_dir, exist_ok=True)
             
-            # Guardar imagen temporal con nombre único basado en usuario y timestamp
             import time
             timestamp = str(int(time.time() * 1000))
-            extension = imagen_documento.name.split('.')[-1] if '.' in imagen_documento.name else 'jpg'
+            extension = _extension_imagen_segura(getattr(imagen_documento, 'name', None) if imagen_documento else '')
             nombre_temporal = f"temp_{request.user.id}_{timestamp}_AC21.{extension}"
             imagen_temporal_path = os.path.join(temp_dir, nombre_temporal)
             
-            # Escribir archivo temporal
             with open(imagen_temporal_path, 'wb') as f:
-                for chunk in imagen_documento.chunks():
-                    f.write(chunk)
+                f.write(imagen_documento_bytes)
             
-            print(f"🖼️ [BACKEND] Imagen guardada temporalmente en: {imagen_temporal_path}")
+            print(f"🖼️ [BACKEND] Imagen guardada temporalmente en: {imagen_temporal_path} ({len(imagen_documento_bytes)} bytes)")
             
-            # Actualizar datos adicionales de todos los registros con la ruta temporal
+            nombre_imagen = getattr(imagen_documento, 'name', None) if imagen_documento else 'documento.jpg'
             for registro in registros_creados:
                 datos_actualizados = registro.datos_adicionales.copy()
                 datos_actualizados['imagen_temporal_path'] = imagen_temporal_path
-                datos_actualizados['imagen_temporal_name'] = imagen_documento.name
+                datos_actualizados['imagen_temporal_name'] = nombre_imagen
+                datos_actualizados['tiene_imagen_documento'] = True
                 registro.datos_adicionales = datos_actualizados
                 registro.save(update_fields=['datos_adicionales'])
         
@@ -1939,7 +1987,7 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
             "success": True,
             "message": f"Se crearon {len(registros_creados)} productos en la línea temporal",
             "count": len(registros_creados),
-            "con_imagen": imagen_documento is not None
+            "con_imagen": bool(imagen_documento_bytes and len(imagen_documento_bytes) >= 100)
         }, status=201)
         
 
@@ -2245,12 +2293,28 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
         # Manejar FormData (cuando se envía imagen)
         parsed_data = request.data
         imagen_documento = None
+        imagen_documento_bytes = None  # bytes para guardar sin depender del stream
         
         if 'multipart/form-data' in request.content_type:
             print("🖼️ [BACKEND] Recibiendo FormData con imagen")
             imagen_documento = request.FILES.get('imagen_documento')
             if imagen_documento:
-                print(f"🖼️ [BACKEND] Imagen recibida: {imagen_documento.name}, {imagen_documento.size} bytes")
+                try:
+                    imagen_documento_bytes = imagen_documento.read()
+                    if imagen_documento_bytes:
+                        if not _bytes_son_imagen_valida(imagen_documento_bytes):
+                            if imagen_documento_bytes[:4] == b'%PDF':
+                                logger.warning("Imagen ignorada: es PDF (enviar imagen procesada, no el PDF original)")
+                            else:
+                                logger.warning("Imagen ignorada: formato no válido (magic %s)", imagen_documento_bytes[:8].hex())
+                            imagen_documento_bytes = None
+                        else:
+                            logger.info("Imagen leída: %s, %s bytes", imagen_documento.name, len(imagen_documento_bytes))
+                    else:
+                        imagen_documento_bytes = None
+                except Exception as e:
+                    logger.exception("Error leyendo imagen en procesar_directo")
+                    imagen_documento_bytes = None
             
             # Extraer datos JSON del FormData
             data_str = request.data.get('data')
@@ -2260,7 +2324,6 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                         parsed_data = json.loads(data_str)
                     else:
                         parsed_data = data_str
-                    print("✅ [BACKEND] Datos parseados desde FormData")
                 except (json.JSONDecodeError, TypeError) as e:
                     print(f"❌ [BACKEND] Error parseando JSON de FormData: {e}")
                     return Response({"error": f"Error parseando datos JSON: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
@@ -2425,14 +2488,16 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 
                 print(f"✅ [BACKEND] Albarán creado: ID={albaran.id}, Número={albaran.numero}, Página={albaran.pagina_numero}/{albaran.total_paginas}")
                 
-                # 3.2. Guardar imagen si existe
-                if imagen_documento:
+                # 3.2. Guardar imagen desde bytes leídos al recibir (evita stream consumido o corrupto)
+                if imagen_documento_bytes and len(imagen_documento_bytes) >= 100:
                     try:
                         from django.core.files.base import ContentFile
-                        extension = imagen_documento.name.split('.')[-1] if '.' in imagen_documento.name else 'jpg'
+                        nombre_orig = getattr(imagen_documento, 'name', None) or ''
+                        extension = _extension_imagen_segura(nombre_orig)
                         nombre_final = f"albaran_{albaran.id}_AC21_{int(time.time())}.{extension}"
-                        albaran.imagen_documento.save(nombre_final, imagen_documento, save=True)
-                        print(f"🖼️ [BACKEND] Imagen guardada: {albaran.imagen_documento.name}")
+                        content = ContentFile(imagen_documento_bytes, name=nombre_final)
+                        albaran.imagen_documento.save(nombre_final, content, save=True)
+                        print(f"🖼️ [BACKEND] Imagen guardada: {albaran.imagen_documento.name} ({len(imagen_documento_bytes)} bytes)")
                     except Exception as e:
                         print(f"❌ [BACKEND] Error guardando imagen: {str(e)}")
                         # Continuar sin fallar el proceso
@@ -2705,12 +2770,13 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                 imagen_temporal_name = None
                 
                 for p_temp in productos_temporales:
-                    datos_add = getattr(p_temp, 'datos_adicionales', {})
-                    if datos_add and datos_add.get('tiene_imagen_documento'):
+                    datos_add = getattr(p_temp, 'datos_adicionales', {}) or {}
+                    if datos_add and (datos_add.get('tiene_imagen_documento') or datos_add.get('imagen_temporal_path')):
                         imagen_temporal_path = datos_add.get('imagen_temporal_path')
                         imagen_temporal_name = datos_add.get('imagen_temporal_name')
-                        print(f"🖼️ [BACKEND] Imagen temporal encontrada: {imagen_temporal_path}")
-                        break
+                        if imagen_temporal_path:
+                            print(f"🖼️ [BACKEND] Imagen temporal encontrada: {imagen_temporal_path}")
+                            break
                 
                 if documento_existente:
                     # Es una página adicional de un documento existente
@@ -2808,9 +2874,14 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                     # Truncar campos numéricos a 20 caracteres si es necesario
                     numero_registro_entrada = str(cabecera.get('numero_registro_entrada', ''))[:20] if cabecera.get('numero_registro_entrada') else ''
                     numero_registro_salida = str(cabecera.get('numero_registro_salida', ''))[:20] if cabecera.get('numero_registro_salida') else ''
-                    
+                    # Si no hay empresas (p. ej. Excel), guardar como albarán normal en Entradas (sin direccion_transferencia)
+                    # Si hay empresas (AC21), marcar como ENTRADA para que aparezca como AC21 en Entradas
+                    tiene_empresas = bool(empresa_origen.get('id') or empresa_destino.get('id'))
+                    direccion = 'ENTRADA' if tiene_empresas else None
+                    if not tiene_empresas:
+                        print("📋 [BACKEND] Sin empresas (origen Excel/albarán): direccion_transferencia=None → se listará como Albarán en Entradas")
                     albaran = Albaran.objects.create(
-                        numero=numero[:20] if len(str(numero)) > 20 else numero,  # Truncar numero si es necesario
+                        numero=numero[:20] if len(str(numero)) > 20 else numero,
                         tipo_documento=tipo_documento_normalizado,
                         fecha=fecha_informe,
                         fecha_informe=fecha_informe,
@@ -2820,7 +2891,7 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                         codigo_contabilidad=cabecera.get('codigos_contabilidad', ''),
                         empresa_origen_id=empresa_origen.get('id'),
                         empresa_destino_id=empresa_destino.get('id'),
-                        direccion_transferencia='ENTRADA',  # Los AC-21 procesados desde tabla temporal son siempre de ENTRADA
+                        direccion_transferencia=direccion,
                         accesorios=accesorios,
                         equipos_prueba=equipos_prueba,
                         observaciones_odmc=observaciones or '',
@@ -2853,17 +2924,16 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                         with open(imagen_temporal_path, 'rb') as temp_file:
                             contenido_imagen = temp_file.read()
                         
-                        # Crear nombre para el archivo final
-                        extension = imagen_temporal_name.split('.')[-1] if '.' in imagen_temporal_name else 'jpg'
-                        nombre_final = f"albaran_{albaran.id}_AC21_{int(time.time())}.{extension}"
-                        
-                        # Guardar imagen en el albarán
-                        archivo_django = ContentFile(contenido_imagen, name=nombre_final)
-                        albaran.imagen_documento.save(nombre_final, archivo_django, save=True)
-                        
-                        print(f"🖼️ [BACKEND] Imagen transferida exitosamente: {albaran.imagen_documento.name}")
-                        
-                        # Limpiar archivo temporal
+                        if not contenido_imagen or len(contenido_imagen) < 100:
+                            print(f"❌ [BACKEND] Imagen temporal vacía o inválida (tamaño {len(contenido_imagen) or 0}), no se guarda")
+                        else:
+                            # Extensión segura (imagen_temporal_name puede ser "blob" o vacío)
+                            extension = _extension_imagen_segura(imagen_temporal_name or '')
+                            nombre_final = f"albaran_{albaran.id}_AC21_{int(time.time())}.{extension}"
+                            archivo_django = ContentFile(contenido_imagen, name=nombre_final)
+                            albaran.imagen_documento.save(nombre_final, archivo_django, save=True)
+                            print(f"🖼️ [BACKEND] Imagen transferida exitosamente: {albaran.imagen_documento.name}")
+                        # Limpiar archivo temporal siempre (ya se leyó)
                         os.remove(imagen_temporal_path)
                         print(f"🧹 [BACKEND] Archivo temporal eliminado: {imagen_temporal_path}")
                         

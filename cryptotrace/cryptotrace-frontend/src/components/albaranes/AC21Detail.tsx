@@ -35,24 +35,28 @@ function ModalImagenDocumento({ albaranId, numero, isOpen, onClose }: ModalImage
           throw new Error('No hay token de autenticación');
         }
 
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/albaranes/${albaranId}/imagen-documento/`, {
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
+        const response = await fetch(`${apiBase}/albaranes/${albaranId}/imagen-documento/`, {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
         });
 
         if (!response.ok) {
-          if (response.status === 401) {
-            throw new Error('No autorizado - inicia sesión nuevamente');
-          } else if (response.status === 404) {
-            throw new Error('Imagen no encontrada');
-          } else {
-            throw new Error(`Error del servidor: ${response.status}`);
-          }
+          let msg = `Error del servidor: ${response.status}`;
+          try {
+            const data = await response.json();
+            if (data?.detail) msg = typeof data.detail === 'string' ? data.detail : String(data.detail);
+          } catch (_) {}
+          if (response.status === 401) msg = 'No autorizado - inicia sesión nuevamente';
+          else if (response.status === 404) msg = msg || 'Imagen no encontrada';
+          throw new Error(msg);
         }
 
-        // Convertir la respuesta a blob y crear URL
         const blob = await response.blob();
+        if (!blob.size || !(blob.type.startsWith('image/'))) {
+          throw new Error(blob.size ? 'La respuesta no es una imagen válida.' : 'El documento no tiene imagen asociada.');
+        }
         const imageUrl = URL.createObjectURL(blob);
         setImagenSrc(imageUrl);
       } catch (err: any) {
@@ -369,6 +373,11 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
 
   const tienePaginaAnterior = paginaActual > 0;
   const tienePaginaSiguiente = paginaActual < paginas.length - 1;
+
+  // Id del albarán que tiene la imagen (página actual o primera página del documento que la tenga)
+  const imagenAlbaranId: number | null = albaranActual?.tiene_imagen_documento
+    ? albaranActual.id
+    : (paginas.find((p: Albaran & { tiene_imagen_documento?: boolean }) => p.tiene_imagen_documento)?.id ?? null);
 
   useEffect(() => {
     // Cargar movimientos del albarán
@@ -942,8 +951,8 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
                   Imprimir AC21
                 </Button>
                 
-                {/* Botón para ver imagen del documento */}
-                {albaranActual.tiene_imagen_documento && (
+                {/* Botón para ver imagen del documento (puede estar en la página actual o en otra página del mismo documento) */}
+                {imagenAlbaranId != null && (
                   <Button 
                     variant="outline"
                     onClick={() => setModalImagenAbierto(true)}
@@ -1813,8 +1822,8 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
       
       {/* Modal de imagen del documento */}
       <ModalImagenDocumento 
-        albaranId={albaranActual.id} 
-        numero={albaranActual.numero} 
+        albaranId={imagenAlbaranId ?? albaranActual?.id ?? albaranLocal.id} 
+        numero={albaranActual?.numero ?? albaranLocal.numero} 
         isOpen={modalImagenAbierto}
         onClose={() => setModalImagenAbierto(false)}
       />

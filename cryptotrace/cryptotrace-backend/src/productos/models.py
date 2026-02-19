@@ -8,21 +8,22 @@ from datetime import datetime
 
 User = get_user_model()
 
+# Extensiones de imagen válidas para documentos AC21 (evita .blob o vacío del frontend)
+IMAGEN_DOCUMENTO_EXTENSIONES = ('.jpg', '.jpeg', '.png', '.webp')
+
+
 def imagen_documento_upload_path(instance, filename):
     """
     Genera path consistente para almacenamiento de imágenes de documentos
     Estructura: albaranes/documentos/YYYY/MM/albaran_ID_AC21_timestamp.ext
+    Siempre usa una extensión de imagen válida (por si el frontend envía "blob" o sin extensión).
     """
-    # Extraer extensión del archivo
-    ext = os.path.splitext(filename)[1]
-    
-    # Generar timestamp
+    ext = (os.path.splitext(filename)[1] or '').lower()
+    if ext not in IMAGEN_DOCUMENTO_EXTENSIONES:
+        ext = '.jpg'
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # Nombre consistente para rclone
     new_filename = f"albaran_{instance.id}_AC21_{timestamp}{ext}"
-    
-    # Path organizado por fecha
     return f"albaranes/documentos/{datetime.now().strftime('%Y/%m/')}{new_filename}"
 
 # Constante global TIPO_ENTRADA_CHOICES será eliminada

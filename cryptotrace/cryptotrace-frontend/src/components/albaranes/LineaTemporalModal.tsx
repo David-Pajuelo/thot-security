@@ -15,7 +15,7 @@ interface LineaTemporalModalProps {
     equipos_prueba: any[];
     firmas: any;
     observaciones: string;
-    imagen?: File;
+    imagen?: File | Blob;
   };
 }
 

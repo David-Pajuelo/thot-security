@@ -35,9 +35,9 @@ else:
         re_path(r'^media/(?P<path>.*)$', serve, {
             'document_root': settings.MEDIA_ROOT,
         }),
-        # Servir documentos de albaranes desde su ubicación específica  
+        # Servir documentos de albaranes (misma base que MEDIA_ROOT: media/albaranes/documentos/...)
         re_path(r'^albaranes/documentos/(?P<path>.*)$', serve, {
-            'document_root': '/app/albaranes/documentos',
+            'document_root': os.path.join(settings.MEDIA_ROOT, 'albaranes', 'documentos'),
         }),
         # Servir archivos estáticos en producción
         re_path(r'^static/(?P<path>.*)$', serve, {
