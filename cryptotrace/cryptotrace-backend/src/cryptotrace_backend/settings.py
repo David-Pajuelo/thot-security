@@ -70,10 +70,9 @@ REST_FRAMEWORK = {
     ),
 }
 
-# Configuración JWT unificada (compatible con hps-system)
-# hps-system usa 480 minutos (8 horas), cryptotrace usa 1 hora
-# Usamos configuración desde variables de entorno con fallback
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '480'))  # 8 horas por defecto (hps-system)
+# Configuración JWT unificada (compatible con hps-system y cryptotrace)
+# Por defecto 2 horas para evitar redirecciones cada 15 min; override con ACCESS_TOKEN_EXPIRE_MINUTES
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '120'))  # 2 horas por defecto
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),

@@ -199,8 +199,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     };
   }, [isAuthenticated]);
 
-  // Cierre de sesión por inactividad (Fase 6 sesión; opcional, 15 min)
-  const IDLE_MINUTES = 15;
+  // Cierre de sesión por inactividad (alineado con validación de token: 2 h)
+  const IDLE_MINUTES = 120;
   const idleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isAuthenticated) return;

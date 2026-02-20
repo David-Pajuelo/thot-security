@@ -41,15 +41,24 @@ export function getTokenExpiration(token: string): number | null {
 /** Minutos antes de expirar el access token para hacer el refresh proactivo. El lifetime del token se configura en backend (p. ej. 2 h). */
 const PROACTIVE_REFRESH_MINUTES = 5;
 
-/** Intenta renovar el access token. Devuelve true si se renovó; false si no hay refresh o el refresh falla. */
+/** Intenta renovar el access token. Devuelve true solo si se renovó correctamente. */
 export async function refreshTokenAsync(): Promise<boolean> {
-  return doRefreshToken();
+  const result = await doRefreshTokenDetailed();
+  return result === 'ok';
 }
 
-async function doRefreshToken(): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
+type RefreshResult = 'ok' | 'invalid' | 'transient';
+
+/**
+ * Resultado del refresh:
+ * - ok: token renovado
+ * - invalid: refresh inválido/caducado (se debe cerrar sesión)
+ * - transient: error temporal (red/5xx). No forzar logout inmediato.
+ */
+async function doRefreshTokenDetailed(): Promise<RefreshResult> {
+  if (typeof window === 'undefined') return 'transient';
   const refresh = localStorage.getItem('refreshToken') || localStorage.getItem('hps_refresh_token');
-  if (!refresh) return false;
+  if (!refresh) return 'invalid';
 
   try {
     const response = await fetch(`${API_URL}/token/refresh/`, {
@@ -70,12 +79,24 @@ async function doRefreshToken(): Promise<boolean> {
         localStorage.setItem('refreshToken', newRefresh);
         localStorage.setItem('hps_refresh_token', newRefresh);
       }
-      return true;
+      return 'ok';
+    }
+
+    // 400/401/403 => refresh inválido o expirado
+    if ([400, 401, 403].includes(response.status)) {
+      return 'invalid';
     }
   } catch (error) {
     console.error('Error refreshing token:', error);
+    return 'transient';
   }
-  return false;
+
+  // Otros códigos (5xx, etc.) se consideran transitorios
+  return 'transient';
+}
+
+async function doRefreshToken(): Promise<boolean> {
+  return (await doRefreshTokenDetailed()) === 'ok';
 }
 
 /**
@@ -96,16 +117,19 @@ export async function fetchWithAuth(
   let response = await fetch(input, { ...init, headers });
 
   if (response.status === 401 && token && !skipRetry) {
-    const refreshed = await doRefreshToken();
-    if (refreshed) {
+    const refreshResult = await doRefreshTokenDetailed();
+    if (refreshResult === 'ok') {
       const newToken = getAuthToken();
       if (newToken) {
         headers.set('Authorization', `Bearer ${newToken}`);
         return fetch(input, { ...init, headers });
       }
     }
-    clearSessionAndRedirect();
-    throw new Error('Sesión expirada. Redirigiendo al login.');
+    if (refreshResult === 'invalid') {
+      clearSessionAndRedirect();
+      throw new Error('Sesión expirada. Redirigiendo al login.');
+    }
+    throw new Error('No se pudo refrescar la sesión temporalmente. Reintenta.');
   }
 
   return response;
@@ -129,22 +153,33 @@ export function scheduleProactiveRefresh(): () => void {
   const delaySec = exp - nowSec - PROACTIVE_REFRESH_MINUTES * 60;
   if (delaySec <= 0) {
     // Ya está próximo a expirar o expirado; intentar refresh ya
-    doRefreshToken().then((ok) => {
-      if (!ok) clearSessionAndRedirect();
-      else window.dispatchEvent(new Event('tokenUpdated'));
+    doRefreshTokenDetailed().then((result) => {
+      if (result === 'ok') {
+        window.dispatchEvent(new Event('tokenUpdated'));
+      } else if (result === 'invalid') {
+        clearSessionAndRedirect();
+      } else {
+        // Error temporal (red/5xx): no cerrar sesión; reintentar en 60s
+        window.setTimeout(() => scheduleProactiveRefresh(), 60 * 1000);
+      }
     });
     return () => {};
   }
 
   const timeoutId = window.setTimeout(async () => {
-    const ok = await doRefreshToken();
-    if (!ok) {
+    const result = await doRefreshTokenDetailed();
+    if (result === 'invalid') {
       clearSessionAndRedirect();
       return;
     }
-    window.dispatchEvent(new Event('tokenUpdated'));
-    // Res programar con el nuevo token
-    scheduleProactiveRefresh();
+    if (result === 'ok') {
+      window.dispatchEvent(new Event('tokenUpdated'));
+      // Reprogramar con el nuevo token
+      scheduleProactiveRefresh();
+      return;
+    }
+    // Error transitorio: reintentar pronto sin tirar sesión
+    window.setTimeout(() => scheduleProactiveRefresh(), 60 * 1000);
   }, delaySec * 1000);
 
   return () => window.clearTimeout(timeoutId);
@@ -172,8 +207,8 @@ export const apiFetch = async (
 
   // If unauthorized, try to refresh token; if refresh fails, clear session and redirect to login
   if (response.status === 401 && token) {
-    const refreshed = await doRefreshToken();
-    if (refreshed) {
+    const refreshResult = await doRefreshTokenDetailed();
+    if (refreshResult === 'ok') {
       const newToken = getAuthToken();
       if (newToken) {
         headers['Authorization'] = `Bearer ${newToken}`;
@@ -183,9 +218,12 @@ export const apiFetch = async (
         });
       }
     }
-    if (response.status === 401) {
+    if (response.status === 401 && refreshResult === 'invalid') {
       clearSessionAndRedirect();
       throw new Error('Sesión expirada. Redirigiendo al login.');
+    }
+    if (response.status === 401 && refreshResult === 'transient') {
+      throw new Error('No se pudo validar sesión temporalmente. Reintenta.');
     }
   }
 

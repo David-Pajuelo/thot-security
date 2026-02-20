@@ -10,14 +10,15 @@ export const useSessionPersistence = () => {
   const intervalRef = useRef(null);
 
   useEffect(() => {
-    // Verificar sesión cada 5 minutos si está autenticado
+    // Verificar sesión cada 2 horas si está autenticado (alineado con lifetime del access token)
+    const SESSION_CHECK_MINUTES = 120;
     if (isAuthenticated) {
       console.log('useSessionPersistence - Iniciando verificación automática de sesión');
       
       // Verificar inmediatamente
       checkAndRefreshToken();
       
-      // Configurar verificación periódica cada 5 minutos
+      // Configurar verificación periódica cada 2 horas
       intervalRef.current = setInterval(async () => {
         console.log('useSessionPersistence - Verificación periódica de sesión');
         const isValid = await checkAndRefreshToken();
@@ -26,7 +27,7 @@ export const useSessionPersistence = () => {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
         }
-      }, 5 * 60 * 1000); // 5 minutos
+      }, SESSION_CHECK_MINUTES * 60 * 1000);
     } else {
       // Limpiar intervalo si no está autenticado
       if (intervalRef.current) {

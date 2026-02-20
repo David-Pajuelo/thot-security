@@ -107,7 +107,7 @@ chmod +x /usr/local/bin/docker-compose
 
 # Verificar instalación
 docker --version
-docker-compose --version
+docker compose --version
 ```
 
 ### 2.4 Configurar Firewall (UFW)
@@ -472,33 +472,33 @@ cat docker-compose.prod.yml
 cd /opt/thot-security/cryptotrace
 
 # Construir las imágenes
-docker-compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml build
 
 # Levantar los contenedores
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # Ver logs para verificar que todo está funcionando
-docker-compose -f docker-compose.prod.yml logs -f
+docker compose -f docker-compose.prod.yml logs -f
 ```
 
 **Esperar a que todos los contenedores estén "healthy" o "Up":**
 
 ```bash
 # Ver estado de los contenedores
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 ```
 
 ### 6.2 Ejecutar Migraciones de Base de Datos (CryptoTrace)
 
 ```bash
 # Ejecutar migraciones
-docker-compose -f docker-compose.prod.yml exec backend python manage.py migrate
+docker compose -f docker-compose.prod.yml exec backend python manage.py migrate
 
 # Crear superusuario (opcional)
-docker-compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
+docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
 
 # Recolectar archivos estáticos
-docker-compose -f docker-compose.prod.yml exec backend python manage.py collectstatic --noinput
+docker compose -f docker-compose.prod.yml exec backend python manage.py collectstatic --noinput
 ```
 
 ### 6.3 Construir y Levantar HPS System
@@ -508,27 +508,27 @@ docker-compose -f docker-compose.prod.yml exec backend python manage.py collects
 cd /opt/thot-security/hps-system
 
 # Construir las imágenes
-docker-compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml build
 
 # Levantar los contenedores
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # Ver logs para verificar que todo está funcionando
-docker-compose -f docker-compose.prod.yml logs -f
+docker compose -f docker-compose.prod.yml logs -f
 ```
 
 **Esperar a que todos los contenedores estén "healthy" o "Up":**
 
 ```bash
 # Ver estado de los contenedores
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 ```
 
 ### 6.4 Ejecutar Migraciones de Base de Datos (HPS System)
 
 ```bash
 # Ejecutar migraciones (si usa Alembic)
-docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 
 # O si usa otro sistema de migraciones, seguir la documentación específica
 ```
@@ -707,14 +707,14 @@ curl https://seguridad.idiaicox.com
 
 ```bash
 # CryptoTrace - Conectar a la base de datos
-docker-compose -f cryptotrace/docker-compose.prod.yml exec db psql -U cryptotrace_user -d cryptotrace_prod
+docker compose -f cryptotrace/docker-compose.prod.yml exec db psql -U cryptotrace_user -d cryptotrace_prod
 
 # Dentro de psql:
 \dt  # Ver tablas
 \q   # Salir
 
 # HPS System - Conectar a la base de datos
-docker-compose -f hps-system/docker-compose.prod.yml exec db psql -U hps_user -d hps_system
+docker compose -f hps-system/docker-compose.prod.yml exec db psql -U hps_user -d hps_system
 
 # Dentro de psql:
 \dt  # Ver tablas
@@ -725,11 +725,11 @@ docker-compose -f hps-system/docker-compose.prod.yml exec db psql -U hps_user -d
 
 ```bash
 # CryptoTrace - Verificar Redis
-docker-compose -f cryptotrace/docker-compose.prod.yml exec redis redis-cli ping
+docker compose -f cryptotrace/docker-compose.prod.yml exec redis redis-cli ping
 # Debe responder: PONG
 
 # HPS System - Verificar Redis
-docker-compose -f hps-system/docker-compose.prod.yml exec redis redis-cli ping
+docker compose -f hps-system/docker-compose.prod.yml exec redis redis-cli ping
 # Debe responder: PONG
 ```
 
@@ -767,20 +767,20 @@ git pull origin production
 
 # Reconstruir y reiniciar contenedores
 cd cryptotrace
-docker-compose -f docker-compose.prod.yml build
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d
 
 cd ../hps-system
-docker-compose -f docker-compose.prod.yml build
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ### 9.2 Ver Logs
 
 ```bash
 # Ver logs de todos los servicios
-docker-compose -f cryptotrace/docker-compose.prod.yml logs -f
-docker-compose -f hps-system/docker-compose.prod.yml logs -f
+docker compose -f cryptotrace/docker-compose.prod.yml logs -f
+docker compose -f hps-system/docker-compose.prod.yml logs -f
 
 # Ver logs de un servicio específico
 docker logs cryptotrace-backend -f
@@ -791,36 +791,36 @@ docker logs hps_backend -f
 
 ```bash
 # Backup CryptoTrace
-docker-compose -f cryptotrace/docker-compose.prod.yml exec db pg_dump -U cryptotrace_user cryptotrace_prod > /opt/backups/cryptotrace_$(date +%Y%m%d_%H%M%S).sql
+docker compose -f cryptotrace/docker-compose.prod.yml exec db pg_dump -U cryptotrace_user cryptotrace_prod > /opt/backups/cryptotrace_$(date +%Y%m%d_%H%M%S).sql
 
 # Backup HPS System
-docker-compose -f hps-system/docker-compose.prod.yml exec db pg_dump -U hps_user hps_system > /opt/backups/hps_$(date +%Y%m%d_%H%M%S).sql
+docker compose -f hps-system/docker-compose.prod.yml exec db pg_dump -U hps_user hps_system > /opt/backups/hps_$(date +%Y%m%d_%H%M%S).sql
 ```
 
 ### 9.4 Reiniciar Servicios
 
 ```bash
 # Reiniciar todos los servicios de CryptoTrace
-docker-compose -f cryptotrace/docker-compose.prod.yml restart
+docker compose -f cryptotrace/docker-compose.prod.yml restart
 
 # Reiniciar todos los servicios de HPS System
-docker-compose -f hps-system/docker-compose.prod.yml restart
+docker compose -f hps-system/docker-compose.prod.yml restart
 
 # Reiniciar un servicio específico
-docker-compose -f cryptotrace/docker-compose.prod.yml restart backend
+docker compose -f cryptotrace/docker-compose.prod.yml restart backend
 ```
 
 ### 9.5 Detener Servicios
 
 ```bash
 # Detener todos los servicios de CryptoTrace
-docker-compose -f cryptotrace/docker-compose.prod.yml down
+docker compose -f cryptotrace/docker-compose.prod.yml down
 
 # Detener todos los servicios de HPS System
-docker-compose -f hps-system/docker-compose.prod.yml down
+docker compose -f hps-system/docker-compose.prod.yml down
 
 # Detener y eliminar volúmenes (¡CUIDADO! Esto elimina datos)
-docker-compose -f cryptotrace/docker-compose.prod.yml down -v
+docker compose -f cryptotrace/docker-compose.prod.yml down -v
 ```
 
 ---
@@ -878,7 +878,7 @@ Usa este checklist para asegurarte de que todo está configurado correctamente:
 docker logs <nombre_contenedor>
 
 # Verificar variables de entorno
-docker-compose -f docker-compose.prod.yml config
+docker compose -f docker-compose.prod.yml config
 
 # Verificar que los puertos no estén en uso
 netstat -tulpn | grep :8080
@@ -904,7 +904,7 @@ cat cryptotrace-backend/.env.prod | grep DB_
 docker logs cryptotrace-frontend
 
 # Verificar variables de entorno del frontend
-docker-compose -f docker-compose.prod.yml config | grep NEXT_PUBLIC
+docker compose -f docker-compose.prod.yml config | grep NEXT_PUBLIC
 ```
 
 ### Problema: SSL no funciona
@@ -935,25 +935,25 @@ ssh root@187.33.154.156
 cd /opt/thot-security/cryptotrace
 
 # Ver estado
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 
 # Ver logs
-docker-compose -f docker-compose.prod.yml logs -f
+docker compose -f docker-compose.prod.yml logs -f
 
 # Reiniciar
-docker-compose -f docker-compose.prod.yml restart
+docker compose -f docker-compose.prod.yml restart
 
 # Detener
-docker-compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml down
 
 # Levantar
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # Migraciones
-docker-compose -f docker-compose.prod.yml exec backend python manage.py migrate
+docker compose -f docker-compose.prod.yml exec backend python manage.py migrate
 
 # Crear superusuario
-docker-compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
+docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
 ```
 
 ### Comandos Esenciales HPS System
@@ -961,19 +961,19 @@ docker-compose -f docker-compose.prod.yml exec backend python manage.py createsu
 cd /opt/thot-security/hps-system
 
 # Ver estado
-docker-compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml ps
 
 # Ver logs
-docker-compose -f docker-compose.prod.yml logs -f
+docker compose -f docker-compose.prod.yml logs -f
 
 # Reiniciar
-docker-compose -f docker-compose.prod.yml restart
+docker compose -f docker-compose.prod.yml restart
 
 # Detener
-docker-compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml down
 
 # Levantar
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ### URLs de Acceso

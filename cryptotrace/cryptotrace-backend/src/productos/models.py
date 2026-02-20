@@ -535,20 +535,23 @@ class MovimientoProducto(models.Model):
             ).first()
 
             if inventario:
-                # Actualizamos el registro existente
+                # Actualizamos el registro existente (incluir descripción del movimiento por línea)
                 print(f"📝 [MovimientoProducto.save] Actualizando inventario existente ID={inventario.id}")
                 inventario.estado = self.estado_nuevo
                 inventario.ultimo_movimiento = self
                 inventario.ultima_actualizacion = self.fecha
+                if self.descripcion:
+                    inventario.descripcion = self.descripcion
                 inventario.save()
                 print(f"✅ [MovimientoProducto.save] Inventario actualizado correctamente")
             else:
-                # Creamos un nuevo registro de inventario
+                # Creamos un nuevo registro de inventario (descripción del movimiento, no del catálogo)
                 print(f"➕ [MovimientoProducto.save] Creando nuevo registro de inventario")
+                desc_inv = self.descripcion or self.producto.descripcion
                 nuevo_inventario = InventarioProducto.objects.create(
                     producto=self.producto,
                     numero_serie=self.numero_serie,
-                    descripcion=self.producto.descripcion,
+                    descripcion=desc_inv,
                     estado=self.estado_nuevo,
                     ultimo_movimiento=self,
                     ultima_actualizacion=self.fecha

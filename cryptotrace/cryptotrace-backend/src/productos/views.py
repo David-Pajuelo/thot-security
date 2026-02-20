@@ -614,12 +614,13 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                         # Para salidas, el estado nuevo siempre es 'inactivo' (el producto sale de custodia)
                         estado_nuevo = 'inactivo'
                         
-                        # Crear el movimiento de producto
+                        # Descripción por línea (articulo), no la del catálogo
+                        desc_articulo = articulo.get('descripcion', '') or articulo.get('observaciones', '')
                         movimiento = MovimientoProducto.objects.create(
                             albaran=albaran,
                             producto=producto_catalogo,
                             numero_serie=articulo.get('numero_serie'),
-                            descripcion=producto_catalogo.descripcion,
+                            descripcion=desc_articulo or producto_catalogo.descripcion,
                             tipo_movimiento=albaran.tipo_documento,
                             estado_anterior=estado_anterior,
                             estado_nuevo=estado_nuevo,
@@ -2588,12 +2589,13 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                         cc_del_ocr = None
                     # Si el usuario quiere respetar el vacío, necesitaríamos cambiar el modelo a null=True
                     
-                    # Crear movimiento
+                    # Descripción por línea (cada artículo puede tener Kit 1, Kit 2, etc.), no la del catálogo
+                    descripcion_linea = articulo.get('descripcion', '') or articulo.get('observaciones', '')
                     movimiento = MovimientoProducto.objects.create(
                         albaran=albaran,
                         producto=producto,
                         numero_serie=numero_serie,
-                        descripcion=producto.descripcion,
+                        descripcion=descripcion_linea or producto.descripcion,
                         tipo_movimiento=tipo_documento_normalizado,
                         cantidad=articulo.get('cantidad', 1),
                         cc=cc_del_ocr,
@@ -3022,13 +3024,15 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
                         # Por defecto, si no hay dirección, usar 'activo' para inventarios
                         estado_nuevo = 'activo'
                     
+                    # Descripción por línea (cada ítem puede tener descripción distinta), no la del catálogo
+                    descripcion_linea = getattr(p, 'descripcion', '') or getattr(p, 'observaciones', '') or ''
                     print(f"🔄 [BACKEND] Creando MovimientoProducto: producto={producto.codigo_producto}, serie={p.numero_serie}, estado_anterior={estado_anterior}, estado_nuevo={estado_nuevo}")
                     try:
                         movimiento = MovimientoProducto.objects.create(
                             albaran=albaran,
                             producto=producto,
                             numero_serie=p.numero_serie,
-                            descripcion=producto.descripcion,
+                            descripcion=descripcion_linea or producto.descripcion,
                             tipo_movimiento=tipo_movimiento_normalizado,
                             cantidad=getattr(p, 'cantidad', 1),
                             cc=cc_del_ocr,  # Usar cc del OCR desde datos_adicionales
