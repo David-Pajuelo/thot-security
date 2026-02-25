@@ -26,9 +26,24 @@ export interface Empresa {
   id: number;
   nombre: string;
   codigo?: string;
+  direccion?: string;
+  ciudad?: string;
+  codigo_postal?: string;
+  provincia?: string;
+  numero_odmc?: string;
   activa: boolean;
   created_at?: string;
   updated_at?: string;
+}
+
+/** Campos editables de empresa en AC21 (origen/destino) */
+export interface EmpresaEditable {
+  nombre: string;
+  direccion: string;
+  ciudad: string;
+  codigo_postal: string;
+  provincia: string;
+  numero_odmc: string;
 }
 
 export interface Cryptocustodio {

@@ -1039,6 +1039,8 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                 accesorios_por_hoja_fisica = []
                 equipos_por_hoja_fisica = []
                 
+                # Página principal (primera) para heredar accesorios/equipos si una hoja no los tiene
+                pagina_principal_multipagina = todas_las_paginas[0]
                 # Recopilar todos los productos de todas las hojas físicas en orden
                 for pagina in todas_las_paginas:
                     movimientos_pagina = MovimientoProducto.objects.filter(albaran=pagina).select_related('producto').order_by('id')
@@ -1059,9 +1061,13 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                     
                     productos_por_hoja_fisica.append(productos_hoja)
                     
-                    # Recopilar accesorios y equipos de cada hoja física
+                    # Recopilar accesorios y equipos de cada hoja física; si la hoja no tiene, usar los de la página principal
                     accesorios_hoja = self._procesar_accesorios(pagina.accesorios)
+                    if not accesorios_hoja and pagina.id != pagina_principal_multipagina.id:
+                        accesorios_hoja = self._procesar_accesorios(pagina_principal_multipagina.accesorios)
                     equipos_hoja = self._procesar_equipos_prueba(pagina.equipos_prueba)
+                    if not equipos_hoja and pagina.id != pagina_principal_multipagina.id:
+                        equipos_hoja = self._procesar_equipos_prueba(pagina_principal_multipagina.equipos_prueba)
                     accesorios_por_hoja_fisica.append(accesorios_hoja)
                     equipos_por_hoja_fisica.append(equipos_hoja)
                 
@@ -1108,10 +1114,22 @@ class AlbaranViewSet(viewsets.ModelViewSet):
                             accesorios_hoja = accesorios_por_hoja_fisica[idx_hoja]
                             equipos_hoja = equipos_por_hoja_fisica[idx_hoja]
                             
-                            # Combinar accesorios y equipos (evitar duplicados)
+                            # Combinar accesorios: mismo nombre/descripción → sumar cantidades
                             for acc in accesorios_hoja:
-                                if acc not in accesorios_pagina:
-                                    accesorios_pagina.append(acc)
+                                desc = (acc.get('descripcion') or acc.get('nombre') or '').strip()
+                                cant = acc.get('cantidad')
+                                if cant is None:
+                                    cant = 1
+                                try:
+                                    cant = int(cant)
+                                except (TypeError, ValueError):
+                                    cant = 1
+                                encontrado = next((a for a in accesorios_pagina if (a.get('descripcion') or a.get('nombre') or '').strip() == desc), None)
+                                if encontrado:
+                                    encontrado['cantidad'] = (encontrado.get('cantidad') or 0) + cant
+                                else:
+                                    accesorios_pagina.append({'descripcion': desc or acc.get('descripcion', ''), 'cantidad': cant})
+                            # Equipos de prueba: sin duplicados (se listan por código)
                             for eq in equipos_hoja:
                                 if eq not in equipos_pagina:
                                     equipos_pagina.append(eq)
@@ -1557,7 +1575,8 @@ class AlbaranViewSet(viewsets.ModelViewSet):
 
     def _procesar_accesorios(self, accesorios_data):
         """
-        Procesa los datos de accesorios del modelo para enviar al PDF generator
+        Procesa los datos de accesorios del modelo para enviar al PDF generator.
+        Garantiza que cada ítem tenga 'descripcion' y 'cantidad' para la plantilla.
         """
         if not accesorios_data:
             return []
@@ -1571,13 +1590,24 @@ class AlbaranViewSet(viewsets.ModelViewSet):
             if isinstance(accesorios_data, dict) and not accesorios_data:
                 return []
             
-            # Si es lista, devolverla tal como está
-            if isinstance(accesorios_data, list):
-                return accesorios_data
-            
-            # Si es dict con datos, convertir a lista
+            # Normalizar a lista
             if isinstance(accesorios_data, dict):
-                return [accesorios_data]
+                lista = [accesorios_data]
+            elif isinstance(accesorios_data, list):
+                lista = accesorios_data
+            else:
+                return []
+            
+            # Asegurar que cada ítem tenga descripcion y cantidad (la plantilla los usa)
+            resultado = []
+            for item in lista:
+                if not isinstance(item, dict):
+                    continue
+                resultado.append({
+                    'descripcion': item.get('descripcion') or item.get('nombre') or str(item) or '',
+                    'cantidad': item.get('cantidad') if item.get('cantidad') is not None else 1,
+                })
+            return resultado
                 
         except (json.JSONDecodeError, TypeError):
             print(f"⚠️ Error procesando accesorios: {accesorios_data}")

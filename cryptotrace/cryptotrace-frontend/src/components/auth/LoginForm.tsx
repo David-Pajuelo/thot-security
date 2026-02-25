@@ -33,13 +33,15 @@ export default function LoginForm() {
 
   // Verificar si ya hay un token válido al cargar (sesión compartida con HPS)
   useEffect(() => {
+    let cancelled = false;
+
     const checkExistingToken = async () => {
       try {
         // 1. Verificar token en localStorage
         let accessToken = localStorage.getItem("accessToken");
         const hpsToken = localStorage.getItem("hps_token");
         let token = accessToken || hpsToken;
-        
+
         // 2. Si no hay token, intentar desde cookies primero (más rápido que iframe)
         if (!token) {
           const cookieToken = getCookie("accessToken");
@@ -53,29 +55,32 @@ export default function LoginForm() {
             console.log("[LoginForm] Token encontrado en cookie, copiado a localStorage");
           }
         }
-        
+
         // 3. Si aún no hay token, intentar obtenerlo desde HPS System (más lento, último recurso)
         if (!token) {
           console.log("[LoginForm] Intentando obtener token desde HPS System...");
-          const hpsToken = await getTokenFromHPS();
-          if (hpsToken) {
-            token = hpsToken;
+          const hpsTokenFromIframe = await getTokenFromHPS();
+          if (cancelled) return;
+          if (hpsTokenFromIframe) {
+            token = hpsTokenFromIframe;
             localStorage.setItem("accessToken", token);
             console.log("[LoginForm] ✅ Token copiado desde HPS System a localStorage");
           }
         }
-        
+
         // Logs solo en desarrollo para mejor rendimiento
-        if (process.env.NODE_ENV === 'development') {
+        if (process.env.NODE_ENV === "development") {
           console.log("[LoginForm] Verificando token existente...");
           console.log("[LoginForm] accessToken existe:", !!accessToken);
           console.log("[LoginForm] hps_token existe:", !!hpsToken);
           console.log("[LoginForm] Token a usar:", token ? "Sí" : "No");
         }
-        
+
         if (!token) {
-          console.log("[LoginForm] No hay token, mostrando formulario de login");
-          setCheckingToken(false);
+          if (!cancelled) {
+            console.log("[LoginForm] No hay token, mostrando formulario de login");
+            setCheckingToken(false);
+          }
           return;
         }
 
@@ -88,41 +93,42 @@ export default function LoginForm() {
             username: payload.username,
             role: payload.role,
             exp: payload.exp,
-            must_change_password: payload.must_change_password
+            must_change_password: payload.must_change_password,
           });
-          
+
           // Verificar si el token ha expirado
           const currentTime = Math.floor(Date.now() / 1000);
           if (payload.exp && payload.exp < currentTime) {
             console.log("[LoginForm] Token expirado. Exp:", payload.exp, "Current:", currentTime);
-            // Token expirado, limpiar y permitir login
             localStorage.removeItem("accessToken");
             localStorage.removeItem("refreshToken");
             localStorage.removeItem("hps_token");
             localStorage.removeItem("hps_refresh_token");
-            setCheckingToken(false);
+            if (!cancelled) setCheckingToken(false);
             return;
           }
 
           // Verificar rol permitido
-          const allowedRoles = ['admin', 'crypto'];
+          const allowedRoles = ["admin", "crypto"];
           console.log("[LoginForm] Rol del usuario:", payload.role);
           console.log("[LoginForm] Roles permitidos:", allowedRoles);
-          
+
           if (payload.role && !allowedRoles.includes(payload.role)) {
             console.log("[LoginForm] Usuario no tiene rol permitido, limpiando token y mostrando formulario");
-            // Usuario no tiene permisos, limpiar token y mostrar formulario con error
             localStorage.removeItem("accessToken");
             localStorage.removeItem("refreshToken");
             localStorage.removeItem("hps_token");
             localStorage.removeItem("hps_refresh_token");
-            setError("No tienes permisos para acceder a CryptoTrace. Solo usuarios con rol 'admin' o 'crypto' pueden acceder.");
-            setCheckingToken(false);
+            if (!cancelled) {
+              setError("No tienes permisos para acceder a CryptoTrace. Solo usuarios con rol 'admin' o 'crypto' pueden acceder.");
+              setCheckingToken(false);
+            }
             return;
           }
 
-          // Token válido y rol permitido, redirigir al dashboard
-          console.log("[LoginForm] Token válido y rol permitido, redirigiendo...");
+          // Token válido y rol permitido: salir del estado "verificando" y redirigir
+          // (evita bucle si la redirección tarda o falla)
+          if (!cancelled) setCheckingToken(false);
           if (payload.must_change_password) {
             console.log("[LoginForm] Debe cambiar contraseña, redirigiendo a /cambiar-password");
             router.push("/cambiar-password");
@@ -132,35 +138,47 @@ export default function LoginForm() {
           }
         } catch (decodeError) {
           console.error("[LoginForm] Error decodificando token existente:", decodeError);
-          // Token inválido, limpiar y permitir login
           localStorage.removeItem("accessToken");
           localStorage.removeItem("refreshToken");
           localStorage.removeItem("hps_token");
           localStorage.removeItem("hps_refresh_token");
-          setCheckingToken(false);
+          if (!cancelled) setCheckingToken(false);
         }
       } catch (error) {
         console.error("[LoginForm] Error verificando token existente:", error);
+        if (!cancelled) setCheckingToken(false);
+      }
+    };
+
+    // Timeout de seguridad: si tras 5s seguimos en "verificando", mostrar formulario
+    const safetyTimeout = setTimeout(() => {
+      setCheckingToken((prev) => {
+        if (prev) {
+          console.log("[LoginForm] Timeout de verificación (5s), mostrando formulario de login");
+          return false;
+        }
+        return prev;
+      });
+    }, 5000);
+
+    checkExistingToken();
+
+    // Listener tokenUpdated: solo re-ejecutar si no estamos ya en una verificación en curso
+    const handleTokenUpdate = () => {
+      const token = localStorage.getItem("accessToken") || localStorage.getItem("hps_token");
+      if (token) {
+        checkExistingToken();
+      } else {
         setCheckingToken(false);
       }
     };
 
-    checkExistingToken();
-    
-    // También escuchar el evento tokenUpdated para cuando llegue el token mediante postMessage
-    const handleTokenUpdate = () => {
-      console.log("[LoginForm] Evento tokenUpdated recibido, verificando token...");
-      const token = localStorage.getItem("accessToken") || localStorage.getItem("hps_token");
-      if (token) {
-        console.log("[LoginForm] Token encontrado después de tokenUpdated, verificando...");
-        checkExistingToken();
-      }
-    };
-    
-    window.addEventListener('tokenUpdated', handleTokenUpdate);
-    
+    window.addEventListener("tokenUpdated", handleTokenUpdate);
+
     return () => {
-      window.removeEventListener('tokenUpdated', handleTokenUpdate);
+      cancelled = true;
+      clearTimeout(safetyTimeout);
+      window.removeEventListener("tokenUpdated", handleTokenUpdate);
     };
   }, [router]);
 

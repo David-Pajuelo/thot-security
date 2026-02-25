@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, FileText, Printer, ArrowUpRight, ChevronLeft, ChevronRight, Files, Edit, Save, X, Image, Download } from "lucide-react";
-import { Albaran, Empresa } from "@/lib/types";
+import { Albaran, Empresa, EmpresaEditable } from "@/lib/types";
 import AlbaranMovimientos from "./AlbaranMovimientos";
 import { toast } from "sonner";
-import { obtenerPaginasDocumento, fetchEmpresas, fetchCryptocustodios } from "@/lib/api";
+import { obtenerPaginasDocumento, fetchEmpresas, fetchCryptocustodios, updateEmpresa } from "@/lib/api";
 
 // Modal para mostrar la imagen del documento con autenticación
 interface ModalImagenDocumentoProps {
@@ -483,6 +483,9 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
       // IDs de empresas para seleccionar del catálogo
       empresa_origen_id: albaranActual.empresa_origen || '',
       empresa_destino_id: albaranActual.empresa_destino || '',
+      // Empresas editables campo a campo (origen y destino)
+      empresa_origen_editable: toEmpresaEditable((albaranActual as any).empresa_origen_info),
+      empresa_destino_editable: toEmpresaEditable((albaranActual as any).empresa_destino_info),
       // Datos de firmas
       firma_a_nombre_apellidos: albaranActual.firma_a_nombre_apellidos || '',
       firma_a_cargo: albaranActual.firma_a_cargo || '',
@@ -534,10 +537,57 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
     setDatosEditables({});
   };
 
+  // Construir objeto EmpresaEditable desde info del albarán o desde una Empresa del listado
+  const toEmpresaEditable = (emp: { nombre?: string; direccion?: string; ciudad?: string; codigo_postal?: string; provincia?: string; numero_odmc?: string } | null | undefined): EmpresaEditable => ({
+    nombre: emp?.nombre ?? '',
+    direccion: emp?.direccion ?? '',
+    ciudad: emp?.ciudad ?? '',
+    codigo_postal: emp?.codigo_postal ?? '',
+    provincia: emp?.provincia ?? '',
+    numero_odmc: emp?.numero_odmc ?? '',
+  });
+
+  // Actualizar un campo de empresa origen o destino en datosEditables
+  const actualizarEmpresaEditable = (tipo: 'origen' | 'destino', campo: keyof EmpresaEditable, valor: string) => {
+    const key = tipo === 'origen' ? 'empresa_origen_editable' : 'empresa_destino_editable';
+    setDatosEditables((prev: any) => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] ?? {}),
+        [campo]: valor,
+      },
+    }));
+  };
+
   const guardarCambios = async () => {
     try {
       setGuardando(true);
-      
+
+      // Guardar cambios de empresas (campo a campo) si hay ID válido y datos editables
+      const origenIdRaw = datosEditables.empresa_origen_id;
+      const destinoIdRaw = datosEditables.empresa_destino_id;
+      const origenId = origenIdRaw != null && origenIdRaw !== '' && Number(origenIdRaw) > 0 ? Number(origenIdRaw) : null;
+      const destinoId = destinoIdRaw != null && destinoIdRaw !== '' && Number(destinoIdRaw) > 0 ? Number(destinoIdRaw) : null;
+      const origenEditable = datosEditables.empresa_origen_editable;
+      const destinoEditable = datosEditables.empresa_destino_editable;
+
+      if (origenId != null && origenId > 0 && origenEditable) {
+        const empOrigen = empresas.find((e) => e.id === origenId) ?? (albaranActual as any).empresa_origen_info;
+        const payloadOrigen = {
+          ...(empOrigen && typeof empOrigen === 'object' ? { nombre: empOrigen.nombre, direccion: empOrigen.direccion ?? '', ciudad: empOrigen.ciudad ?? '', codigo_postal: empOrigen.codigo_postal ?? '', provincia: empOrigen.provincia ?? '', numero_odmc: empOrigen.numero_odmc ?? '', activa: (empOrigen as any).activa !== false } : {}),
+          ...origenEditable,
+        };
+        await updateEmpresa(origenId, payloadOrigen);
+      }
+      if (destinoId != null && destinoId > 0 && destinoEditable) {
+        const empDestino = empresas.find((e) => e.id === destinoId) ?? (albaranActual as any).empresa_destino_info;
+        const payloadDestino = {
+          ...(empDestino && typeof empDestino === 'object' ? { nombre: empDestino.nombre, direccion: empDestino.direccion ?? '', ciudad: empDestino.ciudad ?? '', codigo_postal: empDestino.codigo_postal ?? '', provincia: empDestino.provincia ?? '', numero_odmc: empDestino.numero_odmc ?? '', activa: (empDestino as any).activa !== false } : {}),
+          ...destinoEditable,
+        };
+        await updateEmpresa(destinoId, payloadDestino);
+      }
+
       // Función auxiliar para intentar la petición con manejo de token
       const intentarPeticion = async (token: string) => {
         const payload = {
@@ -1009,7 +1059,17 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
                       <select
                         className="w-full border rounded-md py-1 px-2 text-sm mb-1 bg-white font-semibold"
                         value={datosEditables.empresa_origen_id || ''}
-                        onChange={(e) => actualizarDatoEditable('empresa_origen_id', e.target.value)}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          actualizarDatoEditable('empresa_origen_id', id);
+                          const emp = empresas.find((em) => em.id.toString() === id);
+                          if (emp) {
+                            setDatosEditables((prev: any) => ({
+                              ...prev,
+                              empresa_origen_editable: toEmpresaEditable(emp),
+                            }));
+                          }
+                        }}
                       >
                         <option value="">Seleccionar empresa origen...</option>
                         {empresas.map(empresa => (
@@ -1026,29 +1086,28 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
                   </div>
                   <div className="mt-1 text-xs text-gray-700 space-y-0.5">
                     {modoEdicion ? (
-                      (() => {
-                        const empresaSeleccionada = empresas.find(e => e.id.toString() === datosEditables.empresa_origen_id?.toString());
-                        return empresaSeleccionada ? (
-                          <>
-                            <div className="bg-blue-50 border border-blue-200 rounded px-2 py-1">
-                              <div><strong>Datos de la empresa seleccionada:</strong></div>
-                              <div>{empresaSeleccionada.direccion}</div>
-                              <div>
-                                {[
-                                  empresaSeleccionada.codigo_postal,
-                                  empresaSeleccionada.ciudad,
-                                  empresaSeleccionada.provincia
-                                ].filter(Boolean).join(' ')}
-                              </div>
-                              <div><span className="font-semibold">ODMC Nº:</span> {empresaSeleccionada.numero_odmc || '-'}</div>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="text-gray-400 text-center py-2">
-                            Selecciona una empresa para ver sus datos
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-semibold text-gray-500">Nombre</label>
+                        <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_origen_editable?.nombre ?? ''} onChange={(e) => actualizarEmpresaEditable('origen', 'nombre', e.target.value)} />
+                        <label className="block text-[10px] font-semibold text-gray-500">Dirección</label>
+                        <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_origen_editable?.direccion ?? ''} onChange={(e) => actualizarEmpresaEditable('origen', 'direccion', e.target.value)} />
+                        <div className="grid grid-cols-3 gap-1">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-500">CP</label>
+                            <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_origen_editable?.codigo_postal ?? ''} onChange={(e) => actualizarEmpresaEditable('origen', 'codigo_postal', e.target.value)} />
                           </div>
-                        );
-                      })()
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-500">Ciudad</label>
+                            <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_origen_editable?.ciudad ?? ''} onChange={(e) => actualizarEmpresaEditable('origen', 'ciudad', e.target.value)} />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-500">Provincia</label>
+                            <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_origen_editable?.provincia ?? ''} onChange={(e) => actualizarEmpresaEditable('origen', 'provincia', e.target.value)} />
+                          </div>
+                        </div>
+                        <label className="block text-[10px] font-semibold text-gray-500">ODMC Nº</label>
+                        <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_origen_editable?.numero_odmc ?? ''} onChange={(e) => actualizarEmpresaEditable('origen', 'numero_odmc', e.target.value)} />
+                      </div>
                     ) : (
                       <>
                         <div>{albaranActual.empresa_origen_info?.direccion || '-'}</div>
@@ -1086,7 +1145,17 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
                       <select
                         className="w-full border rounded-md py-1 px-2 text-sm mb-1 bg-white font-semibold"
                         value={datosEditables.empresa_destino_id || ''}
-                        onChange={(e) => actualizarDatoEditable('empresa_destino_id', e.target.value)}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          actualizarDatoEditable('empresa_destino_id', id);
+                          const emp = empresas.find((em) => em.id.toString() === id);
+                          if (emp) {
+                            setDatosEditables((prev: any) => ({
+                              ...prev,
+                              empresa_destino_editable: toEmpresaEditable(emp),
+                            }));
+                          }
+                        }}
                       >
                         <option value="">Seleccionar empresa destino...</option>
                         {empresas.map(empresa => (
@@ -1103,29 +1172,28 @@ export default function AC21Detail({ albaran, onBack }: AC21DetailProps) {
                   </div>
                   <div className="mt-1 text-xs text-gray-700 space-y-0.5">
                     {modoEdicion ? (
-                      (() => {
-                        const empresaSeleccionada = empresas.find(e => e.id.toString() === datosEditables.empresa_destino_id?.toString());
-                        return empresaSeleccionada ? (
-                          <>
-                            <div className="bg-green-50 border border-green-200 rounded px-2 py-1">
-                              <div><strong>Datos de la empresa seleccionada:</strong></div>
-                              <div>{empresaSeleccionada.direccion}</div>
-                              <div>
-                                {[
-                                  empresaSeleccionada.codigo_postal,
-                                  empresaSeleccionada.ciudad,
-                                  empresaSeleccionada.provincia
-                                ].filter(Boolean).join(' ')}
-                              </div>
-                              <div><span className="font-semibold">ODMC Nº:</span> {empresaSeleccionada.numero_odmc || '-'}</div>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="text-gray-400 text-center py-2">
-                            Selecciona una empresa para ver sus datos
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-semibold text-gray-500">Nombre</label>
+                        <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_destino_editable?.nombre ?? ''} onChange={(e) => actualizarEmpresaEditable('destino', 'nombre', e.target.value)} />
+                        <label className="block text-[10px] font-semibold text-gray-500">Dirección</label>
+                        <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_destino_editable?.direccion ?? ''} onChange={(e) => actualizarEmpresaEditable('destino', 'direccion', e.target.value)} />
+                        <div className="grid grid-cols-3 gap-1">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-500">CP</label>
+                            <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_destino_editable?.codigo_postal ?? ''} onChange={(e) => actualizarEmpresaEditable('destino', 'codigo_postal', e.target.value)} />
                           </div>
-                        );
-                      })()
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-500">Ciudad</label>
+                            <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_destino_editable?.ciudad ?? ''} onChange={(e) => actualizarEmpresaEditable('destino', 'ciudad', e.target.value)} />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-500">Provincia</label>
+                            <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_destino_editable?.provincia ?? ''} onChange={(e) => actualizarEmpresaEditable('destino', 'provincia', e.target.value)} />
+                          </div>
+                        </div>
+                        <label className="block text-[10px] font-semibold text-gray-500">ODMC Nº</label>
+                        <input type="text" className="w-full border rounded px-2 py-0.5 text-xs bg-white" value={datosEditables.empresa_destino_editable?.numero_odmc ?? ''} onChange={(e) => actualizarEmpresaEditable('destino', 'numero_odmc', e.target.value)} />
+                      </div>
                     ) : (
                       <>
                         <div>{albaranActual.empresa_destino_info?.direccion || '-'}</div>

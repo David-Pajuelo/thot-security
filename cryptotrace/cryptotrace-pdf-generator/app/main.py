@@ -166,6 +166,7 @@ def generate_pdf_endpoint():
                     total_paginas = total_paginas_real
                 
                 print(f"📄 [PDF Generator] Dividiendo {len(lineas_producto)} productos en {total_paginas} páginas (división automática)")
+                print(f"📄 [PDF Generator] Accesorios por página (fallback): {[len(a) for a in accesorios_por_pagina]}")
                 
                 for pagina in range(1, total_paginas + 1):
                     # Calcular el rango de productos para esta página
@@ -180,10 +181,14 @@ def generate_pdf_endpoint():
                     datos_pagina["lineas_producto"] = productos_pagina
                     datos_pagina["pagina_actual"] = pagina
                     datos_pagina["total_paginas"] = total_paginas
-                    # Asegurar que accesorios y equipos estén vacíos si no hay datos específicos
-                    if "accesorios" not in datos_pagina or not datos_pagina.get("accesorios"):
+                    # Usar accesorios/equipos por página si hay; si no, los globales o lista vacía
+                    if accesorios_por_pagina and len(accesorios_por_pagina) >= pagina:
+                        datos_pagina["accesorios"] = accesorios_por_pagina[pagina - 1] or []
+                    elif not datos_pagina.get("accesorios"):
                         datos_pagina["accesorios"] = []
-                    if "equipos_prueba" not in datos_pagina or not datos_pagina.get("equipos_prueba"):
+                    if equipos_por_pagina and len(equipos_por_pagina) >= pagina:
+                        datos_pagina["equipos_prueba"] = equipos_por_pagina[pagina - 1] or []
+                    elif not datos_pagina.get("equipos_prueba"):
                         datos_pagina["equipos_prueba"] = []
                     datos_pagina["data"] = datos_pagina
                     
@@ -294,18 +299,26 @@ def generate_pdf_endpoint():
             # Una sola página
             ac21_data["pagina_actual"] = 1
             ac21_data["total_paginas"] = 1
-            # Asegurar que accesorios y equipos estén vacíos si no hay datos
-            if "accesorios" not in ac21_data or not ac21_data.get("accesorios"):
+            # Asegurar que accesorios y equipos estén definidos; usar accesorios_por_pagina[0] si viene del backend
+            accesorios_por_pagina = ac21_data.get("accesorios_por_pagina", [])
+            equipos_por_pagina = ac21_data.get("equipos_por_pagina", [])
+            if not ac21_data.get("accesorios") and accesorios_por_pagina and len(accesorios_por_pagina) > 0:
+                ac21_data["accesorios"] = accesorios_por_pagina[0] if isinstance(accesorios_por_pagina[0], list) else [accesorios_por_pagina[0]]
+            elif "accesorios" not in ac21_data or not ac21_data.get("accesorios"):
                 ac21_data["accesorios"] = []
-            if "equipos_prueba" not in ac21_data or not ac21_data.get("equipos_prueba"):
+            if not ac21_data.get("equipos_prueba") and equipos_por_pagina and len(equipos_por_pagina) > 0:
+                ac21_data["equipos_prueba"] = equipos_por_pagina[0] if isinstance(equipos_por_pagina[0], list) else [equipos_por_pagina[0]]
+            elif "equipos_prueba" not in ac21_data or not ac21_data.get("equipos_prueba"):
                 ac21_data["equipos_prueba"] = []
             template = template_env.get_template('ac21_pdf_template.html')
             html_string = template.render(ac21_data)
         else:
-            # Múltiples páginas por cantidad de productos
+            # Múltiples páginas por cantidad de productos (ej. 1 documento con >18 ítems)
             import math
             total_paginas = math.ceil(len(lineas_producto) / productos_por_pagina)
             html_pages = []
+            accesorios_por_pagina_single = ac21_data.get("accesorios_por_pagina", [])
+            equipos_por_pagina_single = ac21_data.get("equipos_por_pagina", [])
             
             for pagina in range(1, total_paginas + 1):
                 # Calcular el rango de productos para esta página
@@ -318,10 +331,16 @@ def generate_pdf_endpoint():
                 datos_pagina["lineas_producto"] = productos_pagina
                 datos_pagina["pagina_actual"] = pagina
                 datos_pagina["total_paginas"] = total_paginas
-                # Asegurar que accesorios y equipos estén vacíos si no hay datos específicos
-                if "accesorios" not in datos_pagina or not datos_pagina.get("accesorios"):
+                # Accesorios/equipos: usar por página si hay (p. ej. [0]) o los globales; en doc de 1 hoja suelen mostrarse en todas las páginas
+                if accesorios_por_pagina_single and len(accesorios_por_pagina_single) > 0:
+                    prim = accesorios_por_pagina_single[0]
+                    datos_pagina["accesorios"] = prim if isinstance(prim, list) else [prim]
+                elif not datos_pagina.get("accesorios"):
                     datos_pagina["accesorios"] = []
-                if "equipos_prueba" not in datos_pagina or not datos_pagina.get("equipos_prueba"):
+                if equipos_por_pagina_single and len(equipos_por_pagina_single) > 0:
+                    prim_eq = equipos_por_pagina_single[0]
+                    datos_pagina["equipos_prueba"] = prim_eq if isinstance(prim_eq, list) else [prim_eq]
+                elif not datos_pagina.get("equipos_prueba"):
                     datos_pagina["equipos_prueba"] = []
                 datos_pagina["data"] = datos_pagina
                 
