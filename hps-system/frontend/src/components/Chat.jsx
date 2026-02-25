@@ -346,7 +346,8 @@ const Chat = () => {
                 email: user?.email || 'unknown',
                 role: user?.role || 'member',
                 team_id: user?.team_id || null,
-                team_name: user?.team_name || null
+                team_name: user?.team_name || null,
+                team_ids: user?.team_ids ?? (user?.team_id ? [user.team_id] : [])
               }
             };
             websocketService.sendMessage(messageData);
@@ -409,7 +410,8 @@ const Chat = () => {
           email: user?.email || 'unknown',
           role: user?.role || 'member',
           team_id: user?.team_id || null,
-          team_name: user?.team_name || null
+          team_name: user?.team_name || null,
+          team_ids: user?.team_ids ?? (user?.team_id ? [user.team_id] : [])
         }
       };
       
@@ -472,7 +474,8 @@ const Chat = () => {
           email: user?.email || 'unknown',
           role: user?.role || 'member',
           team_id: user?.team_id || null,
-          team_name: user?.team_name || null
+          team_name: user?.team_name || null,
+          team_ids: user?.team_ids ?? (user?.team_id ? [user.team_id] : [])
         }
       };
       

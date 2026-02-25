@@ -260,7 +260,7 @@ MENSAJE DEL USUARIO: {message}
 CONTEXTO ADICIONAL:
 - Email del usuario: {user_email}
 - Rol: {user_role}
-- Equipo: {user_context.get('team_id', 'No asignado')}
+- Equipos (IDs): {user_context.get('team_ids', []) or ([user_context.get('team_id')] if user_context.get('team_id') else []) or 'Ninguno'}
 
 Por favor, analiza el mensaje y responde según las reglas establecidas.
 """

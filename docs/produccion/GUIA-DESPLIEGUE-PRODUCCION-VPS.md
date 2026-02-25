@@ -775,6 +775,8 @@ docker compose -f docker-compose.prod.yml build
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+**Después de cada actualización de código**, seguir el **[Checklist de actualización VPS](CHECKLIST-ACTUALIZACION-VPS.md)** para ejecutar migraciones (p. ej. `python manage.py migrate` en el backend de CryptoTrace) y otros pasos necesarios.
+
 ### 9.2 Ver Logs
 
 ```bash

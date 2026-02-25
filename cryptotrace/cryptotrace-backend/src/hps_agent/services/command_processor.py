@@ -10,7 +10,7 @@ from datetime import datetime
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from channels.db import database_sync_to_async
-from hps_core.models import HpsUserProfile, HpsTeam, HpsRequest, HpsRole
+from hps_core.models import HpsUserProfile, HpsTeam, HpsTeamMembership, HpsRequest, HpsRole
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -472,16 +472,22 @@ class CommandProcessor:
     
     @database_sync_to_async
     def _get_team_hps(self, user_id):
-        """Obtener HPS del equipo del usuario"""
+        """Obtener HPS de los equipos del usuario (vía HpsTeamMembership, N:N)."""
         try:
-            user = User.objects.get(id=user_id)
-            if not hasattr(user, 'hps_profile') or not user.hps_profile.team:
+            user_team_ids = list(
+                HpsTeamMembership.objects.filter(user_id=user_id, is_active=True).values_list('team_id', flat=True)
+            )
+            if not user_team_ids:
                 return []
-            
-            team = user.hps_profile.team
-            team_users = HpsUserProfile.objects.filter(team=team).values_list('user_id', flat=True)
+            team_users = list(
+                HpsTeamMembership.objects.filter(
+                    team_id__in=user_team_ids,
+                    is_active=True,
+                ).values_list('user_id', flat=True).distinct()
+            )
+            if not team_users:
+                return []
             hps_requests = HpsRequest.objects.filter(user_id__in=team_users).order_by('-created_at')[:50]
-            
             return [
                 {
                     'email': hps.user.email if hps.user else 'N/A',
@@ -778,25 +784,36 @@ class CommandProcessor:
             user_id = user_context.get("id")
             
             if user_role == "admin":
-                # Admin ve todos los usuarios
                 profiles = HpsUserProfile.objects.select_related('user', 'role', 'team').all()[:100]
             else:
-                # Team lead ve solo usuarios de su equipo
-                user = User.objects.get(id=user_id)
-                if hasattr(user, 'hps_profile') and user.hps_profile.team:
-                    team = user.hps_profile.team
-                    profiles = HpsUserProfile.objects.filter(team=team).select_related('user', 'role')[:100]
-                else:
+                # Team lead ve usuarios que comparten al menos un equipo (vía memberships)
+                user_team_ids = list(
+                    HpsTeamMembership.objects.filter(user_id=user_id, is_active=True).values_list('team_id', flat=True)
+                )
+                if not user_team_ids:
                     return []
-            
-            return [
-                {
+                profile_ids = list(
+                    HpsUserProfile.objects.filter(
+                        user__hps_team_memberships__team_id__in=user_team_ids,
+                        user__hps_team_memberships__is_active=True,
+                    ).distinct().values_list('id', flat=True)[:100]
+                )
+                profiles = HpsUserProfile.objects.filter(id__in=profile_ids).select_related('user', 'role', 'team')
+            # Para cada perfil, equipos vía memberships (pueden ser varios)
+            result = []
+            for profile in profiles:
+                team_names = list(
+                    HpsTeamMembership.objects.filter(
+                        user_id=profile.user_id,
+                        is_active=True,
+                    ).select_related('team').values_list('team__name', flat=True)
+                )
+                result.append({
                     'email': profile.user.email if profile.user else 'N/A',
                     'role': profile.role.name if profile.role else 'N/A',
-                    'team': profile.team.name if profile.team else 'N/A',
-                }
-                for profile in profiles
-            ]
+                    'team': ', '.join(t for t in team_names if t) or (profile.team.name if profile.team else 'N/A'),
+                })
+            return result
         except Exception as e:
             logger.error(f"Error obteniendo lista de usuarios: {e}")
             return []
@@ -1288,13 +1305,15 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
                 defaults={"description": "Miembro del equipo", "permissions": {}}
             )
             
-            # Obtener equipo del usuario actual si es team_lead
+            # Obtener equipo del usuario actual si es team_lead (primer equipo de sus memberships)
             team = None
             current_user_id = user_context.get("id")
             if user_context.get("role", "").lower() == "team_lead":
-                current_user = User.objects.get(id=current_user_id)
-                if hasattr(current_user, 'hps_profile') and current_user.hps_profile.team:
-                    team = current_user.hps_profile.team
+                first_m = HpsTeamMembership.objects.filter(user_id=current_user_id, is_active=True).select_related('team').first()
+                if first_m and first_m.team:
+                    team = first_m.team
+                if not team and hasattr(User.objects.get(id=current_user_id), 'hps_profile') and User.objects.get(id=current_user_id).hps_profile.team:
+                    team = User.objects.get(id=current_user_id).hps_profile.team
             
             # Si no hay equipo, usar AICOX
             if not team:
@@ -1303,24 +1322,32 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
             
             # Crear o actualizar perfil HPS (solo si no existe)
             if not hasattr(user, 'hps_profile'):
-                # IMPORTANTE: Establecer TODOS los campos necesarios del perfil HPS
-                # Si se envía correo con contraseña temporal, marcar como temporal
                 profile = HpsUserProfile.objects.create(
                     user=user,
                     role=member_role,
                     team=team,
-                    email_verified=False,  # Email no verificado inicialmente
-                    is_temp_password=not user_exists,  # True si es usuario nuevo (se envía correo)
-                    must_change_password=not user_exists,  # True si es usuario nuevo (debe cambiar contraseña)
-                    last_login=None,  # Sin login inicial
-                    extra_permissions={}  # Sin permisos extra inicialmente
+                    email_verified=False,
+                    is_temp_password=not user_exists,
+                    must_change_password=not user_exists,
+                    last_login=None,
+                    extra_permissions={}
+                )
+                HpsTeamMembership.objects.get_or_create(
+                    team=team,
+                    user=user,
+                    defaults={"is_active": True, "is_lead": (team.team_lead_id == user.id)},
                 )
                 logger.info(f"Perfil HPS creado completamente para usuario: {email} - is_temp_password={not user_exists}, must_change_password={not user_exists}")
             else:
-                # Si ya tiene perfil, actualizar equipo si es necesario
+                # Añadir membresía si no está ya en el equipo
+                HpsTeamMembership.objects.get_or_create(
+                    team=team,
+                    user=user,
+                    defaults={"is_active": True, "is_lead": (team.team_lead_id == user.id)},
+                )
                 if user.hps_profile.team != team:
                     user.hps_profile.team = team
-                    user.hps_profile.save()
+                    user.hps_profile.save(update_fields=['team'])
                     logger.info(f"Equipo actualizado para usuario: {email}")
             
             return {
@@ -1461,22 +1488,29 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
             user = User.objects.get(email=email)
             team = HpsTeam.objects.get(name=team_name, is_active=True)
             
-            # Verificar permisos: team_lead solo puede asignar a su equipo
+            # Verificar permisos: team_lead solo puede asignar a equipos en los que él está (memberships)
             user_role = user_context.get("role", "").lower()
             if user_role == "team_lead":
                 current_user_id = user_context.get("id")
-                current_user = User.objects.get(id=current_user_id)
-                if hasattr(current_user, 'hps_profile') and current_user.hps_profile.team:
-                    if current_user.hps_profile.team.id != team.id:
-                        return {
-                            "success": False,
-                            "message": f"❌ Solo puedes asignar usuarios a tu propio equipo."
-                        }
+                if not HpsTeamMembership.objects.filter(user_id=current_user_id, team=team, is_active=True).exists():
+                    return {
+                        "success": False,
+                        "message": f"❌ Solo puedes asignar usuarios a equipos en los que tú perteneces."
+                    }
             
-            # Actualizar perfil HPS
+            # Añadir membresía (N:N); mantener profile.team como primer equipo
+            HpsTeamMembership.objects.get_or_create(
+                team=team,
+                user=user,
+                defaults={"is_active": True, "is_lead": (team.team_lead_id == user.id)},
+            )
+            m = HpsTeamMembership.objects.get(team=team, user=user)
+            if not m.is_active:
+                m.is_active = True
+                m.save()
             if hasattr(user, 'hps_profile'):
-                user.hps_profile.team = team
-                user.hps_profile.save()
+                user.hps_profile.team = team  # compatibilidad: primer equipo
+                user.hps_profile.save(update_fields=['team'])
             else:
                 # Crear perfil si no existe con todos los campos necesarios
                 member_role, _ = HpsRole.objects.get_or_create(
@@ -1705,12 +1739,18 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
             # Verificar permisos según el rol
             user_role = user_context.get("role", "").lower()
             if user_role == "team_lead":
-                # Team leads solo pueden aprobar HPS de su equipo
-                if hasattr(approver, 'hps_profile') and approver.hps_profile.team:
-                    if not hasattr(user, 'hps_profile') or user.hps_profile.team != approver.hps_profile.team:
+                # Team lead solo puede aprobar si el usuario comparte al menos un equipo con él (memberships)
+                approver_team_ids = set(
+                    HpsTeamMembership.objects.filter(user=approver, is_active=True).values_list('team_id', flat=True)
+                )
+                if approver_team_ids:
+                    user_team_ids = set(
+                        HpsTeamMembership.objects.filter(user=user, is_active=True).values_list('team_id', flat=True)
+                    )
+                    if not (approver_team_ids & user_team_ids):
                         return {
                             "success": False,
-                            "message": f"❌ Solo puedes aprobar HPS de usuarios de tu equipo."
+                            "message": f"❌ Solo puedes aprobar HPS de usuarios de tus equipos."
                         }
             
             # Aprobar HPS
@@ -1793,15 +1833,20 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
                     "message": f"❌ No se encontró una solicitud HPS pendiente para {email}."
                 }
             
-            # Verificar permisos según el rol
+            # Verificar permisos: team_lead solo si el usuario comparte al menos un equipo (memberships)
             user_role = user_context.get("role", "").lower()
             if user_role == "team_lead":
-                # Team leads solo pueden rechazar HPS de su equipo
-                if hasattr(approver, 'hps_profile') and approver.hps_profile.team:
-                    if not hasattr(user, 'hps_profile') or user.hps_profile.team != approver.hps_profile.team:
+                approver_team_ids = set(
+                    HpsTeamMembership.objects.filter(user=approver, is_active=True).values_list('team_id', flat=True)
+                )
+                if approver_team_ids:
+                    user_team_ids = set(
+                        HpsTeamMembership.objects.filter(user=user, is_active=True).values_list('team_id', flat=True)
+                    )
+                    if not (approver_team_ids & user_team_ids):
                         return {
                             "success": False,
-                            "message": f"❌ Solo puedes rechazar HPS de usuarios de tu equipo."
+                            "message": f"❌ Solo puedes rechazar HPS de usuarios de tus equipos."
                         }
             
             # Rechazar HPS
@@ -1933,6 +1978,16 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
                 profile.is_temp_password = True
                 profile.must_change_password = True
                 profile.save()
+            HpsTeamMembership.objects.get_or_create(
+                team=team,
+                user=user,
+                defaults={"is_active": True, "is_lead": True},
+            )
+            m = HpsTeamMembership.objects.get(team=team, user=user)
+            if not m.is_active or not m.is_lead:
+                m.is_active = True
+                m.is_lead = True
+                m.save()
             
             # Asignar como team_lead del equipo
             team.team_lead = user

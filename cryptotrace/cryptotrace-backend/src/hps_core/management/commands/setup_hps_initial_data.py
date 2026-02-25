@@ -6,7 +6,7 @@ Crea roles, equipos y usuarios iniciales para el sistema HPS.
 """
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
-from hps_core.models import HpsRole, HpsTeam, HpsUserProfile
+from hps_core.models import HpsRole, HpsTeam, HpsUserProfile, HpsTeamMembership
 
 User = get_user_model()
 
@@ -228,6 +228,14 @@ class Command(BaseCommand):
                 profile.role = user_data['role']
                 profile.team = user_data['team']
                 profile.save()
+
+            # Asegurar membresía en el equipo asignado
+            if user_data['team']:
+                HpsTeamMembership.objects.get_or_create(
+                    team=user_data['team'],
+                    user=user,
+                    defaults={'is_active': True, 'is_lead': (user_data['team'].team_lead_id == user.id)},
+                )
 
         # Asignar team_lead al primer equipo
         if teams:

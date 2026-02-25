@@ -6,7 +6,7 @@ Todas las contraseñas serán "Password123" y no serán temporales.
 """
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
-from hps_core.models import HpsRole, HpsUserProfile, HpsTeam
+from hps_core.models import HpsRole, HpsUserProfile, HpsTeam, HpsTeamMembership
 
 User = get_user_model()
 
@@ -229,6 +229,13 @@ class Command(BaseCommand):
                 profile.is_temp_password = False
                 profile.must_change_password = False
                 profile.save()
+
+            # Asegurar membresía en AICOX
+            HpsTeamMembership.objects.get_or_create(
+                team=aicox_team,
+                user=user,
+                defaults={'is_active': True, 'is_lead': (aicox_team.team_lead_id == user.id)},
+            )
 
             if user_created:
                 self.stdout.write(self.style.SUCCESS(f'  ✓ Usuario creado: {user.email} ({role.name})'))

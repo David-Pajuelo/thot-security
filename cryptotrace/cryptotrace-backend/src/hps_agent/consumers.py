@@ -80,14 +80,20 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 await self.close(code=4003)
                 return
             
-            # Construir contexto del usuario
+            # Construir contexto del usuario (team_ids para N:N)
+            team_ids = user_data.get('team_ids')
+            if team_ids is None and user_data.get('team_id') is not None:
+                team_ids = [user_data.get('team_id')]
+            if not team_ids:
+                team_ids = []
             self.user_context = {
                 'id': str(self.user.id),
                 'email': self.user.email,
                 'first_name': self.user.first_name or '',
                 'last_name': self.user.last_name or '',
                 'role': user_data.get('role', 'member'),
-                'team_id': user_data.get('team_id'),
+                'team_id': user_data.get('team_id') or (team_ids[0] if team_ids else None),
+                'team_ids': team_ids,
                 'auth_token': token
             }
             
@@ -340,14 +346,20 @@ class ChatConsumer(AsyncWebsocketConsumer):
             from rest_framework_simplejwt.tokens import AccessToken
             access_token = AccessToken(token)
             
-            # Extraer datos del usuario
+            # Extraer datos del usuario (team_ids para múltiples equipos)
+            team_ids = access_token.get('team_ids')
+            if team_ids is None and access_token.get('team_id') is not None:
+                team_ids = [access_token.get('team_id')]
+            if not team_ids:
+                team_ids = []
             user_data = {
                 'user_id': access_token['user_id'],
                 'email': access_token.get('email', ''),
                 'first_name': access_token.get('first_name', ''),
                 'last_name': access_token.get('last_name', ''),
                 'role': access_token.get('role', 'member'),
-                'team_id': access_token.get('team_id'),
+                'team_id': access_token.get('team_id') or (team_ids[0] if team_ids else None),
+                'team_ids': team_ids,
             }
             
             return user_data

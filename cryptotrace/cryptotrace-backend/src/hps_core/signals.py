@@ -3,7 +3,7 @@ from django.conf import settings
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from .models import HpsRole, HpsUserProfile, HpsTeam
+from .models import HpsRole, HpsUserProfile, HpsTeam, HpsTeamMembership
 
 # UUID del equipo AICOX (el mismo que se usa en el frontend)
 AICOX_TEAM_UUID = uuid.UUID('d8574c01-851f-4716-9ac9-bbda45469bdf')
@@ -45,11 +45,16 @@ def ensure_hps_profile(sender, instance, created, **kwargs):
 
     try:
         profile = instance.hps_profile
-        # Si el perfil existe pero no tiene equipo, asignarlo a AICOX
+        # Si el perfil existe pero no tiene equipo, asignarlo a AICOX y crear membresía
         if not profile.team:
             aicox_team = get_or_create_aicox_team()
             profile.team = aicox_team
             profile.save(update_fields=['team'])
+            HpsTeamMembership.objects.get_or_create(
+                team=aicox_team,
+                user=instance,
+                defaults={'is_active': True, 'is_lead': (aicox_team.team_lead_id == instance.id)},
+            )
         return
     except HpsUserProfile.DoesNotExist:
         pass
@@ -81,11 +86,16 @@ def ensure_hps_profile(sender, instance, created, **kwargs):
     # Obtener o crear el equipo AICOX
     aicox_team = get_or_create_aicox_team()
 
-    HpsUserProfile.objects.get_or_create(
+    profile, _ = HpsUserProfile.objects.get_or_create(
         user=instance,
         defaults={
             "role": default_role,
-            "team": aicox_team,  # Asignar automáticamente al equipo AICOX
+            "team": aicox_team,
         },
+    )
+    HpsTeamMembership.objects.get_or_create(
+        team=aicox_team,
+        user=instance,
+        defaults={'is_active': True, 'is_lead': (aicox_team.team_lead_id == instance.id)},
     )
 

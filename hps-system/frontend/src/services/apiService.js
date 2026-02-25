@@ -237,23 +237,31 @@ export const userService = {
     }
     
     // Transformar perfiles HPS al formato esperado por el frontend
-    const transformedUsers = users.map(profile => ({
-      id: profile.user_id || profile.id,
-      email: profile.email || (profile.user && profile.user.email),
-      username: profile.username || (profile.user && profile.user.username),
-      first_name: profile.first_name || (profile.user && profile.user.first_name),
-      last_name: profile.last_name || (profile.user && profile.user.last_name),
-      full_name: profile.full_name || `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || (profile.user && `${profile.user.first_name || ''} ${profile.user.last_name || ''}`.trim()),
-      role: profile.role || (profile.role_name || (profile.role && profile.role.name)),
-      team_id: profile.team_id || (profile.team && profile.team.id),
-      team_name: profile.team_name || (profile.team && profile.team.name),
-      is_active: profile.is_active !== undefined ? profile.is_active : (profile.user && profile.user.is_active),
-      is_temp_password: profile.is_temp_password || false,
-      must_change_password: profile.must_change_password || false,
-      email_verified: profile.email_verified || false,
-      created_at: profile.created_at,
-      updated_at: profile.updated_at
-    }));
+    const transformedUsers = users.map(profile => {
+      const teamId = profile.team_id || (profile.team && profile.team.id);
+      const teamName = profile.team_name || (profile.team && profile.team.name);
+      const teamIds = profile.team_ids ?? (teamId ? [teamId] : []);
+      const teams = profile.teams ?? (teamId && teamName ? [{ id: teamId, name: teamName }] : []);
+      return {
+        id: profile.user_id || profile.id,
+        email: profile.email || (profile.user && profile.user.email),
+        username: profile.username || (profile.user && profile.user.username),
+        first_name: profile.first_name || (profile.user && profile.user.first_name),
+        last_name: profile.last_name || (profile.user && profile.user.last_name),
+        full_name: profile.full_name || `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || (profile.user && `${profile.user.first_name || ''} ${profile.user.last_name || ''}`.trim()),
+        role: profile.role || (profile.role_name || (profile.role && profile.role.name)),
+        team_id: teamId,
+        team_name: teamName,
+        team_ids: teamIds,
+        teams,
+        is_active: profile.is_active !== undefined ? profile.is_active : (profile.user && profile.user.is_active),
+        is_temp_password: profile.is_temp_password || false,
+        must_change_password: profile.must_change_password || false,
+        email_verified: profile.email_verified || false,
+        created_at: profile.created_at,
+        updated_at: profile.updated_at
+      };
+    });
     
     return { users: transformedUsers };
   },
@@ -467,10 +475,13 @@ export const teamService = {
     return response.data;
   },
 
-  // Obtener líderes disponibles (no implementado en Django aún)
+  // Obtener candidatos a líder: con teamId = miembros del equipo (member/team_lead); sin teamId = todos (crear equipo)
   getAvailableLeaders: async (teamId = null) => {
-    // TODO: Implementar endpoint en Django si es necesario
-    return [];
+    const url = teamId
+      ? `/api/hps/teams/${teamId}/possible-leaders/`
+      : '/api/hps/teams/possible-leaders/';
+    const response = await apiClient.get(url);
+    return Array.isArray(response.data) ? response.data : [];
   },
 
   // Obtener detalles del equipo con miembros
@@ -479,9 +490,25 @@ export const teamService = {
     return response.data;
   },
 
-  // Obtener miembros del equipo para asignar como líder
+  // Obtener miembros del equipo
   getTeamMembers: async (id) => {
     const response = await apiClient.get(`/api/hps/teams/${id}/members/`);
+    return response.data;
+  },
+
+  // Usuarios que se pueden añadir al equipo (aún no están en el equipo)
+  getAvailableMembers: async (teamId) => {
+    const response = await apiClient.get(`/api/hps/teams/${teamId}/available-members/`);
+    return Array.isArray(response.data) ? response.data : [];
+  },
+
+  addTeamMember: async (teamId, userId) => {
+    const response = await apiClient.post(`/api/hps/teams/${teamId}/members/add/`, { user_id: userId });
+    return response.data;
+  },
+
+  removeTeamMember: async (teamId, userId) => {
+    const response = await apiClient.post(`/api/hps/teams/${teamId}/members/remove/`, { user_id: userId });
     return response.data;
   }
 };

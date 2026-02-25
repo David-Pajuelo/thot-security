@@ -15,7 +15,9 @@ import {
   LinkIcon,
   ArrowLeftIcon,
   ArrowPathIcon,
-  XMarkIcon
+  XMarkIcon,
+  ChevronDownIcon,
+  ChevronUpIcon
 } from '@heroicons/react/24/outline';
 import PermanentDeleteModal from '../components/PermanentDeleteModal';
 
@@ -43,6 +45,42 @@ const getRoleLabel = (role) => {
     'member': 'Miembro'
   };
   return roleLabels[role] || role?.replace('_', ' ');
+};
+
+// Celda compacta de equipos: desplegable para ver la lista sin expandir la tabla
+const TeamsCell = ({ user, expanded, onToggle }) => {
+  const teams = user.teams?.length ? user.teams : (user.team_id && user.team_name ? [{ id: user.team_id, name: user.team_name }] : []);
+  if (!teams.length) {
+    return <span className="text-gray-500">Sin equipo</span>;
+  }
+  if (teams.length === 1) {
+    return <span className="text-gray-900">{teams[0].name}</span>;
+  }
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        className="inline-flex items-center gap-1 text-left text-gray-900 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded px-1 py-0.5"
+        title="Ver equipos"
+      >
+        <span>{teams.length} equipos</span>
+        {expanded ? <ChevronUpIcon className="h-4 w-4 shrink-0" /> : <ChevronDownIcon className="h-4 w-4 shrink-0" />}
+      </button>
+      {expanded && (
+        <div
+          className="absolute left-0 top-full z-10 mt-1 min-w-[160px] rounded-md border border-gray-200 bg-white py-1 shadow-lg"
+          role="list"
+        >
+          {teams.map((t) => (
+            <div key={t.id || t.name} className="px-3 py-1.5 text-sm text-gray-700 truncate max-w-[200px]" title={t.name}>
+              {t.name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 };
 
 // Función helper para ordenar usuarios por jerarquía de roles
@@ -131,7 +169,8 @@ const UserManagement = () => {
     full_name: '',
     password: '',
     role: 'member',
-    team_id: 'd8574c01-851f-4716-9ac9-bbda45469bdf' // AICOX por defecto
+    team_id: 'd8574c01-851f-4716-9ac9-bbda45469bdf',
+    team_ids: ['d8574c01-851f-4716-9ac9-bbda45469bdf'] // AICOX por defecto; múltiples equipos
   });
   
   // Estados para gestión de equipos
@@ -140,12 +179,16 @@ const UserManagement = () => {
     description: '',
     team_lead_id: ''
   });
+  const [expandedTeamsUserId, setExpandedTeamsUserId] = useState(null);
   const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
   const [showEditTeamModal, setShowEditTeamModal] = useState(false);
   const [showViewTeamModal, setShowViewTeamModal] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [availableLeaders, setAvailableLeaders] = useState([]);
   const [teamStats, setTeamStats] = useState(null);
+  const [availableMembersToAdd, setAvailableMembersToAdd] = useState([]);
+  const [addingMemberTeamId, setAddingMemberTeamId] = useState(null);
+  const [removingMemberUserId, setRemovingMemberUserId] = useState(null);
   
   // Estados para modales de confirmación
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
@@ -228,17 +271,12 @@ const UserManagement = () => {
 
   const loadAvailableLeaders = async (teamId = null) => {
     try {
-      if (teamId) {
-        // Cargar miembros del equipo específico
-        const response = await teamService.getTeamMembers(teamId);
-        setAvailableLeaders(response);
-      } else {
-        // Cargar líderes disponibles para crear equipos
-        const response = await teamService.getAvailableLeaders();
-        setAvailableLeaders(response);
-      }
+      // Siempre mismo endpoint: todos los member/team_lead (de cualquier equipo)
+      const response = await teamService.getAvailableLeaders(teamId ?? undefined);
+      setAvailableLeaders(Array.isArray(response) ? response : []);
     } catch (error) {
       console.error('Error cargando líderes disponibles:', error);
+      setAvailableLeaders([]);
     }
   };
 
@@ -252,12 +290,9 @@ const UserManagement = () => {
         email: formData.email,
         full_name: formData.full_name,
         password: formData.password,
-        role: roleValue,  // Usar 'role' directamente (no role_writable)
-        team_id: formData.team_id || null  // Usar 'team_id' directamente (no team_id_writable)
+        role: roleValue
       };
-      
-      console.log('Creando usuario con datos:', userData);
-      
+
       await userService.createUser(userData);
       setShowCreateModal(false);
       setFormData({ 
@@ -265,7 +300,8 @@ const UserManagement = () => {
         full_name: '', 
         password: '', 
         role: 'member', 
-        team_id: 'd8574c01-851f-4716-9ac9-bbda45469bdf' // AICOX por defecto
+        team_id: 'd8574c01-851f-4716-9ac9-bbda45469bdf',
+        team_ids: ['d8574c01-851f-4716-9ac9-bbda45469bdf']
       });
       loadUsers();
     } catch (error) {
@@ -285,12 +321,9 @@ const UserManagement = () => {
       // Asegurar que el rol siempre sea un string, no un objeto
       const roleValue = typeof formData.role === 'string' ? formData.role : (formData.role?.name || formData.role || 'member');
       
-      // Preparar datos para actualización - enviar siempre los valores del formulario
-      // Los campos required siempre tienen valor, así que los enviamos siempre
       const updateData = {
-        full_name: formData.full_name.trim(),  // Siempre enviar nombre (es required)
-        email: formData.email.trim(),  // Siempre enviar email (es required)
-        team_id: formData.team_id && formData.team_id.trim() !== '' ? formData.team_id.trim() : null  // Enviar team_id (puede ser null o UUID)
+        full_name: formData.full_name.trim(),
+        email: formData.email.trim()
       };
       
       // Solo enviar role si el usuario tiene permisos para cambiarlo
@@ -307,7 +340,7 @@ const UserManagement = () => {
       
       setShowEditModal(false);
       setSelectedUser(null);
-      setFormData({ email: '', full_name: '', password: '', role: 'member', team_id: 'd8574c01-851f-4716-9ac9-bbda45469bdf' });
+      setFormData({ email: '', full_name: '', password: '', role: 'member', team_id: 'd8574c01-851f-4716-9ac9-bbda45469bdf', team_ids: ['d8574c01-851f-4716-9ac9-bbda45469bdf'] });
       loadUsers();
     } catch (error) {
       console.error('Error actualizando usuario:', error);
@@ -328,6 +361,8 @@ const UserManagement = () => {
           errorMessage = Array.isArray(data.role) ? data.role[0] : data.role;
         } else if (data.team_id) {
           errorMessage = Array.isArray(data.team_id) ? data.team_id[0] : data.team_id;
+        } else if (data.team_ids_writable) {
+          errorMessage = Array.isArray(data.team_ids_writable) ? data.team_ids_writable[0] : data.team_ids_writable;
         } else if (data.non_field_errors) {
           errorMessage = Array.isArray(data.non_field_errors) ? data.non_field_errors[0] : data.non_field_errors;
         } else {
@@ -502,13 +537,11 @@ const UserManagement = () => {
     try {
       // Limpiar datos antes de enviar
       const cleanData = {
-        name: teamFormData.name,
-        description: teamFormData.description || null,
+        name: teamFormData.name?.trim() || '',
+        description: (teamFormData.description || '').trim(),
         team_lead_id_writable: teamFormData.team_lead_id ? parseInt(teamFormData.team_lead_id) : null
       };
-      
-      console.log('Datos a enviar:', cleanData);
-      
+
       await teamService.createTeam(cleanData);
       setShowCreateTeamModal(false);
       setTeamFormData({ name: '', description: '', team_lead_id: '' });
@@ -522,8 +555,13 @@ const UserManagement = () => {
       alert('Equipo creado exitosamente');
     } catch (error) {
       console.error('Error creando equipo:', error);
-      const errorMessage = formatErrorForDisplay(error.response?.data || error);
-      alert('Error al crear equipo: ' + errorMessage);
+      const data = error.response?.data;
+      const msg = data?.description?.[0] || data?.description;
+      const isDescError = msg || (error.response?.status === 400 && data && !data.detail);
+      const friendlyMsg = isDescError || (typeof (data?.detail || error.message) === 'string' && (data?.detail || error.message || '').toLowerCase().includes('null'))
+        ? 'Por favor, añade una descripción al equipo (puede ser breve).'
+        : formatErrorForDisplay(data || error);
+      alert('Error al crear equipo: ' + friendlyMsg);
     }
   };
 
@@ -532,13 +570,11 @@ const UserManagement = () => {
     try {
       // Limpiar datos antes de enviar
       const cleanData = {
-        name: teamFormData.name,
-        description: teamFormData.description || null,
+        name: teamFormData.name?.trim() || '',
+        description: (teamFormData.description || '').trim(),
         team_lead_id_writable: teamFormData.team_lead_id ? parseInt(teamFormData.team_lead_id) : null
       };
-      
-      console.log('Datos a enviar:', cleanData);
-      
+
       await teamService.updateTeam(selectedTeam.id, cleanData);
       setShowEditTeamModal(false);
       setTeamFormData({ name: '', description: '', team_lead_id: '' });
@@ -552,8 +588,12 @@ const UserManagement = () => {
       alert('Equipo actualizado exitosamente');
     } catch (error) {
       console.error('Error actualizando equipo:', error);
-      const errorMessage = formatErrorForDisplay(error.response?.data || error);
-      alert('Error al actualizar equipo: ' + errorMessage);
+      const data = error.response?.data;
+      const msg = data?.description?.[0] || data?.description;
+      const friendlyMsg = msg || (typeof (data?.detail || error.message) === 'string' && (data?.detail || error.message || '').toLowerCase().includes('null'))
+        ? 'Por favor, añade una descripción al equipo (puede ser breve).'
+        : formatErrorForDisplay(data || error);
+      alert('Error al actualizar equipo: ' + friendlyMsg);
     }
   };
 
@@ -580,6 +620,7 @@ const UserManagement = () => {
 
   const openCreateTeamModal = () => {
     setTeamFormData({ name: '', description: '', team_lead_id: '' });
+    loadAvailableLeaders(); // sin teamId: todos los member/team_lead para elegir líder
     setShowCreateTeamModal(true);
   };
 
@@ -599,26 +640,77 @@ const UserManagement = () => {
 
   const openViewTeamModal = async (team) => {
     try {
-      // Cargar detalles completos del equipo con miembros
-      const teamDetail = await teamService.getTeamDetail(team.id);
+      const [teamDetail, available] = await Promise.all([
+        teamService.getTeamDetail(team.id),
+        teamService.getAvailableMembers(team.id),
+      ]);
       setSelectedTeam(teamDetail);
+      setAvailableMembersToAdd(Array.isArray(available) ? available : []);
       setShowViewTeamModal(true);
     } catch (error) {
       console.error('Error cargando detalles del equipo:', error);
-      // Fallback a la información básica si falla la carga
       setSelectedTeam(team);
+      setAvailableMembersToAdd([]);
       setShowViewTeamModal(true);
+    }
+  };
+
+  const refreshViewTeamData = async () => {
+    if (!selectedTeam?.id) return;
+    try {
+      const [teamDetail, available] = await Promise.all([
+        teamService.getTeamDetail(selectedTeam.id),
+        teamService.getAvailableMembers(selectedTeam.id),
+      ]);
+      setSelectedTeam(teamDetail);
+      setAvailableMembersToAdd(Array.isArray(available) ? available : []);
+    } catch (e) {
+      console.error('Error refrescando equipo:', e);
+    }
+  };
+
+  const handleAddTeamMember = async (teamId, userId) => {
+    if (!userId) return;
+    setAddingMemberTeamId(teamId);
+    try {
+      await teamService.addTeamMember(teamId, userId);
+      await refreshViewTeamData();
+      loadTeams();
+      loadUsers();
+    } catch (error) {
+      console.error('Error añadiendo miembro:', error);
+      alert('Error al añadir miembro: ' + (error.response?.data?.detail || error.message));
+    } finally {
+      setAddingMemberTeamId(null);
+    }
+  };
+
+  const handleRemoveTeamMember = async (teamId, userId) => {
+    if (!window.confirm('¿Quitar a este usuario del equipo?')) return;
+    setRemovingMemberUserId(userId);
+    try {
+      await teamService.removeTeamMember(teamId, userId);
+      await refreshViewTeamData();
+      loadTeams();
+      loadUsers();
+    } catch (error) {
+      console.error('Error quitando miembro:', error);
+      alert('Error al quitar miembro: ' + (error.response?.data?.detail || error.message));
+    } finally {
+      setRemovingMemberUserId(null);
     }
   };
 
   const openEditModal = (user) => {
     setSelectedUser(user);
+    const ids = user.team_ids ?? (user.team_id ? [user.team_id] : []);
     setFormData({
       email: user.email,
       full_name: user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim(),
       password: '',
-      role: user.role?.name || user.role || 'member', // role puede venir como objeto {name: "rol"} o string
-      team_id: user.team_id || 'd8574c01-851f-4716-9ac9-bbda45469bdf' // AICOX por defecto si no tiene equipo
+      role: user.role?.name || user.role || 'member',
+      team_id: user.team_id || (ids[0]) || 'd8574c01-851f-4716-9ac9-bbda45469bdf',
+      team_ids: ids.length ? ids : ['d8574c01-851f-4716-9ac9-bbda45469bdf']
     });
     setShowEditModal(true);
   };
@@ -651,6 +743,14 @@ const UserManagement = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, roleFilter, showInactiveUsers]);
+
+  // Cerrar desplegable de equipos al hacer clic fuera
+  useEffect(() => {
+    if (expandedTeamsUserId === null) return;
+    const close = () => setExpandedTeamsUserId(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [expandedTeamsUserId]);
 
   if (loading) {
     return (
@@ -689,7 +789,10 @@ const UserManagement = () => {
               
               {activeTab === 'users' && (
                 <button
-                  onClick={() => setShowCreateModal(true)}
+                  onClick={() => {
+                    setFormData({ email: '', full_name: '', password: '', role: 'member', team_id: 'd8574c01-851f-4716-9ac9-bbda45469bdf', team_ids: ['d8574c01-851f-4716-9ac9-bbda45469bdf'] });
+                    setShowCreateModal(true);
+                  }}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center"
                 >
                   <PlusIcon className="h-5 w-5 mr-2" />
@@ -836,7 +939,11 @@ const UserManagement = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {user.team_name || user.team?.name || 'Sin equipo'}
+                      <TeamsCell
+                        user={user}
+                        expanded={expandedTeamsUserId === user.id}
+                        onToggle={() => setExpandedTeamsUserId(expandedTeamsUserId === user.id ? null : user.id)}
+                      />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -1288,7 +1395,7 @@ const UserManagement = () => {
                     </select>
                     <p className="text-xs text-gray-500 mt-1">
                       {getUserRole() === 'admin' 
-                        ? 'Nota: Los líderes de equipo se asignan desde la gestión de equipos, no desde aquí.'
+                        ? 'Nota: Los líderes de equipo se asignan desde la gestión de equipos.'
                         : 'Solo puedes asignar roles de crypto o miembro.'}
                     </p>
                   </>
@@ -1308,24 +1415,8 @@ const UserManagement = () => {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Equipo
-                </label>
-                <select
-                  value={formData.team_id || ''}
-                  onChange={(e) => setFormData({...formData, team_id: e.target.value || null})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
-                  style={{ color: '#111827' }}
-                >
-                  <option value="">Sin equipo</option>
-                  {teams.map((team) => (
-                    <option key={team.id || 'none'} value={team.id || ''}>
-                      {team.name} - {team.description}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  AICOX es el equipo por defecto. Selecciona otro equipo si es necesario.
+                <p className="text-sm text-gray-600 bg-gray-50 px-3 py-2 rounded-md">
+                  Los equipos se asignan en la pestaña <strong>Equipos</strong> (añadir al usuario como miembro del equipo).
                 </p>
               </div>
             </form>
@@ -1407,7 +1498,7 @@ const UserManagement = () => {
                     </select>
                     <p className="text-xs text-gray-500 mt-1">
                       {getUserRole() === 'admin' 
-                        ? 'Nota: Los líderes de equipo se asignan desde la gestión de equipos, no desde aquí.'
+                        ? 'Nota: Los líderes de equipo se asignan desde la gestión de equipos.'
                         : 'Solo puedes asignar roles de crypto o miembro.'}
                     </p>
                   </>
@@ -1428,23 +1519,15 @@ const UserManagement = () => {
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Equipo
+                  Equipos (solo consulta)
                 </label>
-                <select
-                  value={formData.team_id || ''}
-                  onChange={(e) => setFormData({...formData, team_id: e.target.value || null})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
-                  style={{ color: '#111827' }}
-                >
-                  <option value="">Sin equipo</option>
-                  {teams.map((team) => (
-                    <option key={team.id || 'none'} value={team.id || ''}>
-                      {team.name} - {team.description}
-                    </option>
-                  ))}
-                </select>
+                <p className="text-sm text-gray-700 bg-gray-50 px-3 py-2 rounded-md">
+                  {(selectedUser.teams && selectedUser.teams.length)
+                    ? selectedUser.teams.map(t => t.name).join(', ')
+                    : (selectedUser.team_name || 'Sin equipos')}
+                </p>
                 <p className="text-xs text-gray-500 mt-1">
-                  AICOX es el equipo por defecto. Selecciona otro equipo si es necesario.
+                  Para cambiar los equipos, usa la pestaña <strong>Equipos</strong>.
                 </p>
               </div>
             </form>
@@ -1526,8 +1609,10 @@ const UserManagement = () => {
                         </svg>
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-gray-500">Equipo</p>
-                        <p className="text-sm text-gray-900">{selectedUser.team_name || selectedUser.team?.name || 'Sin equipo'}</p>
+                        <p className="text-sm font-medium text-gray-500">Equipos</p>
+                        <p className="text-sm text-gray-900">
+                          {(selectedUser.teams && selectedUser.teams.length) ? selectedUser.teams.map(t => t.name).join(', ') : (selectedUser.team_name || selectedUser.team?.name || 'Sin equipo')}
+                        </p>
                       </div>
                     </div>
 
@@ -1940,15 +2025,40 @@ const UserManagement = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Miembros del Equipo ({selectedTeam.members?.length || 0})
-                  </label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Miembros del Equipo ({selectedTeam.members?.length || 0})
+                    </label>
+                    {availableMembersToAdd.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="text-sm border border-gray-300 rounded-md px-2 py-1 text-gray-900 bg-white"
+                          value=""
+                          onChange={(e) => {
+                            const uid = e.target.value ? parseInt(e.target.value, 10) : null;
+                            if (uid) handleAddTeamMember(selectedTeam.id, uid);
+                            e.target.value = '';
+                          }}
+                          disabled={addingMemberTeamId === selectedTeam.id}
+                        >
+                          <option value="">Añadir miembro...</option>
+                          {availableMembersToAdd.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.full_name || u.email} ({u.email})
+                            </option>
+                          ))}
+                        </select>
+                        {addingMemberTeamId === selectedTeam.id && (
+                          <span className="text-xs text-gray-500">Añadiendo...</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   
                   {selectedTeam.members && selectedTeam.members.length > 0 ? (
                     <div className="bg-gray-50 px-4 py-2 rounded-md">
                       <div className="space-y-2">
                         {(() => {
-                          // Ordenar miembros por rol: líder > admin > jefe seguridad > js suplente > crypto > miembro
                           const roleOrder = {
                             'team_lead': 1,
                             'admin': 2,
@@ -1957,44 +2067,44 @@ const UserManagement = () => {
                             'crypto': 5,
                             'member': 6
                           };
-                          
                           const sortedMembers = [...selectedTeam.members].sort((a, b) => {
                             const roleA = roleOrder[a.role] || 999;
                             const roleB = roleOrder[b.role] || 999;
-                            
-                            // Si tienen el mismo rol, ordenar alfabéticamente por nombre
                             if (roleA === roleB) {
                               return (a.full_name || a.email || '').localeCompare(b.full_name || b.email || '');
                             }
-                            
                             return roleA - roleB;
                           });
-                          
                           return sortedMembers.map((member) => (
                             <div key={member.id} className="flex items-center justify-between py-2 px-3 bg-white rounded-lg border border-gray-200">
-                              <div className="flex-1">
+                              <div className="flex-1 min-w-0">
                                 <div className="flex items-center space-x-3">
-                                  <div className="flex-shrink-0">
-                                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                                      <span className="text-sm font-medium text-blue-600">
-                                        {member.full_name?.charAt(0) || member.email?.charAt(0) || '?'}
-                                      </span>
-                                    </div>
+                                  <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                    <span className="text-sm font-medium text-blue-600">
+                                      {member.full_name?.charAt(0) || member.email?.charAt(0) || '?'}
+                                    </span>
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <p className="text-sm font-medium text-gray-900 truncate">
                                       {member.full_name || 'Sin nombre'}
                                     </p>
-                                    <p className="text-sm text-gray-500 truncate">
-                                      {member.email}
-                                    </p>
+                                    <p className="text-sm text-gray-500 truncate">{member.email}</p>
                                   </div>
                                 </div>
                               </div>
-                              <div className="flex-shrink-0">
+                              <div className="flex-shrink-0 flex items-center gap-2">
                                 <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleColors(member.role)}`}>
                                   {getRoleLabel(member.role)}
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveTeamMember(selectedTeam.id, member.id)}
+                                  disabled={removingMemberUserId === member.id}
+                                  className="text-red-600 hover:text-red-800 text-xs font-medium disabled:opacity-50"
+                                  title="Quitar del equipo"
+                                >
+                                  {removingMemberUserId === member.id ? '...' : 'Quitar'}
+                                </button>
                               </div>
                             </div>
                           ));
@@ -2002,8 +2112,27 @@ const UserManagement = () => {
                       </div>
                     </div>
                   ) : (
-                    <div className="bg-gray-50 p-4 rounded-md text-center">
-                      <p className="text-sm text-gray-500">No hay miembros en este equipo</p>
+                    <div className="bg-gray-50 p-4 rounded-md">
+                      <p className="text-sm text-gray-500 mb-2">No hay miembros en este equipo</p>
+                      {availableMembersToAdd.length > 0 && (
+                        <select
+                          className="text-sm border border-gray-300 rounded-md px-2 py-1 text-gray-900 bg-white"
+                          value=""
+                          onChange={(e) => {
+                            const uid = e.target.value ? parseInt(e.target.value, 10) : null;
+                            if (uid) handleAddTeamMember(selectedTeam.id, uid);
+                            e.target.value = '';
+                          }}
+                          disabled={addingMemberTeamId === selectedTeam.id}
+                        >
+                          <option value="">Añadir miembro...</option>
+                          {availableMembersToAdd.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.full_name || u.email} ({u.email})
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   )}
                 </div>

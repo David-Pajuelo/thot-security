@@ -46,7 +46,14 @@ class HpsTeamSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-    
+
+    def to_internal_value(self, data):
+        """Asegurar que description nunca sea null (el modelo usa TextField sin null=True)."""
+        ret = super().to_internal_value(data)
+        if "description" in ret and ret["description"] is None:
+            ret["description"] = ""
+        return ret
+
     def get_team_lead_id(self, obj):
         """Obtener el ID del líder del equipo como entero"""
         if obj.team_lead:
@@ -61,24 +68,31 @@ class HpsTeamSerializer(serializers.ModelSerializer):
         return None
     
     def get_members(self, obj):
-        """Obtener lista de miembros del equipo"""
-        members = models.HpsUserProfile.objects.filter(
+        """Obtener lista de miembros del equipo vía HpsTeamMembership (N:N)."""
+        memberships = models.HpsTeamMembership.objects.filter(
             team=obj,
-            user__is_active=True
-        ).select_related('user', 'role')
-        
+            is_active=True,
+            user__is_active=True,
+        ).select_related('user')
+        user_ids = [m.user_id for m in memberships]
+        profiles = {
+            p.user_id: p
+            for p in models.HpsUserProfile.objects.filter(user_id__in=user_ids).select_related('role')
+        }
         members_list = []
-        for profile in members:
+        for m in memberships:
+            user = m.user
+            profile = profiles.get(user.id)
+            role_name = profile.role.name if profile and profile.role else None
             members_list.append({
-                'id': profile.user.id,
-                'email': profile.user.email,
-                'full_name': f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.email,
-                'first_name': profile.user.first_name,
-                'last_name': profile.user.last_name,
-                'role': profile.role.name if profile.role else None,
-                'is_active': profile.user.is_active
+                'id': user.id,
+                'email': user.email,
+                'full_name': f"{user.first_name} {user.last_name}".strip() or user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'role': role_name,
+                'is_active': user.is_active,
             })
-        
         return members_list
     
     def create(self, validated_data):
@@ -127,7 +141,15 @@ class HpsTeamSerializer(serializers.ModelSerializer):
         else:
             validated_data['team_lead'] = None
         
-        return super().create(validated_data)
+        team = super().create(validated_data)
+        # Añadir al líder como miembro del equipo si no está ya (permite elegir líder al crear equipo)
+        if team.team_lead_id:
+            models.HpsTeamMembership.objects.get_or_create(
+                team=team,
+                user_id=team.team_lead_id,
+                defaults={'is_active': True, 'is_lead': True},
+            )
+        return team
     
     def validate_team_lead_id_writable(self, value):
         """Validar que el usuario existe si se proporciona team_lead_id_writable"""
@@ -162,19 +184,23 @@ class HpsTeamSerializer(serializers.ModelSerializer):
         
         if lead_id is not None:
             if lead_id == '' or lead_id is None:
-                # Se está quitando el liderazgo
+                # Se está quitando el liderazgo: pasar a "member" solo si ya no es líder de ningún otro equipo
                 if old_team_lead:
-                    try:
-                        old_profile = old_team_lead.hps_profile
-                        # Si el rol era "team_lead", volver a "member"
-                        if old_profile.role and old_profile.role.name == "team_lead":
-                            member_role = models.HpsRole.objects.filter(name="member").first()
-                            if member_role:
-                                old_profile.role = member_role
-                                old_profile.save(update_fields=['role'])
-                                logger.info(f"Usuario {old_team_lead.email} vuelve a rol 'member' al quitarle el liderazgo")
-                    except models.HpsUserProfile.DoesNotExist:
-                        pass
+                    still_lead_elsewhere = models.HpsTeam.objects.filter(
+                        team_lead=old_team_lead,
+                        is_active=True,
+                    ).exclude(pk=instance.pk).exists()
+                    if not still_lead_elsewhere:
+                        try:
+                            old_profile = old_team_lead.hps_profile
+                            if old_profile.role and old_profile.role.name == "team_lead":
+                                member_role = models.HpsRole.objects.filter(name="member").first()
+                                if member_role:
+                                    old_profile.role = member_role
+                                    old_profile.save(update_fields=['role'])
+                                    logger.info(f"Usuario {old_team_lead.email} vuelve a rol 'member' al quitarle el liderazgo")
+                        except models.HpsUserProfile.DoesNotExist:
+                            pass
                 instance.team_lead = None
             else:
                 # Se está asignando un nuevo líder
@@ -201,18 +227,29 @@ class HpsTeamSerializer(serializers.ModelSerializer):
                     except models.HpsUserProfile.DoesNotExist:
                         logger.warning(f"Usuario {new_team_lead.email} no tiene perfil HPS")
                     
-                    # Si había un líder anterior diferente, revertir su rol si era "team_lead"
+                    # Si había un líder anterior diferente: pasar a "member" solo si ya no es líder de ningún otro equipo
                     if old_team_lead and old_team_lead.id != new_team_lead.id:
-                        try:
-                            old_profile = old_team_lead.hps_profile
-                            if old_profile.role and old_profile.role.name == "team_lead":
-                                member_role = models.HpsRole.objects.filter(name="member").first()
-                                if member_role:
-                                    old_profile.role = member_role
-                                    old_profile.save(update_fields=['role'])
-                                    logger.info(f"Usuario {old_team_lead.email} vuelve a rol 'member' al quitarle el liderazgo")
-                        except models.HpsUserProfile.DoesNotExist:
-                            pass
+                        still_lead_elsewhere = models.HpsTeam.objects.filter(
+                            team_lead=old_team_lead,
+                            is_active=True,
+                        ).exclude(pk=instance.pk).exists()
+                        if not still_lead_elsewhere:
+                            try:
+                                old_profile = old_team_lead.hps_profile
+                                if old_profile.role and old_profile.role.name == "team_lead":
+                                    member_role = models.HpsRole.objects.filter(name="member").first()
+                                    if member_role:
+                                        old_profile.role = member_role
+                                        old_profile.save(update_fields=['role'])
+                                        logger.info(f"Usuario {old_team_lead.email} vuelve a rol 'member' al quitarle el liderazgo")
+                            except models.HpsUserProfile.DoesNotExist:
+                                pass
+                    # Añadir al nuevo líder como miembro del equipo si no está
+                    models.HpsTeamMembership.objects.get_or_create(
+                        team=instance,
+                        user=new_team_lead,
+                        defaults={'is_active': True, 'is_lead': True},
+                    )
                             
                 except User.DoesNotExist:
                     raise serializers.ValidationError({'team_lead_id_writable': f'Usuario con ID {lead_id} no existe o está inactivo'})
@@ -397,12 +434,24 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         # Si el frontend envía 'team_id' en lugar de 'team_id_writable', mapearlo
         if 'team_id' in data and 'team_id_writable' not in data:
             data['team_id_writable'] = data.get('team_id')
+        # Si el frontend envía 'team_ids' (lista), asegurar que team_ids_writable exista
+        if 'team_ids' in data and 'team_ids_writable' not in data:
+            data['team_ids_writable'] = data.get('team_ids')
         
         return super().to_internal_value(data)
     team_id = serializers.SerializerMethodField()
-    team_name = serializers.CharField(source='team.name', read_only=True, allow_null=True)
-    # Campo escribible para actualizar el equipo (acepta UUID como string)
+    team_name = serializers.SerializerMethodField()
+    team_ids = serializers.SerializerMethodField()
+    teams = serializers.SerializerMethodField()
+    # Campo escribible: un solo equipo (compatibilidad)
     team_id_writable = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
+    # Campo escribible: lista de equipos (N:N)
+    team_ids_writable = serializers.ListField(
+        child=serializers.CharField(allow_blank=False),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
     is_active = serializers.BooleanField(source='user.is_active', read_only=True)
     hps_requests_count = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(source='user.date_joined', read_only=True)
@@ -423,7 +472,10 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
             "role_writable",
             "team_id",
             "team_name",
+            "team_ids",
+            "teams",
             "team_id_writable",
+            "team_ids_writable",
             "is_active",
             "is_temp_password",
             "must_change_password",
@@ -441,10 +493,41 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         return ""
     
     def get_team_id(self, obj):
-        """Obtiene el team_id como string UUID si existe"""
+        """Primer equipo (compatibilidad). Desde memberships o profile.team."""
+        teams = self._get_user_teams(obj)
+        if teams:
+            return str(teams[0]['id'])
         if obj.team:
             return str(obj.team.id)
         return None
+
+    def get_team_name(self, obj):
+        """Nombre del primer equipo (compatibilidad)."""
+        teams = self._get_user_teams(obj)
+        if teams:
+            return teams[0].get('name') or ''
+        if obj.team:
+            return obj.team.name or ''
+        return None
+
+    def _get_user_teams(self, obj):
+        """Lista de equipos del usuario vía HpsTeamMembership."""
+        if not obj or not obj.user_id:
+            return []
+        memberships = models.HpsTeamMembership.objects.filter(
+            user_id=obj.user_id,
+            is_active=True,
+        ).select_related('team').order_by('team__name')
+        return [{'id': str(m.team_id), 'name': m.team.name} for m in memberships if m.team]
+
+    def get_team_ids(self, obj):
+        """Lista de UUIDs de equipos del usuario."""
+        teams = self._get_user_teams(obj)
+        return [t['id'] for t in teams]
+
+    def get_teams(self, obj):
+        """Lista de { id, name } de equipos del usuario."""
+        return self._get_user_teams(obj)
     
     def get_hps_requests_count(self, obj):
         """Obtiene el número de solicitudes HPS asociadas al usuario"""
@@ -478,6 +561,44 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
                 is_active=True
             )
             return team
+
+    def _sync_team_memberships(self, user, team_id_strings):
+        """
+        Sincronizar HpsTeamMembership para un usuario con la lista de team IDs (UUID strings).
+        Crea membresías activas para los equipos indicados y desactiva las que ya no están.
+        """
+        import uuid
+        if team_id_strings is None:
+            return
+        valid_team_ids = set()
+        for tid in team_id_strings:
+            tid = (tid or '').strip()
+            if not tid or tid == 'None':
+                continue
+            try:
+                valid_team_ids.add(uuid.UUID(tid))
+            except ValueError:
+                continue
+        # Activar/crear membresías para los equipos indicados
+        for team_uuid in valid_team_ids:
+            try:
+                team = models.HpsTeam.objects.get(id=team_uuid)
+            except models.HpsTeam.DoesNotExist:
+                continue
+            m, created = models.HpsTeamMembership.objects.get_or_create(
+                team=team,
+                user=user,
+                defaults={'is_active': True, 'is_lead': (team.team_lead_id == user.id)},
+            )
+            if not created and not m.is_active:
+                m.is_active = True
+                m.is_lead = team.team_lead_id == user.id
+                m.save()
+        # Desactivar membresías que ya no están en la lista
+        models.HpsTeamMembership.objects.filter(
+            user=user,
+            is_active=True,
+        ).exclude(team_id__in=valid_team_ids).update(is_active=False)
     
     def create(self, validated_data):
         """Crear un nuevo perfil de usuario HPS con el rol especificado"""
@@ -543,18 +664,35 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
                     defaults={"description": "Perfil base para usuarios de CryptoTrace", "permissions": {}}
                 )
         
-        # Manejar equipo
+        # Manejar equipos (uno o varios)
+        team_ids_writable = validated_data.pop('team_ids_writable', None)
         team_id_writable = validated_data.pop('team_id_writable', None)
         team = None
-        if team_id_writable:
+        if team_ids_writable is not None and len(team_ids_writable) > 0:
+            # Lista de equipos: validar que existan
+            import uuid as uuid_mod
+            team_ids_valid = []
+            for tid in team_ids_writable:
+                tid = (tid or '').strip()
+                if not tid:
+                    continue
+                try:
+                    t_uuid = uuid_mod.UUID(tid)
+                    models.HpsTeam.objects.get(id=t_uuid)
+                    team_ids_valid.append(tid)
+                except (ValueError, models.HpsTeam.DoesNotExist):
+                    raise serializers.ValidationError({'team_ids_writable': f'El equipo con ID "{tid}" no existe'})
+            if team_ids_valid:
+                first_team = models.HpsTeam.objects.get(id=uuid_mod.UUID(team_ids_valid[0]))
+                team = first_team
+        if team is None and team_id_writable:
             try:
-                import uuid
-                team_uuid = uuid.UUID(team_id_writable)
+                import uuid as uuid_mod
+                team_uuid = uuid_mod.UUID(team_id_writable)
                 team = models.HpsTeam.objects.get(id=team_uuid)
             except (ValueError, models.HpsTeam.DoesNotExist):
                 raise serializers.ValidationError({'team_id_writable': f'El equipo con ID "{team_id_writable}" no existe'})
-        else:
-            # Si no se especifica equipo, asignar automáticamente al equipo AICOX
+        if team is None:
             team = self._get_or_create_aicox_team()
         
         # Crear o obtener usuario
@@ -606,6 +744,11 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
             for attr, value in validated_data.items():
                 setattr(profile, attr, value)
             profile.save()
+        # Sincronizar membresías N:N
+        if team_ids_writable is not None and len(team_ids_writable) > 0:
+            self._sync_team_memberships(user, team_ids_writable)
+        else:
+            self._sync_team_memberships(user, [str(team.id)] if team else None)
         
         return profile
     
@@ -727,28 +870,37 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
             except models.HpsRole.DoesNotExist:
                 raise serializers.ValidationError({'role_writable': f'El rol "{role_name}" no existe'})
         
-        # Manejar actualización del equipo
-        # to_internal_value ya mapeó 'team_id' a 'team_id_writable'
+        # Manejar actualización de equipos (N:N o compatibilidad un solo equipo)
+        team_ids_writable = validated_data.pop('team_ids_writable', None)
         team_id_writable = validated_data.pop('team_id_writable', None)
         
-        if team_id_writable is not None:
-            # Procesar el team_id
+        if team_ids_writable is not None:
+            self._sync_team_memberships(instance.user, team_ids_writable)
+            # Mantener profile.team como primer equipo (compatibilidad)
+            teams = self._get_user_teams(instance)
+            if teams:
+                try:
+                    import uuid as uuid_mod
+                    instance.team = models.HpsTeam.objects.get(id=uuid_mod.UUID(teams[0]['id']))
+                except (ValueError, models.HpsTeam.DoesNotExist):
+                    instance.team = None
+            else:
+                instance.team = None
+            instance.save(update_fields=['team'])
+        elif team_id_writable is not None:
             team_id_str = str(team_id_writable).strip() if team_id_writable else ''
-            
             if not team_id_str or team_id_str == 'None':
-                # Si es None, string vacío o 'None', asignar al equipo AICOX por defecto
                 instance.team = self._get_or_create_aicox_team()
+                self._sync_team_memberships(instance.user, [str(instance.team.id)])
             else:
                 try:
-                    import uuid
-                    team_uuid = uuid.UUID(team_id_str)
+                    import uuid as uuid_mod
+                    team_uuid = uuid_mod.UUID(team_id_str)
                     team = models.HpsTeam.objects.get(id=team_uuid)
                     instance.team = team
-                except (ValueError, models.HpsTeam.DoesNotExist) as e:
+                    self._sync_team_memberships(instance.user, [team_id_str])
+                except (ValueError, models.HpsTeam.DoesNotExist):
                     raise serializers.ValidationError({'team_id': f'El equipo con ID "{team_id_str}" no existe'})
-        
-        # IMPORTANTE: Guardar el equipo explícitamente
-        if team_id_writable is not None:
             instance.save(update_fields=['team'])
         
         # Actualizar otros campos del perfil

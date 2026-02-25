@@ -113,31 +113,171 @@ class HpsTeamViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="members")
     def members(self, request, pk=None):
         """
-        Obtener miembros de un equipo
+        Obtener miembros de un equipo (vía HpsTeamMembership).
         GET /api/hps/teams/{id}/members/
         """
         team = self.get_object()
-        
-        # Obtener todos los usuarios que pertenecen a este equipo a través de HpsUserProfile
-        members = models.HpsUserProfile.objects.filter(
+        memberships = models.HpsTeamMembership.objects.filter(
             team=team,
-            user__is_active=True
-        ).select_related('user', 'role')
-        
-        # Formatear respuesta para el frontend
+            is_active=True,
+            user__is_active=True,
+        ).select_related('user')
+        user_ids = [m.user_id for m in memberships]
+        profiles = {
+            p.user_id: p
+            for p in models.HpsUserProfile.objects.filter(user_id__in=user_ids).select_related('role')
+        }
         members_list = []
-        for profile in members:
+        for m in memberships:
+            user = m.user
+            profile = profiles.get(user.id)
+            role_name = profile.role.name if profile and profile.role else None
             members_list.append({
-                'id': profile.user.id,
-                'email': profile.user.email,
-                'full_name': f"{profile.user.first_name} {profile.user.last_name}".strip() or profile.user.email,
-                'first_name': profile.user.first_name,
-                'last_name': profile.user.last_name,
-                'role': profile.role.name if profile.role else None,
-                'is_active': profile.user.is_active
+                'id': user.id,
+                'email': user.email,
+                'full_name': f"{user.first_name} {user.last_name}".strip() or user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'role': role_name,
+                'is_active': user.is_active,
             })
-        
         return Response(members_list)
+
+    @action(detail=False, methods=["get"], url_path="possible-leaders")
+    def possible_leaders_list(self, request):
+        """
+        Usuarios que pueden ser elegidos como líder (para crear equipo).
+        Solo member y team_lead; excluye crypto y jefes de seguridad.
+        GET /api/hps/teams/possible-leaders/
+        """
+        qs = models.HpsUserProfile.objects.filter(
+            user__is_active=True,
+            role__name__in=('member', 'team_lead'),
+        ).select_related('user', 'role')
+        out = []
+        for p in qs:
+            u = p.user
+            out.append({
+                'id': u.id,
+                'email': u.email,
+                'full_name': f"{u.first_name} {u.last_name}".strip() or u.email,
+                'role': p.role.name if p.role else None,
+            })
+        return Response(out)
+
+    @action(detail=True, methods=["get"], url_path="possible-leaders")
+    def possible_leaders(self, request, pk=None):
+        """
+        Candidatos a líder: todos los usuarios con rol member o team_lead (independientemente del equipo).
+        Al seleccionar uno pasará a ser líder y se añadirá a este equipo si no estaba.
+        GET /api/hps/teams/{id}/possible-leaders/
+        """
+        qs = models.HpsUserProfile.objects.filter(
+            user__is_active=True,
+            role__name__in=('member', 'team_lead'),
+        ).select_related('user', 'role')
+        out = []
+        for p in qs:
+            u = p.user
+            out.append({
+                'id': u.id,
+                'email': u.email,
+                'full_name': f"{u.first_name} {u.last_name}".strip() or u.email,
+                'role': p.role.name if p.role else None,
+            })
+        return Response(out)
+
+    @action(detail=True, methods=["post"], url_path="members/add")
+    def add_member(self, request, pk=None):
+        """
+        Añadir un usuario al equipo.
+        POST /api/hps/teams/{id}/members/add/
+        Body: { "user_id": <int> }
+        """
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        team = self.get_object()
+        user_id = request.data.get('user_id')
+        if user_id is None:
+            return Response(
+                {'detail': 'user_id es requerido'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            user = User.objects.get(id=user_id, is_active=True)
+        except User.DoesNotExist:
+            return Response(
+                {'detail': 'Usuario no encontrado o inactivo'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            profile = user.hps_profile
+        except models.HpsUserProfile.DoesNotExist:
+            return Response(
+                {'detail': 'El usuario no tiene perfil HPS'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        m, created = models.HpsTeamMembership.objects.get_or_create(
+            team=team,
+            user=user,
+            defaults={'is_active': True, 'is_lead': False},
+        )
+        if not created and not m.is_active:
+            m.is_active = True
+            m.save(update_fields=['is_active'])
+        return Response({'detail': 'Miembro añadido', 'user_id': user.id}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="members/remove")
+    def remove_member(self, request, pk=None):
+        """
+        Quitar un usuario del equipo (desactivar membresía).
+        POST /api/hps/teams/{id}/members/remove/
+        Body: { "user_id": <int> }
+        """
+        team = self.get_object()
+        user_id = request.data.get('user_id')
+        if user_id is None:
+            return Response(
+                {'detail': 'user_id es requerido'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        updated = models.HpsTeamMembership.objects.filter(
+            team=team,
+            user_id=user_id,
+        ).update(is_active=False)
+        if not updated:
+            return Response(
+                {'detail': 'El usuario no pertenecía al equipo'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({'detail': 'Miembro eliminado del equipo'})
+
+    @action(detail=True, methods=["get"], url_path="available-members")
+    def available_members(self, request, pk=None):
+        """
+        Usuarios con perfil HPS que aún no están en este equipo (para añadir miembros).
+        GET /api/hps/teams/{id}/available-members/
+        """
+        team = self.get_object()
+        in_team = set(
+            models.HpsTeamMembership.objects.filter(
+                team=team,
+                is_active=True,
+            ).values_list('user_id', flat=True)
+        )
+        qs = models.HpsUserProfile.objects.filter(
+            user__is_active=True,
+        ).exclude(user_id__in=in_team).select_related('user', 'role')
+        out = []
+        for p in qs:
+            u = p.user
+            out.append({
+                'id': u.id,
+                'email': u.email,
+                'full_name': f"{u.first_name} {u.last_name}".strip() or u.email,
+                'role': p.role.name if p.role else None,
+            })
+        return Response(out)
 
 
 class HpsRequestViewSet(viewsets.ModelViewSet):
@@ -174,7 +314,10 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
         if user_id:
             qs = qs.filter(user_id=user_id)
         if team_id:
-            qs = qs.filter(user__hps_profile__team_id=team_id)
+            qs = qs.filter(
+                user__hps_team_memberships__team_id=team_id,
+                user__hps_team_memberships__is_active=True,
+            ).distinct()
 
         profile = self._profile()
         if not profile:
@@ -184,9 +327,17 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
         if role_name in ADMIN_ROLES:
             return qs
 
-        # Verificar si tiene permisos de líder (rol o es líder de equipo)
-        if has_team_lead_permissions(self.request.user, profile) and profile.team_id:
-            return qs.filter(user__hps_profile__team_id=profile.team_id)
+        # Team lead: ver solicitudes de usuarios que comparten al menos un equipo con él (vía memberships)
+        if has_team_lead_permissions(self.request.user, profile):
+            user_team_ids = models.HpsTeamMembership.objects.filter(
+                user=self.request.user,
+                is_active=True,
+            ).values_list('team_id', flat=True)
+            if user_team_ids:
+                return qs.filter(
+                    user__hps_team_memberships__team_id__in=user_team_ids,
+                    user__hps_team_memberships__is_active=True,
+                ).distinct()
 
         return qs.filter(user=self.request.user)
 
@@ -199,7 +350,10 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="team/(?P<team_id>[^/.]+)")
     def team_requests(self, request, team_id=None):
-        qs = self.get_queryset().filter(user__hps_profile__team_id=team_id)
+        qs = self.get_queryset().filter(
+            user__hps_team_memberships__team_id=team_id,
+            user__hps_team_memberships__is_active=True,
+        ).distinct()
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
 
@@ -1191,10 +1345,17 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
         if role_name in ADMIN_ROLES or role_name == "crypto":
             return qs
         
-        # Team leads solo pueden ver perfiles de su equipo
-        # También incluye usuarios que son líderes de equipo aunque su rol no sea team_lead
-        if has_team_lead_permissions(self.request.user, profile) and profile.team_id:
-            return qs.filter(team_id=profile.team_id)
+        # Team leads ven perfiles de usuarios que comparten al menos un equipo (vía memberships)
+        if has_team_lead_permissions(self.request.user, profile):
+            user_team_ids = models.HpsTeamMembership.objects.filter(
+                user=self.request.user,
+                is_active=True,
+            ).values_list('team_id', flat=True)
+            if user_team_ids:
+                return qs.filter(
+                    user__hps_team_memberships__team_id__in=user_team_ids,
+                    user__hps_team_memberships__is_active=True,
+                ).distinct()
         
         # Otros usuarios (members) pueden ver todos los usuarios también
         # Según el requerimiento: todos los usuarios deben aparecer en la gestión
@@ -1869,9 +2030,21 @@ def search_users(request):
             Q(username__icontains=query)
         )[:limit]
         
+        user_ids = [u.id for u in users]
+        memberships = models.HpsTeamMembership.objects.filter(
+            user_id__in=user_ids,
+            is_active=True,
+        ).select_related('team').order_by('team__name')
+        user_teams = {}
+        for m in memberships:
+            if m.user_id not in user_teams:
+                user_teams[m.user_id] = []
+            user_teams[m.user_id].append({'id': str(m.team_id), 'name': m.team.name if m.team else ''})
         user_list = []
         for user in users:
             profile = getattr(user, 'hps_profile', None)
+            teams = user_teams.get(user.id, [])
+            team_ids = [t['id'] for t in teams]
             user_list.append({
                 'id': user.id,
                 'email': user.email,
@@ -1880,7 +2053,9 @@ def search_users(request):
                 'last_name': user.last_name,
                 'is_active': user.is_active,
                 'role': profile.role.name if profile and profile.role else None,
-                'team_id': profile.team.id if profile and profile.team else None,
+                'team_id': team_ids[0] if team_ids else (str(profile.team.id) if profile and profile.team else None),
+                'team_ids': team_ids,
+                'teams': teams,
             })
         
         return Response({'users': user_list})

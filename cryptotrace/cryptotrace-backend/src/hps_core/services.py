@@ -123,7 +123,7 @@ class HpsRequestService:
             user.refresh_from_db()
             
             # Obtener el perfil (debería existir gracias al signal)
-            from .models import HpsUserProfile, HpsTeam
+            from .models import HpsUserProfile, HpsTeam, HpsTeamMembership
             import uuid
             
             # Obtener o crear el equipo AICOX
@@ -142,19 +142,29 @@ class HpsRequestService:
             
             try:
                 profile = user.hps_profile
-                # Asegurar que el perfil tenga el equipo AICOX asignado
+                # Asegurar que el perfil tenga el equipo AICOX asignado y membresía
                 if not profile.team:
                     profile.team = aicox_team
                 profile.is_temp_password = True
                 profile.must_change_password = True
                 profile.save(update_fields=['team', 'is_temp_password', 'must_change_password'])
+                HpsTeamMembership.objects.get_or_create(
+                    team=aicox_team,
+                    user=user,
+                    defaults={'is_active': True, 'is_lead': (aicox_team.team_lead_id == user.id)},
+                )
             except HpsUserProfile.DoesNotExist:
-                # Si por alguna razón no existe, crearlo con el equipo AICOX
+                # Si por alguna razón no existe, crearlo con el equipo AICOX y membresía
                 profile = HpsUserProfile.objects.create(
                     user=user,
                     team=aicox_team,
                     is_temp_password=True,
                     must_change_password=True,
+                )
+                HpsTeamMembership.objects.get_or_create(
+                    team=aicox_team,
+                    user=user,
+                    defaults={'is_active': True, 'is_lead': (aicox_team.team_lead_id == user.id)},
                 )
             
             user_created = True

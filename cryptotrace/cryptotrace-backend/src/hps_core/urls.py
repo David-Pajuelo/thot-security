@@ -163,7 +163,13 @@ def hps_user_profile(request):
             }, status=status.HTTP_200_OK)
         
         profile = user.hps_profile
-        
+        from .models import HpsTeamMembership
+        memberships = HpsTeamMembership.objects.filter(
+            user=user,
+            is_active=True,
+        ).select_related('team').order_by('team__name')
+        teams = [{'id': str(m.team_id), 'name': m.team.name if m.team else ''} for m in memberships if m.team]
+        team_ids = [t['id'] for t in teams]
         return Response({
             'id': user.id,
             'email': user.email,
@@ -175,8 +181,10 @@ def hps_user_profile(request):
             'is_active': user.is_active,
             'is_temp_password': profile.is_temp_password,
             'must_change_password': profile.must_change_password,
-            'team_id': profile.team.id if profile.team else None,
-            'team_name': profile.team.name if profile.team else None,
+            'team_id': team_ids[0] if team_ids else (str(profile.team.id) if profile.team else None),
+            'team_name': teams[0]['name'] if teams else (profile.team.name if profile.team else None),
+            'team_ids': team_ids,
+            'teams': teams,
         }, status=status.HTTP_200_OK)
         
     except Exception as e:

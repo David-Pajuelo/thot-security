@@ -155,7 +155,7 @@ const ReportsPage = () => {
       const teams = {};
       
       users.users?.forEach(user => {
-        const teamName = user.team?.name || 'Sin equipo';
+        const teamName = (user.teams && user.teams[0]?.name) || user.team?.name || 'Sin equipo';
         if (!teams[teamName]) {
           teams[teamName] = { total: 0, active: 0, inactive: 0 };
         }

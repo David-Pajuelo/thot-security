@@ -5,7 +5,7 @@ import uuid
 import logging
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
-from hps_core.models import HpsTeam, HpsUserProfile
+from hps_core.models import HpsTeam, HpsUserProfile, HpsTeamMembership
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -81,9 +81,14 @@ class Command(BaseCommand):
                     continue
                 
                 if not dry_run:
-                    # Asignar al equipo AICOX
+                    # Asignar al equipo AICOX y crear membresía
                     profile.team = aicox_team
                     profile.save(update_fields=['team'])
+                    HpsTeamMembership.objects.get_or_create(
+                        team=aicox_team,
+                        user=profile.user,
+                        defaults={'is_active': True, 'is_lead': (aicox_team.team_lead_id == profile.user_id)},
+                    )
                     updated_count += 1
                     self.stdout.write(
                         self.style.SUCCESS(

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import Iterable, List, Optional
 
 from rest_framework import permissions
 
@@ -20,33 +20,36 @@ TEAM_LEADS = {
 class HpsProfileContext:
     has_profile: bool
     role_name: Optional[str]
-    team_id: Optional[int]
+    team_id: Optional[str]  # Primer equipo (compatibilidad)
+    team_ids: List[str]  # Lista de UUIDs de equipos del usuario (vía memberships)
 
 
 def _extract_profile_context(user) -> HpsProfileContext:
     """
     Extraer contexto del perfil HPS del usuario.
-    También verifica si el usuario es líder de algún equipo, independientemente de su rol.
+    team_ids se obtiene de HpsTeamMembership (N:N).
     """
     if not user or not user.is_authenticated:
-        return HpsProfileContext(False, None, None)
+        return HpsProfileContext(False, None, None, [])
     profile = getattr(user, "hps_profile", None)
     if not profile:
-        return HpsProfileContext(False, None, None)
+        return HpsProfileContext(False, None, None, [])
     role_name = profile.role.name if profile.role else None
-    
-    # Verificar si el usuario es líder de algún equipo activo
-    # Si es líder pero su rol no es "team_lead", considerar que tiene permisos de líder
-    from .models import HpsTeam
+
+    from .models import HpsTeam, HpsTeamMembership
     is_team_lead = HpsTeam.objects.filter(team_lead=user, is_active=True).exists()
     if is_team_lead and role_name != "team_lead":
-        # El usuario es líder de equipo pero tiene otro rol (crypto, admin, etc.)
-        # Internamente tiene permisos de líder aunque su rol no lo refleje
-        # Mantener el rol original pero el sistema de permisos lo tratará como líder
-        pass  # role_name se mantiene como está, pero is_team_lead se usará en permisos
-    
-    team_id = str(profile.team_id) if profile.team_id else None
-    return HpsProfileContext(True, role_name, team_id)
+        pass  # role_name se mantiene; is_team_lead se usa en permisos
+
+    team_ids = list(
+        HpsTeamMembership.objects.filter(
+            user=user,
+            is_active=True,
+        ).values_list('team_id', flat=True)
+    )
+    team_ids_str = [str(tid) for tid in team_ids]
+    team_id = team_ids_str[0] if team_ids_str else (str(profile.team_id) if profile.team_id else None)
+    return HpsProfileContext(True, role_name, team_id, team_ids_str)
 
 
 class HasHpsProfile(permissions.BasePermission):

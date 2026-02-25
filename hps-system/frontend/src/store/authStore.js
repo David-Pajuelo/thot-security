@@ -42,8 +42,10 @@ const useAuthStore = create(
                 role: null,
                 is_active: true,
                 is_temp_password: payload.must_change_password || false,
-                team_id: null,
-                team_name: null,
+                team_id: payload.team_id || null,
+                team_name: payload.team_name || null,
+                team_ids: payload.team_ids || (payload.team_id ? [payload.team_id] : []),
+                teams: payload.teams || (payload.team_id && payload.team_name ? [{ id: payload.team_id, name: payload.team_name }] : []),
               };
             } else {
               throw new Error('No se pudo obtener información del usuario');
@@ -59,8 +61,10 @@ const useAuthStore = create(
             role: userData.role,
             is_active: userData.is_active,
             is_temp_password: userData.is_temp_password,
-            team_id: userData.team_id,
-            team_name: userData.team_name
+            team_id: userData.team_id ?? (userData.team_ids && userData.team_ids[0]) ?? null,
+            team_name: userData.team_name ?? (userData.teams && userData.teams[0]?.name) ?? null,
+            team_ids: userData.team_ids ?? (userData.team_id ? [userData.team_id] : []),
+            teams: userData.teams ?? (userData.team_id && userData.team_name ? [{ id: userData.team_id, name: userData.team_name }] : []),
           };
 
           // Actualizar localStorage con la información completa (ambos sistemas)
@@ -222,8 +226,10 @@ const useAuthStore = create(
             full_name: userData.full_name,
             role: userData.role,
             is_active: userData.is_active,
-            team_id: userData.team_id,
-            team_name: userData.team_name
+            team_id: userData.team_id ?? (userData.team_ids && userData.team_ids[0]) ?? null,
+            team_name: userData.team_name ?? (userData.teams && userData.teams[0]?.name) ?? null,
+            team_ids: userData.team_ids ?? (userData.team_id ? [userData.team_id] : []),
+            teams: userData.teams ?? (userData.team_id && userData.team_name ? [{ id: userData.team_id, name: userData.team_name }] : []),
           };
 
           // Actualizar localStorage con la información completa (ambos sistemas)
@@ -267,8 +273,10 @@ const useAuthStore = create(
             role: userData.role,
             is_active: userData.is_active,
             is_temp_password: userData.is_temp_password,
-            team_id: userData.team_id,
-            team_name: userData.team_name
+            team_id: userData.team_id ?? (userData.team_ids && userData.team_ids[0]) ?? null,
+            team_name: userData.team_name ?? (userData.teams && userData.teams[0]?.name) ?? null,
+            team_ids: userData.team_ids ?? (userData.team_id ? [userData.team_id] : []),
+            teams: userData.teams ?? (userData.team_id && userData.team_name ? [{ id: userData.team_id, name: userData.team_name }] : []),
           };
           
           // Guardar en ambos lugares para compatibilidad
@@ -340,8 +348,10 @@ const useAuthStore = create(
             role: userData.role,
             is_active: userData.is_active,
             is_temp_password: userData.is_temp_password,
-            team_id: userData.team_id,
-            team_name: userData.team_name
+            team_id: userData.team_id ?? (userData.team_ids && userData.team_ids[0]) ?? null,
+            team_name: userData.team_name ?? (userData.teams && userData.teams[0]?.name) ?? null,
+            team_ids: userData.team_ids ?? (userData.team_id ? [userData.team_id] : []),
+            teams: userData.teams ?? (userData.team_id && userData.team_name ? [{ id: userData.team_id, name: userData.team_name }] : []),
           };
           
           // Guardar en ambos lugares para compatibilidad
@@ -422,8 +432,10 @@ const useAuthStore = create(
               role: userData.role,
               is_active: userData.is_active,
               is_temp_password: userData.is_temp_password,
-              team_id: userData.team_id,
-              team_name: userData.team_name
+              team_id: userData.team_id ?? (userData.team_ids && userData.team_ids[0]) ?? null,
+              team_name: userData.team_name ?? (userData.teams && userData.teams[0]?.name) ?? null,
+              team_ids: userData.team_ids ?? (userData.team_id ? [userData.team_id] : []),
+              teams: userData.teams ?? (userData.team_id && userData.team_name ? [{ id: userData.team_id, name: userData.team_name }] : []),
             };
             
             // Guardar en ambos lugares para compatibilidad
