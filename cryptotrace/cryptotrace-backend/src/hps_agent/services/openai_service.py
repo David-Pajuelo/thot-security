@@ -136,24 +136,24 @@ PERMISOS: Solo puedes consultar información sobre tu propia HPS. NO puedes soli
             base_prompt += """
 COMANDOS DISPONIBLES (JEFE DE EQUIPO):
 
-🔹 **GESTIÓN DE USUARIOS DE TU EQUIPO:**
-1. "crear usuario [email]" - Crear usuario en tu equipo
-2. "asignar usuario [email] al equipo [nombre]" - Asignar usuario a tu equipo
-3. "listar usuarios" - Ver usuarios de tu equipo
-4. "modificar rol de [email] a [rol]" - Cambiar rol de usuario de tu equipo
+🔹 **GESTIÓN DE USUARIOS DE TUS EQUIPOS (equipos que lideras):**
+1. "crear usuario [email]" - Crear usuario en uno de los equipos que lideras
+2. "asignar usuario [email] al equipo [nombre]" - Asignar usuario a un equipo que lideras
+3. "listar usuarios" - Ver usuarios de los equipos que lideras
+4. "modificar rol de [email] a [rol]" - Cambiar rol de usuario de tus equipos
 
 🔹 **GESTIÓN DE HPS - SOLICITUDES:**
-5. "envío hps a [email]" o "solicitar hps para [email]" - Solicitar **NUEVA HPS** (envía formulario por correo, el usuario se asociará a tu equipo)
+5. "envío hps a [email]" o "solicitar hps para [email]" - Solicitar **NUEVA HPS** (envía formulario por correo, el usuario se asociará al equipo que indiques o al primero que lideras)
 
 🔹 **GESTIÓN DE HPS - CONSULTAS:**
-6. "estado hps de [email]" - Consultar mi estado de solicitud HPS
-7. "hps de mi equipo" - Ver todas las HPS de tu equipo
+6. "estado hps de [email]" - Consultar estado de solicitud HPS
+7. "hps de mi equipo" / "hps de mis equipos" - Ver HPS de los equipos que lideras
 8. "renovar hps de [email]" - Iniciar renovación (envía formulario por correo)
 
 🔹 **CONSULTAS:**
-9. "listar equipos" - Ver todos los equipos (solo referencia)
+9. "listar equipos" - Ver los equipos que lideras
 
-PERMISOS: Puedes solicitar HPS para cualquier usuario. Los usuarios se asociarán automáticamente a tu equipo. NO puedes realizar traspasos.
+PERMISOS: Puedes solicitar HPS para usuarios de equipos que lideras. Solo puedes asignar/crear en equipos que lideras. NO puedes realizar traspasos.
 """
         else:  # member
             base_prompt += """
@@ -261,6 +261,7 @@ CONTEXTO ADICIONAL:
 - Email del usuario: {user_email}
 - Rol: {user_role}
 - Equipos (IDs): {user_context.get('team_ids', []) or ([user_context.get('team_id')] if user_context.get('team_id') else []) or 'Ninguno'}
+- Equipos que lideras (led_team_ids): {user_context.get('led_team_ids', []) or 'Ninguno'}
 
 Por favor, analiza el mensaje y responde según las reglas establecidas.
 """

@@ -25,6 +25,24 @@ def is_email_only(message: str) -> Optional[str]:
     return None
 
 
+def _extract_team_from_message(message: str) -> Optional[str]:
+    """Extrae nombre de equipo del mensaje. Variaciones: al equipo X, equipo X, asígnalo al equipo X, etc."""
+    if not message or not message.strip():
+        return None
+    msg = message.strip()
+    # "al equipo \"Nombre\"", "al equipo Nombre", "equipo Nombre", "asignar al equipo X", "asígnale al equipo X"
+    for pattern in [
+        r'(?:al\s+)?equipo\s+["\']([^"\']+)["\']',
+        r'(?:al\s+)?equipo\s+(\S+(?:\s+\S+)*?)(?:\s*\.|$|\s+y\s+)',
+        r'asignar\s+(?:al\s+)?equipo\s+["\']?([^"\'\.]+)["\']?',
+        r'asígnale\s+(?:al\s+)?equipo\s+["\']?([^"\'\.]+)["\']?',
+    ]:
+        m = re.search(pattern, msg, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
 class CommandProcessor:
     """Procesador que ejecuta comandos específicos del sistema HPS usando Django ORM"""
     
@@ -38,6 +56,20 @@ class CommandProcessor:
         
         # Flujos conversacionales activos por usuario
         self.conversation_flows = {}
+    
+    def _get_scope_team_ids(self, user_context: Dict[str, Any]):
+        """
+        Equipos sobre los que el usuario puede actuar (consultas, listados, aprobar).
+        - admin / jefe_seguridad / jefe_seguridad_suplente: None = todos.
+        - team_lead: led_team_ids (solo equipos que lidera).
+        """
+        role = (user_context.get("role") or "").lower()
+        if role in ("admin", "jefe_seguridad", "jefe_seguridad_suplente"):
+            return None
+        if role == "team_lead":
+            led = user_context.get("led_team_ids") or []
+            return list(led) if led else []
+        return []
     
     async def execute_command(self, ai_response: Dict[str, Any], user_context: Dict[str, Any]) -> Dict[str, Any]:
         """Ejecutar comando basado en la respuesta del AI"""
@@ -74,26 +106,35 @@ class CommandProcessor:
             
             # Si hay un flujo activo de solicitar_hps
             elif flow_type == "solicitar_hps":
-                logger.info(f"🔄 Procesando flujo solicitar_hps, user_message={user_message}")
+                logger.info(f"🔄 Procesando flujo solicitar_hps, user_message={user_message}, flow={flow}")
+                # Si el flujo ya tiene email y esperaba equipo, el mensaje actual es el nombre del equipo (mantener contexto)
+                if flow.get("step") == "need_team" and flow.get("email"):
+                    email_from_flow = flow.get("email")
+                    team_name = user_message.strip() if user_message else None
+                    if team_name and team_name.lower() not in ("cancelar", "cancel", "no"):
+                        is_transfer = flow.get("is_transfer", False)
+                        parametros = {"email": email_from_flow, "team_name": team_name, "user_message": user_message}
+                        del self.conversation_flows[flow_key]
+                        logger.info(f"🔄 Flujo solicitar_hps: completando con email={email_from_flow}, equipo={team_name}")
+                        return await self._solicitar_hps(parametros, user_context, is_transfer=is_transfer)
+                    else:
+                        return {
+                            "tipo": "conversacion",
+                            "mensaje": f"📋 Indica el **nombre del equipo** para asignar la solicitud de {email_from_flow}.\n\n(Escribe el nombre exacto del equipo o 'cancelar' para cancelar)"
+                        }
                 email = None
-                
-                # Intentar extraer cualquier texto que parezca email (aunque no sea válido)
                 import re
-                # Patrón más flexible: cualquier cosa@cualquier cosa
                 email_like_pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+'
                 email_match = re.search(email_like_pattern, user_message)
                 if email_match:
                     email = email_match.group(0).strip()
                     logger.info(f"✅ Email-like detectado en flujo: {email}")
-                
                 if email:
-                    # Continuar con el flujo de solicitar HPS (no verificar si el usuario existe)
                     is_transfer = flow.get("is_transfer", False)
                     parametros = {"email": email, "user_message": user_message}
-                    del self.conversation_flows[flow_key]  # Limpiar flujo
+                    del self.conversation_flows[flow_key]
                     return await self._solicitar_hps(parametros, user_context, is_transfer=is_transfer)
                 else:
-                    # El mensaje no contiene algo que parezca un email
                     is_transfer = flow.get("is_transfer", False)
                     tipo_solicitud = "traspaso de HPS" if is_transfer else "nueva HPS"
                     return {
@@ -401,12 +442,12 @@ class CommandProcessor:
             }
         
         try:
-            hps_list = await self._get_team_hps(user_id)
+            hps_list = await self._get_team_hps(user_context)
             
             if not hps_list:
                 return {
                     "tipo": "conversacion",
-                    "mensaje": "ℹ️ No hay solicitudes HPS en tu equipo."
+                    "mensaje": "ℹ️ No hay solicitudes HPS en los equipos que gestionas."
                 }
             
             # Función helper para formatear fechas
@@ -432,7 +473,6 @@ class CommandProcessor:
                 'submitted': 'Enviada',
                 'waiting_dps': 'Esperando DPS'
             }
-            
             status_emoji = {
                 'pending': '⏳',
                 'approved': '✅',
@@ -442,24 +482,38 @@ class CommandProcessor:
                 'waiting_dps': '⏸️'
             }
             
-            message = f"📋 HPS de tu equipo\n\n"
-            message += f"Total: {len(hps_list)}\n\n"
+            # Agrupar por equipo (team_name) para formato "Equipo A – listado / Equipo B – listado"
+            from collections import OrderedDict
+            by_team = OrderedDict()
+            for hps in hps_list:
+                team_name = hps.get('team_name') or 'Sin equipo'
+                if team_name not in by_team:
+                    by_team[team_name] = []
+                by_team[team_name].append(hps)
             
-            # Mostrar hasta 10 solicitudes
-            for i, hps in enumerate(hps_list[:10], 1):
-                email = hps.get('email', 'N/A')
-                status = hps.get('status', 'N/A')
-                created_at = format_date(hps.get('created_at'))
-                emoji = status_emoji.get(status, '❓')
-                status_text = status_es.get(status, status)
-                message += f"{i}. {emoji} {email} - {status_text} (Creada: {created_at})\n"
-            
-            if len(hps_list) > 10:
-                message += f"\n... y {len(hps_list) - 10} más."
+            message = f"📋 **HPS por equipo**\n\n"
+            total_shown = 0
+            max_per_team = 15
+            for team_name, items in sorted(by_team.items(), key=lambda x: (x[0] != 'Sin equipo', x[0].lower())):
+                message += f"**{team_name}** — {len(items)} solicitud(es)\n"
+                for i, hps in enumerate(items[:max_per_team], 1):
+                    name = hps.get('name') or hps.get('email', 'N/A')
+                    email = hps.get('email', 'N/A')
+                    status = hps.get('status', 'N/A')
+                    created_at = format_date(hps.get('created_at'))
+                    emoji = status_emoji.get(status, '❓')
+                    status_text = status_es.get(status, status)
+                    message += f"  {i}. {emoji} {name} ({email}) — {status_text} (Creada: {created_at})\n"
+                if len(items) > max_per_team:
+                    message += f"  ... y {len(items) - max_per_team} más.\n"
+                message += "\n"
+                total_shown += len(items)
+            if total_shown < len(hps_list):
+                message += f"_Total mostrado: {total_shown} de {len(hps_list)}._"
             
             return {
                 "tipo": "exito",
-                "mensaje": message,
+                "mensaje": message.strip(),
                 "data": {"hps_list": hps_list}
             }
             
@@ -467,35 +521,58 @@ class CommandProcessor:
             logger.error(f"Error consultando HPS del equipo: {e}")
             return {
                 "tipo": "error",
-                "mensaje": "❌ Hubo un error consultando las HPS de tu equipo."
+                "mensaje": "❌ Hubo un error consultando las HPS de los equipos que gestionas."
             }
     
     @database_sync_to_async
-    def _get_team_hps(self, user_id):
-        """Obtener HPS de los equipos del usuario (vía HpsTeamMembership, N:N)."""
+    def _get_team_hps(self, user_context: Dict[str, Any]):
+        """
+        Obtener HPS según alcance del usuario, con team_id/team_name para agrupar por equipo.
+        - admin/jefe: todas las HPS del sistema.
+        - team_lead: solo HPS de usuarios en equipos que lidera (led_team_ids).
+        """
         try:
-            user_team_ids = list(
-                HpsTeamMembership.objects.filter(user_id=user_id, is_active=True).values_list('team_id', flat=True)
-            )
-            if not user_team_ids:
+            scope_team_ids = self._get_scope_team_ids(user_context)
+            if scope_team_ids is None:
+                hps_requests = HpsRequest.objects.all().select_related('user').order_by('-created_at')[:50]
+            elif not scope_team_ids:
                 return []
-            team_users = list(
-                HpsTeamMembership.objects.filter(
-                    team_id__in=user_team_ids,
-                    is_active=True,
-                ).values_list('user_id', flat=True).distinct()
-            )
-            if not team_users:
-                return []
-            hps_requests = HpsRequest.objects.filter(user_id__in=team_users).order_by('-created_at')[:50]
-            return [
-                {
+            else:
+                team_users = list(
+                    HpsTeamMembership.objects.filter(
+                        team_id__in=scope_team_ids,
+                        is_active=True,
+                    ).values_list('user_id', flat=True).distinct()
+                )
+                if not team_users:
+                    return []
+                hps_requests = HpsRequest.objects.filter(user_id__in=team_users).select_related('user').order_by('-created_at')[:50]
+            # Para cada HPS, asignar un equipo (el primero del usuario en alcance) para agrupar
+            result = []
+            for hps in hps_requests:
+                user_id = hps.user_id
+                team_id = None
+                team_name = "Sin equipo"
+                if user_id:
+                    qs = HpsTeamMembership.objects.filter(user_id=user_id, is_active=True).select_related('team').order_by('team__name')
+                    if scope_team_ids is not None:
+                        qs = qs.filter(team_id__in=scope_team_ids)
+                    first = qs.first()
+                    if first and first.team:
+                        team_id = str(first.team.id)
+                        team_name = first.team.name
+                full_name = ''
+                if hps.user:
+                    full_name = f"{hps.user.first_name or ''} {hps.user.last_name or ''}".strip() or hps.user.email or 'Sin nombre'
+                result.append({
                     'email': hps.user.email if hps.user else 'N/A',
+                    'name': full_name or 'Sin nombre',
                     'status': hps.status,
                     'created_at': hps.created_at.isoformat() if hps.created_at else None,
-                }
-                for hps in hps_requests
-            ]
+                    'team_id': team_id,
+                    'team_name': team_name,
+                })
+            return result
         except Exception as e:
             logger.error(f"Error obteniendo HPS del equipo: {e}")
             return []
@@ -756,16 +833,30 @@ class CommandProcessor:
                     "mensaje": "ℹ️ No se encontraron usuarios."
                 }
             
-            message = f"👥 **Usuarios del sistema:**\n\n"
-            for user in users[:20]:  # Limitar a 20
-                message += f"• {user.get('email', 'N/A')} - {user.get('role', 'N/A')}\n"
+            # Agrupar por equipo para formato "Equipo A – listado / Equipo B – listado"
+            from collections import OrderedDict
+            by_team = OrderedDict()
+            for u in users:
+                team_name = u.get('team_name') or 'Sin equipo'
+                if team_name not in by_team:
+                    by_team[team_name] = []
+                by_team[team_name].append(u)
             
-            if len(users) > 20:
-                message += f"\n... y {len(users) - 20} más."
+            message = f"👥 **Usuarios por equipo**\n\n"
+            total_shown = 0
+            max_per_team = 20
+            for team_name, items in sorted(by_team.items(), key=lambda x: (x[0] != 'Sin equipo', x[0].lower())):
+                message += f"**{team_name}** — {len(items)} usuario(s)\n"
+                for u in items[:max_per_team]:
+                    message += f"  • {u.get('email', 'N/A')} — {u.get('role', 'N/A')}\n"
+                if len(items) > max_per_team:
+                    message += f"  ... y {len(items) - max_per_team} más.\n"
+                message += "\n"
+                total_shown += len(items)
             
             return {
                 "tipo": "exito",
-                "mensaje": message,
+                "mensaje": message.strip(),
                 "data": {"users": users}
             }
             
@@ -778,50 +869,49 @@ class CommandProcessor:
     
     @database_sync_to_async
     def _get_users_list(self, user_context: Dict[str, Any]):
-        """Obtener lista de usuarios"""
+        """
+        Obtener lista de usuarios con team_name para agrupar por equipo.
+        Devuelve una entrada por (usuario, equipo) para poder mostrar "Equipo A – listado".
+        """
         try:
             user_role = user_context.get("role", "").lower()
-            user_id = user_context.get("id")
-            
+            scope_team_ids = self._get_scope_team_ids(user_context)
+            if scope_team_ids is not None and not scope_team_ids:
+                return []
             if user_role == "admin":
                 profiles = HpsUserProfile.objects.select_related('user', 'role', 'team').all()[:100]
             else:
-                # Team lead ve usuarios que comparten al menos un equipo (vía memberships)
-                user_team_ids = list(
-                    HpsTeamMembership.objects.filter(user_id=user_id, is_active=True).values_list('team_id', flat=True)
-                )
-                if not user_team_ids:
-                    return []
                 profile_ids = list(
                     HpsUserProfile.objects.filter(
-                        user__hps_team_memberships__team_id__in=user_team_ids,
+                        user__hps_team_memberships__team_id__in=scope_team_ids,
                         user__hps_team_memberships__is_active=True,
                     ).distinct().values_list('id', flat=True)[:100]
                 )
                 profiles = HpsUserProfile.objects.filter(id__in=profile_ids).select_related('user', 'role', 'team')
-            # Para cada perfil, equipos vía memberships (pueden ser varios)
             result = []
             for profile in profiles:
-                team_names = list(
-                    HpsTeamMembership.objects.filter(
-                        user_id=profile.user_id,
-                        is_active=True,
-                    ).select_related('team').values_list('team__name', flat=True)
-                )
-                result.append({
-                    'email': profile.user.email if profile.user else 'N/A',
-                    'role': profile.role.name if profile.role else 'N/A',
-                    'team': ', '.join(t for t in team_names if t) or (profile.team.name if profile.team else 'N/A'),
-                })
+                qs = HpsTeamMembership.objects.filter(
+                    user_id=profile.user_id,
+                    is_active=True,
+                ).select_related('team').order_by('team__name')
+                if scope_team_ids is not None:
+                    qs = qs.filter(team_id__in=scope_team_ids)
+                for m in qs:
+                    if m.team:
+                        result.append({
+                            'email': profile.user.email if profile.user else 'N/A',
+                            'role': profile.role.name if profile.role else 'N/A',
+                            'team_name': m.team.name,
+                        })
             return result
         except Exception as e:
             logger.error(f"Error obteniendo lista de usuarios: {e}")
             return []
     
     async def _listar_equipos(self, user_context: Dict[str, Any]) -> Dict[str, Any]:
-        """Listar equipos del sistema"""
+        """Listar equipos del sistema (team_lead solo ve los que lidera)"""
         try:
-            teams = await self._get_teams_list()
+            teams = await self._get_teams_list(user_context)
             
             if not teams:
                 return {
@@ -847,16 +937,19 @@ class CommandProcessor:
             }
     
     @database_sync_to_async
-    def _get_teams_list(self):
-        """Obtener lista de equipos"""
+    def _get_teams_list(self, user_context: Dict[str, Any] = None):
+        """Obtener lista de equipos. team_lead solo ve los que lidera."""
         try:
-            teams = HpsTeam.objects.filter(is_active=True).all()
-            
+            qs = HpsTeam.objects.filter(is_active=True)
+            if user_context:
+                scope = self._get_scope_team_ids(user_context)
+                if scope is not None:
+                    if not scope:
+                        return []
+                    qs = qs.filter(id__in=scope)
+            teams = qs.all()
             return [
-                {
-                    'name': team.name,
-                    'member_count': team.member_count,
-                }
+                {'name': team.name, 'member_count': team.member_count}
                 for team in teams
             ]
         except Exception as e:
@@ -919,33 +1012,67 @@ class CommandProcessor:
                     "mensaje": "❌ No tienes permisos para solicitar HPS para otros usuarios."
                 }
         
+        # Extraer equipo del mensaje si viene (ej. "envía hps a x@c.com al equipo Ventas")
+        team_name = parametros.get("team_name") or _extract_team_from_message(user_message or "")
+        team_id_param = parametros.get("team_id")
+        led_team_ids = user_context.get("led_team_ids") or []
+        default_team_id = user_context.get("default_team_id")
+        needs_team = False
+        if user_role == "team_lead" and len(led_team_ids) > 1 and not (team_name or team_id_param):
+            needs_team = True
+        if user_role in ("jefe_seguridad", "jefe_seguridad_suplente") and not default_team_id and not (team_name or team_id_param):
+            needs_team = True
+        
         if not email:
             # Iniciar flujo conversacional para solicitar email
             user_id = user_context.get("id")
             flow_key = f"{user_id}_flow"
-            
-            # Cancelar cualquier flujo anterior antes de iniciar uno nuevo
             if flow_key in self.conversation_flows:
-                logger.info(f"🔄 Cancelando flujo anterior antes de iniciar solicitar_hps: {self.conversation_flows[flow_key].get('type')}")
                 del self.conversation_flows[flow_key]
-            
-            # Iniciar flujo conversacional
             self.conversation_flows[flow_key] = {
                 "type": "solicitar_hps",
                 "is_transfer": is_transfer,
                 "started_at": datetime.now().isoformat()
             }
             logger.info(f"🔄 Flujo solicitar_hps iniciado para usuario {user_id}, flow_key={flow_key}, is_transfer={is_transfer}")
-            
             if is_transfer:
+                return {"tipo": "conversacion", "mensaje": "📧 Para solicitar un **traspaso de HPS**, necesito el email del usuario.\n\n**Por favor, proporciona el email:**\n• Ejemplo: usuario@empresa.com"}
+            return {"tipo": "conversacion", "mensaje": "📧 Para solicitar una **nueva HPS**, necesito el email del usuario.\n\n**Por favor, proporciona el email:**\n• Ejemplo: usuario@empresa.com"}
+        
+        # Si tenemos email pero falta equipo (líder con varios equipos o jefe sin predeterminado), pedir equipo en un solo paso manteniendo el email
+        if needs_team and not (team_name or team_id_param):
+            user_id = user_context.get("id")
+            flow_key = f"{user_id}_flow"
+            if flow_key in self.conversation_flows:
+                del self.conversation_flows[flow_key]
+            self.conversation_flows[flow_key] = {
+                "type": "solicitar_hps",
+                "email": email,
+                "step": "need_team",
+                "is_transfer": is_transfer,
+                "started_at": datetime.now().isoformat()
+            }
+            led_names = await self._get_led_team_names(user_context)
+            if user_role == "team_lead" and led_names:
+                teams_list = "".join(f"• {n}\n" for n in led_names)
                 return {
                     "tipo": "conversacion",
-                    "mensaje": "📧 Para solicitar un **traspaso de HPS**, necesito el email del usuario.\n\n**Por favor, proporciona el email:**\n• Ejemplo: usuario@empresa.com"
+                    "mensaje": f"📋 Para asignar la solicitud de **{email}** necesito el equipo.\n\n**Equipos que lideras:**\n{teams_list}\nIndica el **nombre del equipo** (por ejemplo: «{led_names[0]}»)."
                 }
-            else:
+            return {
+                "tipo": "conversacion",
+                "mensaje": f"📋 Para asignar la solicitud a **{email}** indica el **nombre del equipo**. También puedes configurar un equipo predeterminado en tu perfil para usar solo «envía solicitud a [correo]»."
+            }
+        
+        # Resolver team_id: si jefe y no se indicó equipo, usar predeterminado
+        if not team_id_param and not team_name and user_role in ("jefe_seguridad", "jefe_seguridad_suplente") and default_team_id:
+            team_id_param = default_team_id
+        if team_name and not team_id_param:
+            team_id_param = await self._resolve_team_id_from_name(user_context, team_name)
+            if not team_id_param and team_name:
                 return {
                     "tipo": "conversacion",
-                    "mensaje": "📧 Para solicitar una **nueva HPS**, necesito el email del usuario.\n\n**Por favor, proporciona el email:**\n• Ejemplo: usuario@empresa.com"
+                    "mensaje": f"❌ No encontré el equipo «{team_name}». Comprueba el nombre o indica uno de tus equipos."
                 }
         
         try:
@@ -986,6 +1113,8 @@ class CommandProcessor:
                     "mensaje": "❌ Error de configuración: No se pudo generar la URL del formulario."
                 }
             url = f"{base_url}/hps-form?token={token.token}&email={email}&type={form_type}"
+            if team_id_param:
+                url += f"&team_id={team_id_param}"
             
             # Enviar email con formulario (no se verifica si el usuario existe)
             user_name = email.split("@")[0].replace(".", " ").title()
@@ -1013,7 +1142,7 @@ class CommandProcessor:
                 else:
                     # Solicitud de nueva HPS
                     if user_role == "team_lead":
-                        message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\n📋 **Si el usuario no existe, se registrará automáticamente en tu equipo** cuando complete el formulario.\n\nEl enlace es válido por 72 horas."
+                        message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\n📋 **Si el usuario no existe, se registrará automáticamente en el equipo que indicaste** (o en el primero de los que lideras) cuando complete el formulario.\n\nEl enlace es válido por 72 horas."
                     else:
                         message = f"✅ Se ha enviado la **solicitud de nueva HPS** a {email}.\n\n📧 El correo contiene el formulario de nueva HPS que debe completar.\n\nEl enlace es válido por 72 horas."
             
@@ -1039,6 +1168,45 @@ class CommandProcessor:
                 "mensaje": "❌ Hubo un error procesando la solicitud. Por favor, intenta de nuevo."
             }
     
+    @database_sync_to_async
+    def _get_led_team_names(self, user_context: Dict[str, Any]):
+        """Nombres de equipos que lidera el usuario (para mensajes de flujo)."""
+        led = user_context.get("led_team_ids") or []
+        if not led:
+            return []
+        try:
+            return list(
+                HpsTeam.objects.filter(id__in=led, is_active=True)
+                .order_by("name")
+                .values_list("name", flat=True)
+            )
+        except Exception as e:
+            logger.error(f"Error obteniendo nombres de equipos liderados: {e}")
+            return []
+
+    @database_sync_to_async
+    def _resolve_team_id_from_name(self, user_context: Dict[str, Any], team_name: str) -> Optional[str]:
+        """Resuelve nombre de equipo a ID. team_lead: solo entre sus led_teams; jefe/admin: cualquiera."""
+        if not team_name or not team_name.strip():
+            return None
+        name = team_name.strip()
+        role = (user_context.get("role") or "").lower()
+        scope_ids = self._get_scope_team_ids(user_context)
+        try:
+            qs = HpsTeam.objects.filter(is_active=True)
+            if scope_ids is not None and scope_ids is not []:
+                if not scope_ids:
+                    return None
+                qs = qs.filter(id__in=scope_ids)
+            team = qs.filter(name__iexact=name).first()
+            if team:
+                return str(team.id)
+            team = qs.filter(name__icontains=name).first()
+            return str(team.id) if team else None
+        except Exception as e:
+            logger.error(f"Error resolviendo equipo por nombre: {e}")
+            return None
+
     @database_sync_to_async
     def _get_user_by_id(self, user_id: str):
         """Obtener usuario por ID"""
@@ -1126,6 +1294,9 @@ class CommandProcessor:
 2. Solicitar traspaso HPS.
 3. Solicitar renovación HPS.
 
+**Solicitudes:** Puedes escribir **"envía solicitud a [correo]"** y se usará tu **equipo predeterminado** (si lo tienes configurado en tu perfil).  
+O bien **"envía solicitud a [correo], asígnalo al equipo [nombre]"** (o "envía hps a [correo], al equipo [nombre]") para indicar el equipo.
+
 🔹 **GESTIÓN DE HPS - CONSULTAS:**
 4. Ver estadísticas globales de HPS.
 5. Consultar HPS por cualquier estado.
@@ -1138,21 +1309,21 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
         elif user_role == "team_lead":
             message = """Como Jefe de Equipo, puedes ejecutar los siguientes comandos:
 
-🔹 **GESTIÓN DE USUARIOS DE TU EQUIPO:**
-1. Crear usuario en tu equipo.
-2. Asignar usuario a tu equipo.
-3. Ver usuarios de tu equipo.
+🔹 **GESTIÓN DE USUARIOS DE TUS EQUIPOS:**
+1. Crear usuario en uno de los equipos que lideras.
+2. Asignar usuario a un equipo que lideras.
+3. Ver usuarios de tus equipos.
 
 🔹 **GESTIÓN DE HPS - SOLICITUDES:**
-4. Solicitar nueva HPS (el usuario se asociará a tu equipo).
+4. Solicitar nueva HPS (indica correo y, si lideras varios equipos, el equipo: «envía hps a [correo], al equipo [nombre]»).
 5. Solicitar renovación HPS.
 
 🔹 **GESTIÓN DE HPS - CONSULTAS:**
 6. Consultar estado de HPS de un email específico.
-7. Ver HPS de tu equipo.
+7. Ver HPS de los equipos que lideras.
 
 🔹 **CONSULTAS:**
-8. Ver todos los equipos del sistema.
+8. Ver equipos que lideras.
 
 Si necesitas más información sobre alguna de estas acciones, ¡no dudes en preguntar!"""
         else:
@@ -1305,13 +1476,14 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
                 defaults={"description": "Miembro del equipo", "permissions": {}}
             )
             
-            # Obtener equipo del usuario actual si es team_lead (primer equipo de sus memberships)
+            # Obtener equipo: team_lead usa primer equipo que LIDERA (led_team_ids); admin/otros AICOX si hace falta
             team = None
             current_user_id = user_context.get("id")
             if user_context.get("role", "").lower() == "team_lead":
-                first_m = HpsTeamMembership.objects.filter(user_id=current_user_id, is_active=True).select_related('team').first()
-                if first_m and first_m.team:
-                    team = first_m.team
+                led_ids = user_context.get("led_team_ids") or []
+                if led_ids:
+                    first_led_id = led_ids[0] if isinstance(led_ids[0], int) else int(led_ids[0])
+                    team = HpsTeam.objects.filter(id=first_led_id, is_active=True).first()
                 if not team and hasattr(User.objects.get(id=current_user_id), 'hps_profile') and User.objects.get(id=current_user_id).hps_profile.team:
                     team = User.objects.get(id=current_user_id).hps_profile.team
             
@@ -1488,14 +1660,14 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
             user = User.objects.get(email=email)
             team = HpsTeam.objects.get(name=team_name, is_active=True)
             
-            # Verificar permisos: team_lead solo puede asignar a equipos en los que él está (memberships)
+            # Verificar permisos: team_lead solo puede asignar a equipos que LIDERA (led_team_ids)
             user_role = user_context.get("role", "").lower()
             if user_role == "team_lead":
-                current_user_id = user_context.get("id")
-                if not HpsTeamMembership.objects.filter(user_id=current_user_id, team=team, is_active=True).exists():
+                led_ids = user_context.get("led_team_ids") or []
+                if str(team.id) not in [str(t) for t in led_ids]:
                     return {
                         "success": False,
-                        "message": f"❌ Solo puedes asignar usuarios a equipos en los que tú perteneces."
+                        "message": f"❌ Solo puedes asignar usuarios a equipos que lideras."
                     }
             
             # Añadir membresía (N:N); mantener profile.team como primer equipo
@@ -1739,18 +1911,18 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
             # Verificar permisos según el rol
             user_role = user_context.get("role", "").lower()
             if user_role == "team_lead":
-                # Team lead solo puede aprobar si el usuario comparte al menos un equipo con él (memberships)
-                approver_team_ids = set(
-                    HpsTeamMembership.objects.filter(user=approver, is_active=True).values_list('team_id', flat=True)
-                )
+                # Team lead solo puede aprobar si el usuario pertenece a un equipo que él LIDERA (led_team_ids)
+                led_ids = user_context.get("led_team_ids") or []
+                approver_team_ids = set(str(t) for t in led_ids)
                 if approver_team_ids:
                     user_team_ids = set(
                         HpsTeamMembership.objects.filter(user=user, is_active=True).values_list('team_id', flat=True)
                     )
+                    user_team_ids = set(str(t) for t in user_team_ids)
                     if not (approver_team_ids & user_team_ids):
                         return {
                             "success": False,
-                            "message": f"❌ Solo puedes aprobar HPS de usuarios de tus equipos."
+                            "message": f"❌ Solo puedes aprobar HPS de usuarios de equipos que lideras."
                         }
             
             # Aprobar HPS
@@ -1833,20 +2005,20 @@ Si necesitas más información sobre alguna de estas acciones, ¡no dudes en pre
                     "message": f"❌ No se encontró una solicitud HPS pendiente para {email}."
                 }
             
-            # Verificar permisos: team_lead solo si el usuario comparte al menos un equipo (memberships)
+            # Verificar permisos: team_lead solo si el usuario pertenece a un equipo que él LIDERA (led_team_ids)
             user_role = user_context.get("role", "").lower()
             if user_role == "team_lead":
-                approver_team_ids = set(
-                    HpsTeamMembership.objects.filter(user=approver, is_active=True).values_list('team_id', flat=True)
-                )
+                led_ids = user_context.get("led_team_ids") or []
+                approver_team_ids = set(str(t) for t in led_ids)
                 if approver_team_ids:
                     user_team_ids = set(
                         HpsTeamMembership.objects.filter(user=user, is_active=True).values_list('team_id', flat=True)
                     )
+                    user_team_ids = set(str(t) for t in user_team_ids)
                     if not (approver_team_ids & user_team_ids):
                         return {
                             "success": False,
-                            "message": f"❌ Solo puedes rechazar HPS de usuarios de tus equipos."
+                            "message": f"❌ Solo puedes rechazar HPS de usuarios de equipos que lideras."
                         }
             
             # Rechazar HPS

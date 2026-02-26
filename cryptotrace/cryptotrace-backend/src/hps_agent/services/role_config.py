@@ -42,9 +42,9 @@ class RoleConfig:
         ],
         "team_lead": [
             "¿Qué comandos puedes ejecutar?",
-            "Estado de mi equipo",
+            "Estado de mis equipos",
             "Solicitar HPS para un miembro",
-            "¿Hay HPS pendientes en mi equipo?",
+            "¿Hay HPS pendientes en los equipos que lidero?",
             "Renovar HPS de un miembro"
         ]
     }
@@ -55,7 +55,7 @@ class RoleConfig:
         "jefe_seguridad": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como jefe de seguridad, puedes gestionar HPS y supervisar la seguridad del sistema.",
         "jefe_seguridad_suplente": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como jefe de seguridad suplente, puedes gestionar HPS y supervisar la seguridad del sistema.",
         "crypto": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como especialista en crypto, puedes consultar información sobre tu propia HPS.",
-        "team_lead": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como jefe de equipo, puedes gestionar tu equipo y sus HPS.",
+        "team_lead": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Como jefe de equipo, puedes gestionar los equipos que lideras y sus HPS.",
         "member": "¡Hola {user_name}! 👋 Soy tu asistente de HPS. Estoy aquí para ayudarte con todo lo relacionado con tu habilitación personal de seguridad."
     }
     
