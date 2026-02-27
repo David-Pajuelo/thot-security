@@ -81,14 +81,17 @@ apiClient.interceptors.response.use(
           return apiClient(originalRequest);
         }
       } catch (refreshError) {
-        // Si el refresh falla, limpiar tokens (ambos sistemas)
+        // Si el refresh falla (401 = token caducado o inválido), limpiar y forzar recarga a login
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
         localStorage.removeItem('hps_token');
         localStorage.removeItem('hps_refresh_token');
         localStorage.removeItem('user');
         localStorage.removeItem('hps_user');
-        // No redirigir automáticamente, dejar que el componente maneje el error
+        // Recarga para que la app muestre login sin depender del estado de React
+        if (typeof window !== 'undefined') {
+          window.location.reload();
+        }
         return Promise.reject(refreshError);
       }
     }
