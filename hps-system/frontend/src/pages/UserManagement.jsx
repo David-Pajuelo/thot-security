@@ -1,5 +1,6 @@
 // Página de Gestión de Usuarios del Sistema HPS
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { userService, teamService } from '../services/apiService';
 import hpsService from '../services/hpsService';
@@ -186,6 +187,7 @@ const UserManagement = () => {
   const [filterHps, setFilterHps] = useState([]);
   const [filterTeamIds, setFilterTeamIds] = useState([]);
   const [openFilterDropdown, setOpenFilterDropdown] = useState(null); // 'hps' | 'rol' | 'equipo' | null
+  const [filterDropdownAnchor, setFilterDropdownAnchor] = useState(null); // { top, left, width } para portal
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
@@ -808,10 +810,22 @@ const UserManagement = () => {
   // Cerrar desplegable de filtros al hacer clic fuera (listener en siguiente tick para no cerrar con el mismo clic que abre)
   useEffect(() => {
     if (openFilterDropdown === null) return;
-    const close = () => setOpenFilterDropdown(null);
+    const close = () => { setOpenFilterDropdown(null); setFilterDropdownAnchor(null); };
     const tid = setTimeout(() => document.addEventListener('click', close), 0);
     return () => { clearTimeout(tid); document.removeEventListener('click', close); };
   }, [openFilterDropdown]);
+
+  const openFilter = (key, e) => {
+    e.stopPropagation();
+    if (openFilterDropdown === key) {
+      setOpenFilterDropdown(null);
+      setFilterDropdownAnchor(null);
+    } else {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setFilterDropdownAnchor({ top: rect.bottom, left: rect.left, width: Math.max(rect.width, 180) });
+      setOpenFilterDropdown(key);
+    }
+  };
 
   if (loading) {
     return (
@@ -940,30 +954,19 @@ const UserManagement = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative">
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); setOpenFilterDropdown(openFilterDropdown === 'rol' ? null : 'rol'); }}
+                      onClick={(e) => openFilter('rol', e)}
                       className={`inline-flex items-center gap-1 uppercase ${filterRoles.length ? 'text-blue-600 font-semibold' : 'text-gray-500 hover:bg-gray-100'} rounded px-1 py-0.5`}
                       title="Filtrar por rol (selección múltiple)"
                     >
                       Rol {filterRoles.length > 0 && <span className="bg-blue-100 text-blue-800 rounded-full px-1.5 text-[10px]">({filterRoles.length})</span>}
                       <ChevronDownIcon className="h-4 w-4" />
                     </button>
-                    {openFilterDropdown === 'rol' && (
-                      <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-gray-200 bg-white py-1 shadow-lg max-h-60 overflow-auto" onClick={(e) => e.stopPropagation()}>
-                        <div className="px-3 py-1.5 text-xs font-medium text-gray-500 uppercase">Seleccionar roles</div>
-                        {['admin', 'jefe_seguridad', 'jefe_seguridad_suplente', 'crypto', 'team_lead', 'member'].map((r) => (
-                          <label key={r} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
-                            <input type="checkbox" checked={filterRoles.includes(r)} onChange={() => setFilterRoles((prev) => prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r])} className="rounded border-gray-300" />
-                            {getRoleLabel(r)}
-                          </label>
-                        ))}
-                      </div>
-                    )}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative">
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setOpenFilterDropdown(openFilterDropdown === 'equipo' ? null : 'equipo'); }}
+                        onClick={(e) => openFilter('equipo', e)}
                         className={`inline-flex items-center gap-1 uppercase ${filterTeamIds.length ? 'text-blue-600 font-semibold' : 'text-gray-500 hover:bg-gray-100'} rounded px-1 py-0.5`}
                         title="Filtrar por equipo (usuario en al menos uno)"
                       >
@@ -972,23 +975,12 @@ const UserManagement = () => {
                       </button>
                       <button type="button" onClick={(e) => { e.stopPropagation(); setSortByTeam((v) => !v); }} title={sortByTeam ? 'Agrupar por equipo (activado)' : 'Agrupar por equipo'} className={`p-0.5 rounded ${sortByTeam ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-gray-600'}`}>{sortByTeam && ' ✓'}</button>
                     </div>
-                    {openFilterDropdown === 'equipo' && (
-                      <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-md border border-gray-200 bg-white py-1 shadow-lg max-h-60 overflow-auto" onClick={(e) => e.stopPropagation()}>
-                        <div className="px-3 py-1.5 text-xs font-medium text-gray-500 uppercase">Seleccionar equipos</div>
-                        {(teams || []).filter((t) => t.is_active !== false).map((t) => (
-                          <label key={t.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
-                            <input type="checkbox" checked={filterTeamIds.includes(t.id)} onChange={() => setFilterTeamIds((prev) => prev.includes(t.id) ? prev.filter((id) => id !== t.id) : [...prev, t.id])} className="rounded border-gray-300" />
-                            <span className="truncate" title={t.name}>{t.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative">
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setOpenFilterDropdown(openFilterDropdown === 'hps' ? null : 'hps'); }}
+                        onClick={(e) => openFilter('hps', e)}
                         className={`inline-flex items-center gap-1 uppercase ${filterHps.length ? 'text-blue-600 font-semibold' : 'text-gray-500 hover:bg-gray-100'} rounded px-1 py-0.5`}
                         title="Filtrar por estado HPS (selección múltiple)"
                       >
@@ -997,17 +989,6 @@ const UserManagement = () => {
                       </button>
                       <button type="button" onClick={(e) => { e.stopPropagation(); setSortByHps((v) => !v); }} title={sortByHps ? 'Ordenar por HPS (activado)' : 'Ordenar por HPS'} className={`p-0.5 rounded ${sortByHps ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-gray-600'}`}>{sortByHps && ' ✓'}</button>
                     </div>
-                    {openFilterDropdown === 'hps' && (
-                      <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded-md border border-gray-200 bg-white py-1 shadow-lg max-h-60 overflow-auto" onClick={(e) => e.stopPropagation()}>
-                        <div className="px-3 py-1.5 text-xs font-medium text-gray-500 uppercase">Seleccionar estados HPS</div>
-                        {HPS_ORDER.map((status) => (
-                          <label key={status} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
-                            <input type="checkbox" checked={filterHps.includes(status)} onChange={() => setFilterHps((prev) => prev.includes(status) ? prev.filter((x) => x !== status) : [...prev, status])} className="rounded border-gray-300" />
-                            {HPS_LABELS[status] || status}
-                          </label>
-                        ))}
-                      </div>
-                    )}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Último Acceso
@@ -1168,6 +1149,50 @@ const UserManagement = () => {
             </div>
           )}
         </div>
+
+        {/* Desplegables de filtro en portal (fuera de la tabla para que no se aplasten) */}
+        {filterDropdownAnchor && openFilterDropdown && createPortal(
+          <div
+            className="fixed z-[9999] rounded-md border border-gray-200 bg-white py-1 shadow-xl max-h-60 overflow-auto"
+            style={{ top: filterDropdownAnchor.top + 4, left: filterDropdownAnchor.left, minWidth: filterDropdownAnchor.width }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {openFilterDropdown === 'rol' && (
+              <>
+                <div className="px-3 py-1.5 text-xs font-medium text-gray-500 uppercase">Seleccionar roles</div>
+                {['crypto', 'team_lead', 'member'].map((r) => (
+                  <label key={r} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
+                    <input type="checkbox" checked={filterRoles.includes(r)} onChange={() => setFilterRoles((prev) => prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r])} className="rounded border-gray-300" />
+                    {getRoleLabel(r)}
+                  </label>
+                ))}
+              </>
+            )}
+            {openFilterDropdown === 'equipo' && (
+              <>
+                <div className="px-3 py-1.5 text-xs font-medium text-gray-500 uppercase">Seleccionar equipos</div>
+                {(teams || []).filter((t) => t.is_active !== false).map((t) => (
+                  <label key={t.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
+                    <input type="checkbox" checked={filterTeamIds.includes(t.id)} onChange={() => setFilterTeamIds((prev) => prev.includes(t.id) ? prev.filter((id) => id !== t.id) : [...prev, t.id])} className="rounded border-gray-300" />
+                    <span className="truncate max-w-[200px]" title={t.name}>{t.name}</span>
+                  </label>
+                ))}
+              </>
+            )}
+            {openFilterDropdown === 'hps' && (
+              <>
+                <div className="px-3 py-1.5 text-xs font-medium text-gray-500 uppercase">Seleccionar estados HPS</div>
+                {HPS_ORDER.map((status) => (
+                  <label key={status} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
+                    <input type="checkbox" checked={filterHps.includes(status)} onChange={() => setFilterHps((prev) => prev.includes(status) ? prev.filter((x) => x !== status) : [...prev, status])} className="rounded border-gray-300" />
+                    {HPS_LABELS[status] || status}
+                  </label>
+                ))}
+              </>
+            )}
+          </div>,
+          document.body
+        )}
 
         {/* Paginación */}
         {filteredUsers.length > 0 && totalPages > 1 && (
