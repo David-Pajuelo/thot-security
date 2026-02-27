@@ -437,6 +437,8 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         # Si el frontend envía 'team_ids' (lista), asegurar que team_ids_writable exista
         if 'team_ids' in data and 'team_ids_writable' not in data:
             data['team_ids_writable'] = data.get('team_ids')
+        if 'default_team_id' in data and 'default_team_id_writable' not in data:
+            data['default_team_id_writable'] = data.get('default_team_id')
         
         return super().to_internal_value(data)
     team_id = serializers.SerializerMethodField()
@@ -454,8 +456,13 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
     )
     is_active = serializers.BooleanField(source='user.is_active', read_only=True)
     hps_requests_count = serializers.SerializerMethodField()
+    hps_status = serializers.SerializerMethodField()
+    hps_expires_at = serializers.SerializerMethodField()
+    pending_hps_requests = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(source='user.date_joined', read_only=True)
     updated_at = serializers.DateTimeField(source='user.date_joined', read_only=True)
+    default_team_id = serializers.SerializerMethodField()
+    default_team_id_writable = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = models.HpsUserProfile
@@ -476,11 +483,16 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
             "teams",
             "team_id_writable",
             "team_ids_writable",
+            "default_team_id",
+            "default_team_id_writable",
             "is_active",
             "is_temp_password",
             "must_change_password",
             "email_verified",
             "hps_requests_count",
+            "hps_status",
+            "hps_expires_at",
+            "pending_hps_requests",
             "created_at",
             "updated_at",
         ]
@@ -510,6 +522,12 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
             return obj.team.name or ''
         return None
 
+    def get_default_team_id(self, obj):
+        """Equipo predeterminado para solicitudes HPS (jefe de seguridad)."""
+        if obj.default_team_id:
+            return str(obj.default_team_id)
+        return None
+
     def _get_user_teams(self, obj):
         """Lista de equipos del usuario vía HpsTeamMembership."""
         if not obj or not obj.user_id:
@@ -534,6 +552,35 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         if obj.user:
             return models.HpsRequest.objects.filter(user=obj.user).count()
         return 0
+
+    def _get_hps_status_fields(self, obj):
+        """Estado HPS del usuario: última solicitud relevante. Devuelve (status, expires_at, pending_count)."""
+        if not obj or not obj.user_id:
+            return ("none", None, 0)
+        from django.utils import timezone
+        requests = models.HpsRequest.objects.filter(user_id=obj.user_id).order_by("-created_at")
+        pending_count = requests.filter(status=models.HpsRequest.RequestStatus.PENDING).count()
+        latest = requests.first()
+        if not latest:
+            return ("none", None, pending_count)
+        status = latest.status
+        expires_at = None
+        if latest.status == models.HpsRequest.RequestStatus.APPROVED and hasattr(latest, "expires_at") and latest.expires_at:
+            expires_at = latest.expires_at
+            if timezone.now().date() > expires_at:
+                status = "expired"
+            else:
+                status = "active"
+        return (status, expires_at, pending_count)
+
+    def get_hps_status(self, obj):
+        return self._get_hps_status_fields(obj)[0]
+
+    def get_hps_expires_at(self, obj):
+        return self._get_hps_status_fields(obj)[1]
+
+    def get_pending_hps_requests(self, obj):
+        return self._get_hps_status_fields(obj)[2]
     
     def _get_or_create_aicox_team(self):
         """
@@ -902,6 +949,28 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
                 except (ValueError, models.HpsTeam.DoesNotExist):
                     raise serializers.ValidationError({'team_id': f'El equipo con ID "{team_id_str}" no existe'})
             instance.save(update_fields=['team'])
+        
+        # Equipo predeterminado para solicitudes HPS: solo jefe_seguridad y administrador pueden asignarlo
+        default_team_id_writable = validated_data.pop('default_team_id_writable', None)
+        if default_team_id_writable is not None:
+            request = self.context.get('request')
+            current_role = None
+            if request and request.user and getattr(request.user, 'hps_profile', None) and request.user.hps_profile.role:
+                current_role = request.user.hps_profile.role.name
+            if current_role not in ('admin', 'jefe_seguridad', 'jefe_seguridad_suplente'):
+                # Ignorar silenciosamente si no tiene permiso (no es campo obligatorio)
+                pass
+            else:
+                default_team_id_str = str(default_team_id_writable).strip() if default_team_id_writable else ''
+                if not default_team_id_str or default_team_id_str == 'None':
+                    instance.default_team = None
+                else:
+                    try:
+                        import uuid as uuid_mod
+                        instance.default_team = models.HpsTeam.objects.get(id=uuid_mod.UUID(default_team_id_str))
+                    except (ValueError, models.HpsTeam.DoesNotExist):
+                        raise serializers.ValidationError({'default_team_id': f'El equipo con ID "{default_team_id_str}" no existe'})
+                instance.save(update_fields=['default_team'])
         
         # Actualizar otros campos del perfil
         for attr, value in validated_data.items():

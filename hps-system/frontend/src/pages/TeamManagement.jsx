@@ -15,6 +15,12 @@ import { formatErrorForDisplay } from '../utils/errorHandler';
 const TeamManagement = () => {
   const navigate = useNavigate();
   const { user, isTeamLeader } = useAuthStore();
+  // Equipos que el líder lidera (varios si tiene varios a su cargo)
+  const ledTeams = user?.led_teams ?? [];
+  const hasMultipleLedTeams = ledTeams.length > 1;
+  const [selectedTeamId, setSelectedTeamId] = useState(
+    () => ledTeams[0]?.id ?? user?.team_id ?? null
+  );
   const [teamMembers, setTeamMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -23,31 +29,35 @@ const TeamManagement = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
 
+  // Equipo activo para cargar miembros: selector o único equipo liderado / team_id
+  const activeTeamId = selectedTeamId ?? ledTeams[0]?.id ?? user?.team_id ?? null;
+  const activeTeamName = ledTeams.find((t) => t.id === activeTeamId)?.name ?? user?.team_name ?? 'Mi equipo';
+
   useEffect(() => {
     if (!isTeamLeader()) {
       navigate('/unauthorized');
       return;
     }
-    loadTeamData();
-  }, [isTeamLeader, navigate]);
+    if (ledTeams.length > 0) {
+      setSelectedTeamId((prev) => prev ?? ledTeams[0]?.id ?? null);
+    }
+  }, [isTeamLeader, navigate, ledTeams.length]);
 
-  const loadTeamData = async () => {
+  useEffect(() => {
+    if (!isTeamLeader() || !activeTeamId) return;
+    loadTeamData(activeTeamId);
+  }, [isTeamLeader, activeTeamId]);
+
+  const loadTeamData = async (teamId) => {
+    if (!teamId) {
+      setError('No tienes un equipo asignado. Contacta al administrador.');
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
-
-      console.log('TeamManagement - User:', user);
-      console.log('TeamManagement - Team ID:', user?.team_id);
-
-      if (!user?.team_id) {
-        setError('No tienes un equipo asignado. Contacta al administrador.');
-        return;
-      }
-
-      // Cargar miembros del equipo
-      console.log('Cargando miembros del equipo:', user.team_id);
-      const membersResult = await userService.getTeamMembers(user.team_id);
-      console.log('Resultado miembros:', membersResult);
+      const membersResult = await userService.getTeamMembers(teamId);
       if (membersResult.success) {
         setTeamMembers(membersResult.data);
       } else {
@@ -55,29 +65,30 @@ const TeamManagement = () => {
       }
     } catch (err) {
       console.error('Error cargando datos del equipo:', err);
-      const errorMsg = formatErrorForDisplay(err);
-      setError('Error cargando datos del equipo: ' + errorMsg);
+      setError('Error cargando datos del equipo: ' + formatErrorForDisplay(err));
     } finally {
       setLoading(false);
     }
   };
 
   const handleCreateUser = async (userData) => {
+    const teamId = activeTeamId ?? ledTeams[0]?.id ?? user?.team_id;
+    if (!teamId) {
+      setError('Selecciona un equipo para crear el usuario.');
+      return;
+    }
     try {
-      const result = await userService.createUser({
+      await userService.createUser({
         ...userData,
-        team_id: user.team_id // Asignar al equipo del líder
+        team_id: teamId,
+        team_ids: Array.isArray(userData.team_ids) ? userData.team_ids : [teamId],
       });
-      
-      if (result.success) {
-        await loadTeamData();
-        setShowCreateModal(false);
-      } else {
-        setError(result.error || 'Error creando usuario');
-      }
+      await loadTeamData(activeTeamId);
+      setShowCreateModal(false);
+      setError(null);
     } catch (err) {
       console.error('Error creando usuario:', err);
-      setError('Error creando usuario');
+      setError(err.response?.data?.detail || err.response?.data?.message || 'Error creando usuario');
     }
   };
 
@@ -214,25 +225,53 @@ const TeamManagement = () => {
       </header>
 
       <main className="w-full px-4 sm:px-6 lg:px-8 py-8">
+        {/* Selector de equipo cuando el líder tiene varios equipos */}
+        {hasMultipleLedTeams && (
+          <div className="mb-6">
+            <div className="bg-white shadow rounded-lg p-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Equipo a gestionar
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {ledTeams.map((team) => (
+                  <button
+                    key={team.id}
+                    type="button"
+                    onClick={() => setSelectedTeamId(team.id)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      selectedTeamId === team.id
+                        ? 'bg-blue-600 text-white shadow'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {team.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Estadísticas del Equipo */}
         <div className="mb-8">
           <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
             <div className="bg-white overflow-hidden shadow rounded-lg">
               <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <UserGroupIcon className="h-6 w-6 text-gray-400" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center min-w-0">
+                    <div className="flex-shrink-0">
+                      <UserGroupIcon className="h-6 w-6 text-gray-400" />
+                    </div>
+                    <div className="ml-5 min-w-0">
+                      <span className="text-base font-semibold text-gray-900 truncate block" title={activeTeamName}>
+                        {activeTeamName}
+                      </span>
+                      <span className="text-sm text-gray-500">Miembros</span>
+                    </div>
                   </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">
-                        Miembros del Equipo
-                      </dt>
-                      <dd className="text-lg font-medium text-gray-900">
-                        {teamMembers.length}
-                      </dd>
-                    </dl>
-                  </div>
+                  <dd className="text-2xl font-semibold text-gray-900 ml-4">
+                    {teamMembers.length}
+                  </dd>
                 </div>
               </div>
             </div>
@@ -241,9 +280,9 @@ const TeamManagement = () => {
 
         {/* Contenido de Miembros */}
         <div className="bg-white shadow rounded-lg">
-            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center flex-wrap gap-2">
               <h3 className="text-lg font-medium text-gray-900">
-                Miembros del Equipo ({teamMembers.length})
+                {hasMultipleLedTeams ? `${activeTeamName} — ` : ''}Miembros ({teamMembers.length})
               </h3>
               <div className="flex items-center space-x-4">
                 <label className="text-sm font-medium text-gray-700">
@@ -326,25 +365,25 @@ const TeamManagement = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        {member.role === 'member' && (
-                          <div className="flex justify-end space-x-2">
-                            <button
-                              onClick={() => {
-                                setSelectedUser(member);
-                                setShowEditModal(true);
-                              }}
-                              className="text-blue-600 hover:text-blue-900"
-                            >
-                              <PencilIcon className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteUser(member.id)}
-                              className="text-red-600 hover:text-red-900"
-                            >
-                              <TrashIcon className="h-4 w-4" />
-                            </button>
-                          </div>
-                        )}
+                        <div className="flex justify-end space-x-2">
+                          <button
+                            onClick={() => {
+                              setSelectedUser(member);
+                              setShowEditModal(true);
+                            }}
+                            className="text-indigo-600 hover:text-indigo-900 p-1"
+                            title="Editar"
+                          >
+                            <PencilIcon className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUser(member.id)}
+                            className="text-red-600 hover:text-red-900 p-1"
+                            title="Desactivar"
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -358,7 +397,7 @@ const TeamManagement = () => {
           <CreateUserModal
             onClose={() => setShowCreateModal(false)}
             onSubmit={handleCreateUser}
-            teamId={user.team_id}
+            teamId={activeTeamId ?? ledTeams[0]?.id ?? user?.team_id}
           />
         )}
 

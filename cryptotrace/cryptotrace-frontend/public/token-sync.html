@@ -10,7 +10,7 @@
         // Escuchar mensajes desde HPS System
         // Origen permitido: reemplazado en build; en dev sin inyección usamos fallback por puerto
         function getAllowedOrigin() {
-            const hpsSystemUrl = '__HPS_SYSTEM_URL__';
+            const hpsSystemUrl = 'http://localhost:3001';
             try {
                 if (hpsSystemUrl.indexOf('__') !== -1) {
                     // Placeholder no reemplazado (dev sin prebuild): permitir localhost:3001

@@ -80,12 +80,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 await self.close(code=4003)
                 return
             
-            # Construir contexto del usuario (team_ids para N:N)
+            # Construir contexto del usuario (team_ids para N:N; led_team_ids para líder)
             team_ids = user_data.get('team_ids')
             if team_ids is None and user_data.get('team_id') is not None:
                 team_ids = [user_data.get('team_id')]
             if not team_ids:
                 team_ids = []
+            led_team_ids = user_data.get('led_team_ids') or []
+            default_team_id = user_data.get('default_team_id')
             self.user_context = {
                 'id': str(self.user.id),
                 'email': self.user.email,
@@ -94,6 +96,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'role': user_data.get('role', 'member'),
                 'team_id': user_data.get('team_id') or (team_ids[0] if team_ids else None),
                 'team_ids': team_ids,
+                'led_team_ids': led_team_ids,
+                'default_team_id': default_team_id,
                 'auth_token': token
             }
             
@@ -346,7 +350,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             from rest_framework_simplejwt.tokens import AccessToken
             access_token = AccessToken(token)
             
-            # Extraer datos del usuario (team_ids para múltiples equipos)
+            # Extraer datos del usuario (team_ids, led_team_ids, default_team_id desde JWT)
             team_ids = access_token.get('team_ids')
             if team_ids is None and access_token.get('team_id') is not None:
                 team_ids = [access_token.get('team_id')]
@@ -360,6 +364,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'role': access_token.get('role', 'member'),
                 'team_id': access_token.get('team_id') or (team_ids[0] if team_ids else None),
                 'team_ids': team_ids,
+                'led_team_ids': access_token.get('led_team_ids') or [],
+                'default_team_id': access_token.get('default_team_id'),
             }
             
             return user_data

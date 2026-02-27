@@ -120,6 +120,14 @@ class HpsUserProfile(models.Model):
         null=True,
         blank=True,
     )
+    default_team = models.ForeignKey(
+        HpsTeam,
+        on_delete=models.SET_NULL,
+        related_name="profiles_default_team",
+        null=True,
+        blank=True,
+        help_text="Equipo predeterminado para solicitudes HPS (p. ej. jefe seguridad: 'envía solicitud a correo').",
+    )
     email_verified = models.BooleanField(default=False)
     is_temp_password = models.BooleanField(default=False)
     last_login = models.DateTimeField(null=True, blank=True)

@@ -11,7 +11,6 @@ import {
   TrashIcon,
   EyeIcon,
   MagnifyingGlassIcon,
-  FunnelIcon,
   LinkIcon,
   ArrowLeftIcon,
   ArrowPathIcon,
@@ -83,31 +82,53 @@ const TeamsCell = ({ user, expanded, onToggle }) => {
   );
 };
 
-// Función helper para ordenar usuarios por jerarquía de roles
-const sortUsersByRole = (users) => {
-  const roleOrder = {
-    'admin': 1,
-    'jefe_seguridad': 2,
-    'jefe_seguridad_suplente': 3,
-    'crypto': 4,
-    'team_lead': 5,
-    'member': 6
-  };
-  
-  return users.sort((a, b) => {
-    const roleA = roleOrder[a.role] || 999;
-    const roleB = roleOrder[b.role] || 999;
-    
-    // Si tienen el mismo rol, ordenar alfabéticamente por nombre
-    if (roleA === roleB) {
-      const nameA = a.full_name || a.email || '';
-      const nameB = b.full_name || b.email || '';
-      return nameA.localeCompare(nameB);
-    }
-    
-    return roleA - roleB;
-  });
+const ROLE_ORDER = { admin: 1, jefe_seguridad: 2, jefe_seguridad_suplente: 3, crypto: 4, team_lead: 5, member: 6 };
+const HPS_ORDER = ['pending', 'waiting_dps', 'submitted', 'rejected', 'approved', 'active', 'expired', 'none'];
+const HPS_LABELS = {
+  pending: 'Pendiente',
+  waiting_dps: 'Esperando DPS',
+  submitted: 'Enviada',
+  rejected: 'Denegada',
+  approved: 'Aprobada',
+  active: 'Activa',
+  expired: 'Expirada',
+  none: 'Sin HPS'
 };
+
+// Ordenar por rol (admin -> ... -> member), luego por nombre
+function sortUsersByRole(users) {
+  return [...users].sort((a, b) => {
+    const roleA = ROLE_ORDER[a.role] ?? 999;
+    const roleB = ROLE_ORDER[b.role] ?? 999;
+    if (roleA !== roleB) return roleA - roleB;
+    return (a.full_name || a.email || '').localeCompare(b.full_name || b.email || '');
+  });
+}
+
+// Ordenar por estado HPS: Pendiente -> Esperando DPS -> Enviada -> Denegada -> Aprobada -> ...
+function sortUsersByHps(users) {
+  return [...users].sort((a, b) => {
+    const i = HPS_ORDER.indexOf(a.hps_status || 'none');
+    const j = HPS_ORDER.indexOf(b.hps_status || 'none');
+    const ii = i === -1 ? HPS_ORDER.length : i;
+    const jj = j === -1 ? HPS_ORDER.length : j;
+    if (ii !== jj) return ii - jj;
+    return sortUsersByRole([a, b])[0] === a ? -1 : 1;
+  });
+}
+
+// Agrupar por equipo (primer equipo del usuario), dentro de cada grupo orden por rol
+function groupUsersByTeam(users) {
+  const byTeam = {};
+  users.forEach((u) => {
+    const key = u.team_name || (u.teams?.[0]?.name) || 'Sin equipo';
+    if (!byTeam[key]) byTeam[key] = [];
+    byTeam[key].push(u);
+  });
+  Object.keys(byTeam).forEach((k) => { byTeam[k] = sortUsersByRole(byTeam[k]); });
+  const teamNames = Object.keys(byTeam).sort((a, b) => (a === 'Sin equipo' ? 1 : b === 'Sin equipo' ? -1 : a.localeCompare(b)));
+  return teamNames.flatMap((name) => byTeam[name]);
+}
 
 const UserManagement = () => {
   const navigate = useNavigate();
@@ -150,11 +171,21 @@ const UserManagement = () => {
     const currentRole = getUserRole();
     return currentRole === 'admin' || currentRole === 'jefe_seguridad' || currentRole === 'jefe_seguridad_suplente';
   };
+
+  // Solo jefe de seguridad y administrador pueden asignar equipo predeterminado para solicitudes HPS
+  const canSetDefaultTeam = () => {
+    const currentRole = getUserRole();
+    return currentRole === 'admin' || currentRole === 'jefe_seguridad' || currentRole === 'jefe_seguridad_suplente';
+  };
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState('all');
+  // Filtros multi-selección por columna (vacío = sin filtrar)
+  const [filterRoles, setFilterRoles] = useState([]);
+  const [filterHps, setFilterHps] = useState([]);
+  const [filterTeamIds, setFilterTeamIds] = useState([]);
+  const [openFilterDropdown, setOpenFilterDropdown] = useState(null); // 'hps' | 'rol' | 'equipo' | null
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
@@ -204,6 +235,9 @@ const UserManagement = () => {
   // Estados para paginación
   const [currentPage, setCurrentPage] = useState(1);
   const [usersPerPage] = useState(25);
+  // Ordenación: por bloques de equipo (toggle) y por estado HPS (toggle)
+  const [sortByTeam, setSortByTeam] = useState(false);
+  const [sortByHps, setSortByHps] = useState(false);
 
   // Verificar permisos
   useEffect(() => {
@@ -335,12 +369,16 @@ const UserManagement = () => {
       if (formData.password && formData.password.trim() !== '') {
         updateData.password = formData.password;
       }
+      // Equipo predeterminado para solicitudes HPS (solo jefe/admin pueden enviarlo; backend ignora si no tiene permiso)
+      if (canSetDefaultTeam() && formData.default_team_id !== undefined) {
+        updateData.default_team_id = formData.default_team_id || null;
+      }
       
       const response = await userService.updateUser(selectedUser.id, updateData);
       
       setShowEditModal(false);
       setSelectedUser(null);
-      setFormData({ email: '', full_name: '', password: '', role: 'member', team_id: 'd8574c01-851f-4716-9ac9-bbda45469bdf', team_ids: ['d8574c01-851f-4716-9ac9-bbda45469bdf'] });
+      setFormData({ email: '', full_name: '', password: '', role: 'member', team_id: 'd8574c01-851f-4716-9ac9-bbda45469bdf', team_ids: ['d8574c01-851f-4716-9ac9-bbda45469bdf'], default_team_id: '' });
       loadUsers();
     } catch (error) {
       console.error('Error actualizando usuario:', error);
@@ -710,7 +748,8 @@ const UserManagement = () => {
       password: '',
       role: user.role?.name || user.role || 'member',
       team_id: user.team_id || (ids[0]) || 'd8574c01-851f-4716-9ac9-bbda45469bdf',
-      team_ids: ids.length ? ids : ['d8574c01-851f-4716-9ac9-bbda45469bdf']
+      team_ids: ids.length ? ids : ['d8574c01-851f-4716-9ac9-bbda45469bdf'],
+      default_team_id: user.default_team_id ?? ''
     });
     setShowEditModal(true);
   };
@@ -721,17 +760,32 @@ const UserManagement = () => {
   };
 
 
-  const filteredUsers = sortUsersByRole(users.filter(user => {
+  // IDs de equipos del usuario (para filtro: pertenecer a al menos uno de los seleccionados)
+  const getUserTeamIds = (user) => {
+    const ids = new Set();
+    (user.team_ids || []).forEach((id) => ids.add(String(id)));
+    if (user.team_id) ids.add(String(user.team_id));
+    (user.teams || []).forEach((t) => { if (t.id) ids.add(String(t.id)); });
+    return Array.from(ids);
+  };
+  const baseFiltered = users.filter(user => {
     const matchesSearch = (user.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (user.first_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (user.last_name || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
-    
-    // Filtrar por estado de actividad
+    const userRole = user.role?.name || user.role || 'member';
+    const matchesRole = filterRoles.length === 0 || filterRoles.includes(userRole);
+    const userHps = user.hps_status || 'none';
+    const matchesHps = filterHps.length === 0 || filterHps.includes(userHps);
+    const userTeamIds = getUserTeamIds(user);
+    const matchesTeam = filterTeamIds.length === 0 || filterTeamIds.some((tid) => userTeamIds.includes(String(tid)));
     const matchesActiveStatus = showInactiveUsers ? !user.is_active : user.is_active;
-    
-    return matchesSearch && matchesRole && matchesActiveStatus;
-  }));
+    return matchesSearch && matchesRole && matchesHps && matchesTeam && matchesActiveStatus;
+  });
+  const filteredUsers = (() => {
+    let list = sortByTeam ? groupUsersByTeam(baseFiltered) : sortUsersByRole(baseFiltered);
+    if (sortByHps) list = sortUsersByHps(list);
+    return list;
+  })();
 
   // Lógica de paginación
   const totalPages = Math.ceil(filteredUsers.length / usersPerPage);
@@ -739,10 +793,10 @@ const UserManagement = () => {
   const endIndex = startIndex + usersPerPage;
   const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
 
-  // Resetear página cuando cambien los filtros
+  // Resetear página cuando cambien los filtros o la ordenación
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, roleFilter, showInactiveUsers]);
+  }, [searchTerm, filterRoles, filterHps, filterTeamIds, showInactiveUsers, sortByTeam, sortByHps]);
 
   // Cerrar desplegable de equipos al hacer clic fuera
   useEffect(() => {
@@ -751,6 +805,13 @@ const UserManagement = () => {
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [expandedTeamsUserId]);
+  // Cerrar desplegable de filtros al hacer clic fuera (listener en siguiente tick para no cerrar con el mismo clic que abre)
+  useEffect(() => {
+    if (openFilterDropdown === null) return;
+    const close = () => setOpenFilterDropdown(null);
+    const tid = setTimeout(() => document.addEventListener('click', close), 0);
+    return () => { clearTimeout(tid); document.removeEventListener('click', close); };
+  }, [openFilterDropdown]);
 
   if (loading) {
     return (
@@ -853,23 +914,6 @@ const UserManagement = () => {
             </div>
             
             <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <FunnelIcon className="h-5 w-5 text-gray-400" />
-                <select
-                  value={roleFilter}
-                  onChange={(e) => setRoleFilter(e.target.value)}
-                  className="border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="all">Todos los roles</option>
-                  <option value="admin">Administradores</option>
-                  <option value="jefe_seguridad">Jefe de Seguridad</option>
-                  <option value="jefe_seguridad_suplente">Jefe de Seguridad Suplente</option>
-                  <option value="crypto">Crypto</option>
-                  <option value="team_lead">Líderes de Equipo</option>
-                  <option value="member">Miembros</option>
-                </select>
-              </div>
-              
               <button
                 onClick={() => setShowInactiveUsers(!showInactiveUsers)}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -893,17 +937,77 @@ const UserManagement = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Usuario
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Rol
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setOpenFilterDropdown(openFilterDropdown === 'rol' ? null : 'rol'); }}
+                      className={`inline-flex items-center gap-1 uppercase ${filterRoles.length ? 'text-blue-600 font-semibold' : 'text-gray-500 hover:bg-gray-100'} rounded px-1 py-0.5`}
+                      title="Filtrar por rol (selección múltiple)"
+                    >
+                      Rol {filterRoles.length > 0 && <span className="bg-blue-100 text-blue-800 rounded-full px-1.5 text-[10px]">({filterRoles.length})</span>}
+                      <ChevronDownIcon className="h-4 w-4" />
+                    </button>
+                    {openFilterDropdown === 'rol' && (
+                      <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-gray-200 bg-white py-1 shadow-lg max-h-60 overflow-auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="px-3 py-1.5 text-xs font-medium text-gray-500 uppercase">Seleccionar roles</div>
+                        {['admin', 'jefe_seguridad', 'jefe_seguridad_suplente', 'crypto', 'team_lead', 'member'].map((r) => (
+                          <label key={r} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
+                            <input type="checkbox" checked={filterRoles.includes(r)} onChange={() => setFilterRoles((prev) => prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r])} className="rounded border-gray-300" />
+                            {getRoleLabel(r)}
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Equipo
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setOpenFilterDropdown(openFilterDropdown === 'equipo' ? null : 'equipo'); }}
+                        className={`inline-flex items-center gap-1 uppercase ${filterTeamIds.length ? 'text-blue-600 font-semibold' : 'text-gray-500 hover:bg-gray-100'} rounded px-1 py-0.5`}
+                        title="Filtrar por equipo (usuario en al menos uno)"
+                      >
+                        Equipo {filterTeamIds.length > 0 && <span className="bg-blue-100 text-blue-800 rounded-full px-1.5 text-[10px]">({filterTeamIds.length})</span>}
+                        <ChevronDownIcon className="h-4 w-4" />
+                      </button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setSortByTeam((v) => !v); }} title={sortByTeam ? 'Agrupar por equipo (activado)' : 'Agrupar por equipo'} className={`p-0.5 rounded ${sortByTeam ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-gray-600'}`}>{sortByTeam && ' ✓'}</button>
+                    </div>
+                    {openFilterDropdown === 'equipo' && (
+                      <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-md border border-gray-200 bg-white py-1 shadow-lg max-h-60 overflow-auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="px-3 py-1.5 text-xs font-medium text-gray-500 uppercase">Seleccionar equipos</div>
+                        {(teams || []).filter((t) => t.is_active !== false).map((t) => (
+                          <label key={t.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
+                            <input type="checkbox" checked={filterTeamIds.includes(t.id)} onChange={() => setFilterTeamIds((prev) => prev.includes(t.id) ? prev.filter((id) => id !== t.id) : [...prev, t.id])} className="rounded border-gray-300" />
+                            <span className="truncate" title={t.name}>{t.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Estado
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    HPS
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setOpenFilterDropdown(openFilterDropdown === 'hps' ? null : 'hps'); }}
+                        className={`inline-flex items-center gap-1 uppercase ${filterHps.length ? 'text-blue-600 font-semibold' : 'text-gray-500 hover:bg-gray-100'} rounded px-1 py-0.5`}
+                        title="Filtrar por estado HPS (selección múltiple)"
+                      >
+                        HPS {filterHps.length > 0 && <span className="bg-blue-100 text-blue-800 rounded-full px-1.5 text-[10px]">({filterHps.length})</span>}
+                        <ChevronDownIcon className="h-4 w-4" />
+                      </button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setSortByHps((v) => !v); }} title={sortByHps ? 'Ordenar por HPS (activado)' : 'Ordenar por HPS'} className={`p-0.5 rounded ${sortByHps ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:text-gray-600'}`}>{sortByHps && ' ✓'}</button>
+                    </div>
+                    {openFilterDropdown === 'hps' && (
+                      <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded-md border border-gray-200 bg-white py-1 shadow-lg max-h-60 overflow-auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="px-3 py-1.5 text-xs font-medium text-gray-500 uppercase">Seleccionar estados HPS</div>
+                        {HPS_ORDER.map((status) => (
+                          <label key={status} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
+                            <input type="checkbox" checked={filterHps.includes(status)} onChange={() => setFilterHps((prev) => prev.includes(status) ? prev.filter((x) => x !== status) : [...prev, status])} className="rounded border-gray-300" />
+                            {HPS_LABELS[status] || status}
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Último Acceso
@@ -946,13 +1050,6 @@ const UserManagement = () => {
                       />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                      }`}>
-                        {user.is_active ? 'Activo' : 'Inactivo'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
                       {user.hps_status === 'active' && (
                         <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
                           Activa
@@ -965,12 +1062,27 @@ const UserManagement = () => {
                       )}
                       {user.hps_status === 'pending' && (
                         <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                          Pendiente ({user.pending_hps_requests})
+                          Pendiente {user.pending_hps_requests > 0 ? `(${user.pending_hps_requests})` : ''}
+                        </span>
+                      )}
+                      {user.hps_status === 'waiting_dps' && (
+                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800">
+                          Esperando DPS
                         </span>
                       )}
                       {user.hps_status === 'submitted' && (
                         <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
                           Enviada
+                        </span>
+                      )}
+                      {user.hps_status === 'rejected' && (
+                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                          Denegada
+                        </span>
+                      )}
+                      {user.hps_status === 'approved' && (
+                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                          Aprobada
                         </span>
                       )}
                       {user.hps_status === 'expired' && (
@@ -983,7 +1095,7 @@ const UserManagement = () => {
                           )}
                         </span>
                       )}
-                      {user.hps_status === 'none' && (
+                      {(user.hps_status === 'none' || !user.hps_status) && (
                         <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
                           Sin HPS
                         </span>
@@ -1250,8 +1362,12 @@ const UserManagement = () => {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {team.team_lead_name || 'Sin líder'}
+                          <div className="text-sm">
+                            {team.team_lead_id && team.team_lead_name ? (
+                              <span className="text-gray-900">{team.team_lead_name}</span>
+                            ) : (
+                              <span className="text-red-600 font-medium">Sin líder de equipo</span>
+                            )}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -1530,6 +1646,28 @@ const UserManagement = () => {
                   Para cambiar los equipos, usa la pestaña <strong>Equipos</strong>.
                 </p>
               </div>
+
+              {canSetDefaultTeam() && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Equipo predeterminado para solicitudes HPS
+                  </label>
+                  <p className="text-xs text-gray-500 mb-1">
+                    Solo jefes de seguridad y administrador. Si se configura, al escribir «envía solicitud a [correo]» en el chat se usará este equipo.
+                  </p>
+                  <select
+                    value={formData.default_team_id ?? ''}
+                    onChange={(e) => setFormData({ ...formData, default_team_id: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
+                    style={{ color: '#111827' }}
+                  >
+                    <option value="">Ninguno</option>
+                    {teams.map((team) => (
+                      <option key={team.id} value={team.id}>{team.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </form>
             
             <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
@@ -1863,7 +2001,7 @@ const UserManagement = () => {
                   onChange={(e) => setTeamFormData({...teamFormData, team_lead_id: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
                 >
-                  <option value="">Sin líder asignado</option>
+                  <option value="">Sin líder de equipo</option>
                   {availableLeaders.map((leader) => (
                     <option key={leader.id} value={leader.id}>
                       {leader.full_name} ({leader.email})
@@ -1934,7 +2072,7 @@ const UserManagement = () => {
                   onChange={(e) => setTeamFormData({...teamFormData, team_lead_id: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
                 >
-                  <option value="">Sin líder asignado</option>
+                  <option value="">Sin líder de equipo</option>
                   {availableLeaders.map((leader) => (
                     <option key={leader.id} value={leader.id}>
                       {leader.full_name} ({leader.email})
@@ -2019,8 +2157,8 @@ const UserManagement = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Líder del Equipo
                   </label>
-                  <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-md">
-                    {selectedTeam.team_lead_name || 'Sin líder asignado'}
+                  <p className={`text-sm bg-gray-50 p-3 rounded-md ${selectedTeam.team_lead_id && selectedTeam.team_lead_name ? 'text-gray-900' : 'text-red-600 font-medium'}`}>
+                    {selectedTeam.team_lead_id && selectedTeam.team_lead_name ? selectedTeam.team_lead_name : 'Sin líder de equipo'}
                   </p>
                 </div>
 

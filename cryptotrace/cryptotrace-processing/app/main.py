@@ -48,21 +48,33 @@ async def upload_excel(
         df = pd.read_excel(file_location, engine='openpyxl')
         df.columns = df.columns.str.strip()
 
-        # 🔹 Renombrar columnas para compatibilidad con el backend
-        df = df.rename(columns={
+        # 🔹 Renombrar solo las columnas que existan
+        # Columnas esperadas: ORDER (opcional), Packing List, Part. N, Descripción, CANTIDAD, S/N, BULTOS TOTAL, OBSERVACIONES
+        rename_map = {
             "Packing List": "numero_albaran",
             "Part. N": "codigo_producto",
             "Descripción": "descripcion",
             "S/N": "numero_serie",
             "BULTOS TOTAL": "bultos_total",
-            "OBSERVACIONES": "observaciones"
-        })
+            "OBSERVACIONES": "observaciones",
+            "CANTIDAD": "cantidad",
+        }
+        df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+        # Si hay dos columnas CANTIDAD, pandas suele crear "cantidad" y "CANTIDAD.1"; nos quedamos con "cantidad"
 
-        df = df.dropna(subset=["numero_serie"])
+        # 🔹 Añadir columnas faltantes (Excel mínimo puede tener solo numero_albaran y codigo_producto)
+        for col in ["numero_albaran", "codigo_producto", "descripcion", "numero_serie", "bultos_total", "observaciones", "cantidad"]:
+            if col not in df.columns:
+                df[col] = None
+
         df = df.replace([float("nan"), float("inf"), float("-inf")], None)
 
-        # 🔹 Extraer lista de productos directamente del Excel
-        lineas_temporales = df[["numero_albaran", "codigo_producto", "descripcion", "numero_serie", "bultos_total", "observaciones"]].to_dict(orient="records")
+        # 🔹 Filtrar solo filas sin código de producto (no exigir S/N para Excel mínimo)
+        df = df[df["codigo_producto"].notna() & (df["codigo_producto"].astype(str).str.strip() != "")]
+        if df.empty:
+            raise HTTPException(status_code=400, detail="No se encontraron filas con Part. N (código de producto) en el archivo Excel.")
+
+        lineas_temporales = df[["numero_albaran", "codigo_producto", "descripcion", "numero_serie", "bultos_total", "observaciones", "cantidad"]].to_dict(orient="records")
 
         # 🔹 Filtrar registros inválidos antes de enviarlos al backend
         lineas_temporales = [
@@ -74,50 +86,68 @@ async def upload_excel(
             raise HTTPException(status_code=400, detail="No se encontraron datos válidos en el archivo Excel.")
 
         # 🔹 Transformar datos para que coincidan con la API del backend
-        numero_albaran = lineas_temporales[0].get('numero_albaran')
-        if not numero_albaran or (isinstance(numero_albaran, float) and pd.isna(numero_albaran)):
+        numero_albaran_raw = lineas_temporales[0].get('numero_albaran')
+        if numero_albaran_raw is None or (isinstance(numero_albaran_raw, float) and pd.isna(numero_albaran_raw)):
             raise HTTPException(status_code=400, detail="No se encontró número de albarán (Packing List) en el archivo Excel.")
+        # Normalizar (evitar "12345.0" si Packing List es numérico en Excel)
+        numero_albaran = str(int(numero_albaran_raw)) if isinstance(numero_albaran_raw, float) and numero_albaran_raw == int(numero_albaran_raw) else str(numero_albaran_raw).strip()
         
+        def _normalizar_celda(val):
+            """Convierte a string; si es float entero (ej. 12345.0) quita el .0 para que no salga en código_producto."""
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                return ""
+            if isinstance(val, float) and val == int(val):
+                return str(int(val)).strip()
+            return str(val).strip()
+
         articulos_transformados = []
         for linea in lineas_temporales:
             codigo = linea.get("codigo_producto")
             descripcion = linea.get("descripcion")
             numero_serie = linea.get("numero_serie")
-            
-            # Limpiar valores NaN/None
+
+            # Limpiar NaN/None
             if codigo and isinstance(codigo, float) and pd.isna(codigo):
                 codigo = None
             if descripcion and isinstance(descripcion, float) and pd.isna(descripcion):
                 descripcion = None
             if numero_serie and isinstance(numero_serie, float) and pd.isna(numero_serie):
                 numero_serie = None
-            
-            # Convertir a string y limpiar
-            codigo = str(codigo).strip() if codigo else ""
-            descripcion = str(descripcion).strip() if descripcion else ""
-            numero_serie = str(numero_serie).strip() if numero_serie else ""
-            
+
+            # Normalizar a string (evitar "12345.0" cuando Excel trae número en Part. N o S/N)
+            codigo = _normalizar_celda(codigo)
+            descripcion = _normalizar_celda(descripcion)
+            numero_serie = _normalizar_celda(numero_serie)
+
             # Asegurar que al menos haya código o descripción
             if not codigo and not descripcion:
                 print(f"⚠️ Saltando línea sin código ni descripción: {linea}")
                 continue
-            
-            # Si no hay código, usar descripción como código
+
+            # Código de producto: siempre Part. N si tiene valor; si no, Descripción
             if not codigo:
                 codigo = descripcion
+
+            # Cantidad: desde columna CANTIDAD del Excel (mínimo 1)
+            cantidad_raw = linea.get("cantidad")
+            try:
+                if cantidad_raw is None or (isinstance(cantidad_raw, float) and pd.isna(cantidad_raw)):
+                    cantidad = 1
+                else:
+                    cantidad = int(float(cantidad_raw))
+                    cantidad = max(1, cantidad)
+            except (ValueError, TypeError):
+                cantidad = 1
             
-            observaciones = linea.get("observaciones")
-            if observaciones and isinstance(observaciones, float) and pd.isna(observaciones):
-                observaciones = None
-            observaciones = str(observaciones).strip() if observaciones else ""
+            observaciones = _normalizar_celda(linea.get("observaciones"))
             
             articulos_transformados.append({
                 "codigo": codigo,
-                "codigo_producto": codigo,  # Incluir ambos campos para compatibilidad
-                "descripcion": descripcion if descripcion else codigo,  # Si no hay descripción, usar código
+                "codigo_producto": codigo,
+                "descripcion": descripcion if descripcion else codigo,
                 "numero_serie": numero_serie,
                 "observaciones": observaciones,
-                "cantidad": 1,
+                "cantidad": cantidad,
                 "cc": 1
             })
 

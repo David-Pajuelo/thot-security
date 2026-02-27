@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import datetime
 
 from django.db.models import Count, Q
@@ -11,7 +12,14 @@ from rest_framework.response import Response
 logger = logging.getLogger(__name__)
 
 from . import models, serializers
-from .permissions import HasHpsProfile, IsHpsAdmin, IsHpsAdminOrSelf, IsHpsAdminOrTeamLead, IsHpsAdminOrSecurityChief
+from .permissions import (
+    HasHpsProfile,
+    IsHpsAdmin,
+    IsHpsAdminOrSelf,
+    IsHpsAdminOrTeamLead,
+    IsHpsAdminOrTeamLeadEditingLedMember,
+    IsHpsAdminOrSecurityChief,
+)
 from .services import HpsRequestService
 from .extension_service import ExtensionService
 from django.http import FileResponse, Http404
@@ -68,13 +76,19 @@ class HpsTeamViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """
-        Filtrar equipos: por defecto solo mostrar activos, a menos que se solicite explícitamente
+        Filtrar equipos: admins ven todos; team_lead solo los que lidera.
+        Por defecto solo activos, salvo include_inactive=true.
         """
         qs = super().get_queryset()
-        # Si no se especifica 'include_inactive', solo mostrar equipos activos
         include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
         if not include_inactive:
             qs = qs.filter(is_active=True)
+        profile = getattr(self.request.user, "hps_profile", None)
+        role_name = profile.role.name if profile and profile.role else None
+        if role_name in ADMIN_ROLES:
+            return qs
+        if has_team_lead_permissions(self.request.user, profile):
+            return qs.filter(team_lead=self.request.user)
         return qs
 
     @action(detail=False, methods=["get"])
@@ -217,14 +231,31 @@ class HpsTeamViewSet(viewsets.ModelViewSet):
                 {'detail': 'El usuario no tiene perfil HPS'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # Si el equipo no tiene miembros activos, el nuevo será automáticamente el líder
+        had_no_members = not models.HpsTeamMembership.objects.filter(
+            team=team, is_active=True
+        ).exists()
         m, created = models.HpsTeamMembership.objects.get_or_create(
             team=team,
             user=user,
-            defaults={'is_active': True, 'is_lead': False},
+            defaults={'is_active': True, 'is_lead': had_no_members},
         )
         if not created and not m.is_active:
             m.is_active = True
-            m.save(update_fields=['is_active'])
+            m.is_lead = had_no_members
+            m.save(update_fields=['is_active', 'is_lead'])
+        elif created and had_no_members:
+            m.is_lead = True
+            m.save(update_fields=['is_lead'])
+        if had_no_members:
+            team.team_lead = user
+            team.save(update_fields=['team_lead'])
+            if profile.role and profile.role.name == 'member':
+                team_lead_role = models.HpsRole.objects.filter(name='team_lead').first()
+                if team_lead_role:
+                    profile.role = team_lead_role
+                    profile.save(update_fields=['role'])
+                    logger.info(f"Usuario {user.email} asignado como líder del equipo {team.name} (primer miembro)")
         return Response({'detail': 'Miembro añadido', 'user_id': user.id}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="members/remove")
@@ -241,6 +272,7 @@ class HpsTeamViewSet(viewsets.ModelViewSet):
                 {'detail': 'user_id es requerido'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        was_leader = team.team_lead_id == user_id
         updated = models.HpsTeamMembership.objects.filter(
             team=team,
             user_id=user_id,
@@ -250,6 +282,10 @@ class HpsTeamViewSet(viewsets.ModelViewSet):
                 {'detail': 'El usuario no pertenecía al equipo'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        if was_leader:
+            team.team_lead = None
+            team.save(update_fields=['team_lead'])
+            logger.info(f"Equipo {team.name} quedó sin líder al eliminar al usuario {user_id}")
         return Response({'detail': 'Miembro eliminado del equipo'})
 
     @action(detail=True, methods=["get"], url_path="available-members")
@@ -327,15 +363,17 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
         if role_name in ADMIN_ROLES:
             return qs
 
-        # Team lead: ver solicitudes de usuarios que comparten al menos un equipo con él (vía memberships)
+        # Team lead: ver solo solicitudes de usuarios de los equipos que LIDERA (no todos los que integra)
         if has_team_lead_permissions(self.request.user, profile):
-            user_team_ids = models.HpsTeamMembership.objects.filter(
-                user=self.request.user,
-                is_active=True,
-            ).values_list('team_id', flat=True)
-            if user_team_ids:
+            led_team_ids = list(
+                models.HpsTeam.objects.filter(
+                    team_lead=self.request.user,
+                    is_active=True,
+                ).values_list("id", flat=True)
+            )
+            if led_team_ids:
                 return qs.filter(
-                    user__hps_team_memberships__team_id__in=user_team_ids,
+                    user__hps_team_memberships__team_id__in=led_team_ids,
                     user__hps_team_memberships__is_active=True,
                 ).distinct()
 
@@ -1345,17 +1383,20 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
         if role_name in ADMIN_ROLES or role_name == "crypto":
             return qs
         
-        # Team leads ven perfiles de usuarios que comparten al menos un equipo (vía memberships)
+        # Team lead: solo ve perfiles de usuarios de los equipos que LIDERA (esta vista es para admin/jefes).
         if has_team_lead_permissions(self.request.user, profile):
-            user_team_ids = models.HpsTeamMembership.objects.filter(
-                user=self.request.user,
-                is_active=True,
-            ).values_list('team_id', flat=True)
-            if user_team_ids:
+            led_team_ids = list(
+                models.HpsTeam.objects.filter(
+                    team_lead=self.request.user,
+                    is_active=True,
+                ).values_list("id", flat=True)
+            )
+            if led_team_ids:
                 return qs.filter(
-                    user__hps_team_memberships__team_id__in=user_team_ids,
+                    user__hps_team_memberships__team_id__in=led_team_ids,
                     user__hps_team_memberships__is_active=True,
                 ).distinct()
+            return qs.none()
         
         # Otros usuarios (members) pueden ver todos los usuarios también
         # Según el requerimiento: todos los usuarios deben aparecer en la gestión
@@ -1369,11 +1410,44 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         """
-        Solo admins pueden crear, actualizar, desactivar y eliminar usuarios
+        List/retrieve: HasHpsProfile (get_queryset filtra por led para team_lead).
+        Create: admin o team_lead (solo en equipos que lidera; se valida en perform_create).
+        Update/destroy/activate/deactivate: admin o team_lead solo sobre usuarios de equipos que lidera.
         """
-        if self.action in ['create', 'update', 'partial_update', 'destroy', 'activate', 'deactivate', 'permanent_delete']:
-            return [permissions.IsAuthenticated(), IsHpsAdmin()]
+        if self.action == 'create':
+            return [permissions.IsAuthenticated(), IsHpsAdminOrTeamLead()]
+        if self.action in ['update', 'partial_update', 'destroy', 'activate', 'deactivate', 'permanent_delete']:
+            return [permissions.IsAuthenticated(), IsHpsAdminOrTeamLeadEditingLedMember()]
         return [permissions.IsAuthenticated(), HasHpsProfile()]
+    
+    def perform_create(self, serializer):
+        """Team_lead solo puede crear usuarios en equipos que lidera."""
+        from rest_framework.exceptions import PermissionDenied
+        profile = getattr(self.request.user, "hps_profile", None)
+        role_name = profile.role.name if profile and profile.role else None
+        if role_name not in ADMIN_ROLES and has_team_lead_permissions(self.request.user, profile):
+            led_ids = set(
+                models.HpsTeam.objects.filter(
+                    team_lead=self.request.user,
+                    is_active=True,
+                ).values_list("id", flat=True)
+            )
+            team_ids_raw = self.request.data.get("team_ids") or self.request.data.get("team_ids_writable")
+            team_id_single = self.request.data.get("team_id")
+            if team_id_single and not team_ids_raw:
+                team_ids_raw = [team_id_single]
+            if not team_ids_raw:
+                raise PermissionDenied("Debes indicar al menos un equipo. Solo puedes crear en equipos que lideras.")
+            for tid in (team_ids_raw if isinstance(team_ids_raw, list) else [team_ids_raw]):
+                if not tid:
+                    continue
+                try:
+                    uid = uuid.UUID(str(tid)) if led_ids else None
+                    if uid is not None and uid not in led_ids:
+                        raise PermissionDenied("Solo puedes crear usuarios en equipos que lideras.")
+                except (ValueError, TypeError):
+                    raise PermissionDenied("Equipo no válido. Solo puedes crear en equipos que lideras.")
+        serializer.save()
     
     def get_object(self):
         """

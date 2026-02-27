@@ -146,3 +146,45 @@ class IsHpsAdminOrSelf(permissions.BasePermission):
             return True
         return getattr(obj, "user_id", None) == getattr(request.user, "id", None)
 
+
+class IsHpsAdminOrTeamLeadEditingLedMember(permissions.BasePermission):
+    """
+    Para acciones de escritura sobre perfiles de usuario (update, destroy, activate, etc.):
+    - Admin: siempre permitido.
+    - Team lead: solo si el perfil pertenece a un usuario que está en al menos uno
+      de los equipos que el request.user LIDERA (no equipos donde solo es miembro).
+    """
+
+    message = "Solo puedes modificar usuarios de equipos que lideras."
+
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated
+
+    def has_object_permission(self, request, view, obj):
+        from .models import HpsTeam, HpsTeamMembership
+
+        if not getattr(request.user, "hps_profile", None):
+            return False
+        role_name = request.user.hps_profile.role.name if request.user.hps_profile.role else None
+        if role_name in ADMIN_ROLES:
+            return True
+        # Team lead: solo si el usuario del perfil está en un equipo que request.user lidera
+        led_team_ids = set(
+            HpsTeam.objects.filter(
+                team_lead=request.user,
+                is_active=True,
+            ).values_list("id", flat=True)
+        )
+        if not led_team_ids:
+            return False
+        target_user_id = getattr(obj, "user_id", None) or (obj.user.id if getattr(obj, "user", None) else None)
+        if not target_user_id:
+            return False
+        target_team_ids = set(
+            HpsTeamMembership.objects.filter(
+                user_id=target_user_id,
+                is_active=True,
+            ).values_list("team_id", flat=True)
+        )
+        return bool(led_team_ids & target_team_ids)
+

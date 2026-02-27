@@ -46,6 +46,9 @@ const useAuthStore = create(
                 team_name: payload.team_name || null,
                 team_ids: payload.team_ids || (payload.team_id ? [payload.team_id] : []),
                 teams: payload.teams || (payload.team_id && payload.team_name ? [{ id: payload.team_id, name: payload.team_name }] : []),
+                led_team_ids: payload.led_team_ids || [],
+                led_teams: payload.led_teams || [],
+                default_team_id: payload.default_team_id || null,
               };
             } else {
               throw new Error('No se pudo obtener información del usuario');
@@ -65,6 +68,9 @@ const useAuthStore = create(
             team_name: userData.team_name ?? (userData.teams && userData.teams[0]?.name) ?? null,
             team_ids: userData.team_ids ?? (userData.team_id ? [userData.team_id] : []),
             teams: userData.teams ?? (userData.team_id && userData.team_name ? [{ id: userData.team_id, name: userData.team_name }] : []),
+            led_team_ids: userData.led_team_ids ?? [],
+            led_teams: userData.led_teams ?? [],
+            default_team_id: userData.default_team_id ?? null,
           };
 
           // Actualizar localStorage con la información completa (ambos sistemas)
@@ -230,6 +236,9 @@ const useAuthStore = create(
             team_name: userData.team_name ?? (userData.teams && userData.teams[0]?.name) ?? null,
             team_ids: userData.team_ids ?? (userData.team_id ? [userData.team_id] : []),
             teams: userData.teams ?? (userData.team_id && userData.team_name ? [{ id: userData.team_id, name: userData.team_name }] : []),
+            led_team_ids: userData.led_team_ids ?? [],
+            led_teams: userData.led_teams ?? [],
+            default_team_id: userData.default_team_id ?? null,
           };
 
           // Actualizar localStorage con la información completa (ambos sistemas)
@@ -277,6 +286,9 @@ const useAuthStore = create(
             team_name: userData.team_name ?? (userData.teams && userData.teams[0]?.name) ?? null,
             team_ids: userData.team_ids ?? (userData.team_id ? [userData.team_id] : []),
             teams: userData.teams ?? (userData.team_id && userData.team_name ? [{ id: userData.team_id, name: userData.team_name }] : []),
+            led_team_ids: userData.led_team_ids ?? [],
+            led_teams: userData.led_teams ?? [],
+            default_team_id: userData.default_team_id ?? null,
           };
           
           // Guardar en ambos lugares para compatibilidad
@@ -352,6 +364,9 @@ const useAuthStore = create(
             team_name: userData.team_name ?? (userData.teams && userData.teams[0]?.name) ?? null,
             team_ids: userData.team_ids ?? (userData.team_id ? [userData.team_id] : []),
             teams: userData.teams ?? (userData.team_id && userData.team_name ? [{ id: userData.team_id, name: userData.team_name }] : []),
+            led_team_ids: userData.led_team_ids ?? [],
+            led_teams: userData.led_teams ?? [],
+            default_team_id: userData.default_team_id ?? null,
           };
           
           // Guardar en ambos lugares para compatibilidad
@@ -436,6 +451,9 @@ const useAuthStore = create(
               team_name: userData.team_name ?? (userData.teams && userData.teams[0]?.name) ?? null,
               team_ids: userData.team_ids ?? (userData.team_id ? [userData.team_id] : []),
               teams: userData.teams ?? (userData.team_id && userData.team_name ? [{ id: userData.team_id, name: userData.team_name }] : []),
+              led_team_ids: userData.led_team_ids ?? [],
+              led_teams: userData.led_teams ?? [],
+              default_team_id: userData.default_team_id ?? null,
             };
             
             // Guardar en ambos lugares para compatibilidad
@@ -532,7 +550,7 @@ const useAuthStore = create(
       canManageUsers: () => {
         const user = get().user;
         const role = user?.role || user?.role_name;
-        return role === 'admin' || role === 'team_lead' || role === 'jefe_seguridad' || role === 'jefe_seguridad_suplente';
+        return role === 'admin' || role === 'jefe_seguridad' || role === 'jefe_seguridad_suplente';
       },
 
       getUserRole: () => {

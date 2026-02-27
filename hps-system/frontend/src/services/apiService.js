@@ -254,6 +254,10 @@ export const userService = {
         team_name: teamName,
         team_ids: teamIds,
         teams,
+        default_team_id: profile.default_team_id ?? null,
+        hps_status: profile.hps_status ?? 'none',
+        hps_expires_at: profile.hps_expires_at ?? null,
+        pending_hps_requests: profile.pending_hps_requests ?? 0,
         is_active: profile.is_active !== undefined ? profile.is_active : (profile.user && profile.user.is_active),
         is_temp_password: profile.is_temp_password || false,
         must_change_password: profile.must_change_password || false,
@@ -379,10 +383,10 @@ export const apiUtils = {
     return user?.role === 'team_lead';
   },
   
-  // Verificar si el usuario puede gestionar usuarios
+  // Verificar si el usuario puede gestionar usuarios (solo admin y jefes de seguridad; team_lead usa Mi equipo)
   canManageUsers: () => {
     const user = apiUtils.getStoredUser();
-    return user?.role === 'admin' || user?.role === 'team_lead';
+    return user?.role === 'admin' || user?.role === 'jefe_seguridad' || user?.role === 'jefe_seguridad_suplente';
   }
 };
 

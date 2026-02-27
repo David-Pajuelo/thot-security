@@ -10,7 +10,7 @@
         // Escuchar mensajes desde CryptoTrace
         // Origen permitido: reemplazado en build; en dev sin inyección usamos fallback por puerto
         function getAllowedOrigin() {
-            const cryptoTraceUrl = '__CRYPTOTRACE_URL__';
+            const cryptoTraceUrl = 'http://localhost:3000';
             try {
                 if (cryptoTraceUrl.indexOf('__') !== -1) {
                     // Placeholder no reemplazado (dev sin prebuild): permitir localhost:3000

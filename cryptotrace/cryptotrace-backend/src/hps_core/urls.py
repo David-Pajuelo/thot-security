@@ -160,16 +160,25 @@ def hps_user_profile(request):
                 'must_change_password': False,
                 'team_id': None,
                 'team_name': None,
+                'team_ids': [],
+                'teams': [],
+                'led_team_ids': [],
+                'led_teams': [],
+                'default_team_id': None,
             }, status=status.HTTP_200_OK)
         
         profile = user.hps_profile
-        from .models import HpsTeamMembership
+        from .models import HpsTeamMembership, HpsTeam
         memberships = HpsTeamMembership.objects.filter(
             user=user,
             is_active=True,
         ).select_related('team').order_by('team__name')
         teams = [{'id': str(m.team_id), 'name': m.team.name if m.team else ''} for m in memberships if m.team]
         team_ids = [t['id'] for t in teams]
+        led_teams_qs = HpsTeam.objects.filter(team_lead=user, is_active=True).order_by('name')
+        led_teams = [{'id': str(t.id), 'name': t.name} for t in led_teams_qs]
+        led_team_ids = [t['id'] for t in led_teams]
+        default_team_id = str(profile.default_team_id) if profile.default_team_id else None
         return Response({
             'id': user.id,
             'email': user.email,
@@ -185,6 +194,9 @@ def hps_user_profile(request):
             'team_name': teams[0]['name'] if teams else (profile.team.name if profile.team else None),
             'team_ids': team_ids,
             'teams': teams,
+            'led_team_ids': led_team_ids,
+            'led_teams': led_teams,
+            'default_team_id': default_team_id,
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
