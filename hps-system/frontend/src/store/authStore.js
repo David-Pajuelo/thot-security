@@ -428,11 +428,9 @@ const useAuthStore = create(
         
         if (token && user) {
           console.log('initializeAuth - Hay token y usuario, verificando token...');
+          set({ verifying: true, loading: true });
           
-          // SIEMPRE verificar el token antes de establecer la sesión
           try {
-            set({ verifying: true, loading: true });
-            
             // Verificar token obteniendo el perfil del usuario
             const userData = await authService.getCurrentUser();
             console.log('initializeAuth - Token válido, usuario:', userData.email);
@@ -497,6 +495,9 @@ const useAuthStore = create(
               error: null,
               showChangePasswordModal: false
             });
+          } finally {
+            // Asegurar que nunca nos quedemos en "Verificando sesión..." si algo falla
+            set((state) => ({ verifying: false, loading: state.isAuthenticated ? state.loading : false }));
           }
         } else {
           // No hay token o usuario, estado no autenticado
@@ -544,7 +545,8 @@ const useAuthStore = create(
         const user = get().user;
         const role = user?.role || user?.role_name;
         console.log('isCrypto - User role:', role);
-        return role === 'crypto';
+        // Jefe de seguridad y suplente también pueden acceder a CryptoTrace (solo en dev hasta resolver sesión)
+        return role === 'crypto' || role === 'jefe_seguridad' || role === 'jefe_seguridad_suplente';
       },
 
       canManageUsers: () => {

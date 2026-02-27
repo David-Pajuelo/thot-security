@@ -9,10 +9,16 @@ const apiClient = axios.create({
   headers: config.defaultHeaders
 });
 
-// Interceptor para agregar token de autorización
+// Interceptor para agregar token de autorización (no en login/refresh para no enviar token caducado)
 apiClient.interceptors.request.use(
   (config) => {
-    // Usar accessToken (compartido con CryptoTrace) o hps_token (compatibilidad temporal)
+    const isAuthEndpoint = config.url && (
+      config.url.includes('/api/token/refresh/') ||
+      (config.url.includes('/api/token/') && !config.url.includes('verify'))
+    );
+    if (isAuthEndpoint) {
+      return config; // No añadir Bearer a login ni refresh; el backend rechazaría refresh con Bearer caducado
+    }
     const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;

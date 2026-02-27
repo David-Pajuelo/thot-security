@@ -2,6 +2,32 @@
 
 Usar este checklist cada vez que se actualice el código en el VPS (pull, despliegue nuevo, etc.) para no olvidar pasos críticos.
 
+**En la VPS** el despliegue es un único Docker con ambos bloques de servicio:
+- **HPS:** su frontend (React).
+- **CryptoTrace:** frontend (Next.js), backend (Django), OCR, processing, pdf-generator, Celery, etc.
+
+Si usas un solo `docker-compose` en la raíz que incluye ambos, ejecuta los comandos desde ese directorio. Si tienes dos composes separados (`cryptotrace/` y `hps-system/`), sigue las secciones que indican cada directorio.
+
+---
+
+## 0. Si se queda en "Removing" (red o contenedores)
+
+Al hacer `docker compose down` (o un rebuild que pare los servicios), puede aparecer algo como:
+
+```text
+⠋ Network cryptotrace_cryptotrace-network Removing
+```
+
+**Es normal que tarde 1–2 minutos.** Docker desconecta los contenedores de la red y luego la elimina. Espera un poco.
+
+- Si lleva **más de 4–5 minutos** sin avanzar: pulsa `Ctrl+C`, comprueba contenedores y redes, y si hace falta elimina la red a mano:
+  ```bash
+  docker ps -a
+  docker network ls
+  docker network rm cryptotrace_cryptotrace-network
+  ```
+- Para **evitar** este paso cuando solo quieres actualizar: no hagas `down`; usa solo `up -d --build` (véase sección 4). Así no se elimina la red.
+
 ---
 
 ## 1. Migraciones de base de datos (CryptoTrace backend)
@@ -130,7 +156,11 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 ## 4. Actualización completa tras un pull (varios servicios tocados)
 
-Cuando el merge incluye **backend, frontend CryptoTrace, processing, OCR, PDF, frontend HPS**, hay que reconstruir y levantar cada servicio cuyo código cambió. En el directorio **CryptoTrace** (`/opt/thot-security/cryptotrace`):
+Cuando el merge incluye **backend, frontend CryptoTrace, processing, OCR, PDF, frontend HPS**, hay que reconstruir y levantar cada servicio cuyo código cambió.
+
+**Recomendación:** no hagas `down` salvo que sea necesario; usa solo `up -d --build` para no quedarte en "Removing" de redes. Si en la VPS tienes **un solo compose** que incluye CryptoTrace + HPS, ejecuta todo desde el directorio de ese compose (por ejemplo `/opt/thot-security` si el compose está ahí). Si tienes **dos composes** (cryptotrace y hps-system por separado), sigue los bloques siguientes.
+
+### CryptoTrace (directorio `/opt/thot-security/cryptotrace`)
 
 ```bash
 cd /opt/thot-security/cryptotrace
@@ -159,14 +189,14 @@ cd /opt/thot-security/cryptotrace
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Luego **frontend HPS System** (otro proyecto, otro compose):
+### Frontend HPS System (directorio `/opt/thot-security/hps-system`)
 
 ```bash
 cd /opt/thot-security/hps-system
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build frontend
 ```
 
-**Collectstatic** (si cambió el frontend CryptoTrace):
+### Collectstatic (si cambió el frontend CryptoTrace):
 
 ```bash
 cd /opt/thot-security/cryptotrace

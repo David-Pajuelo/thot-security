@@ -1776,11 +1776,11 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        # Verificar permisos basándose en el rol de HPS (admin o crypto)
+        # Verificar permisos basándose en el rol de HPS (admin, crypto, jefe_seguridad, jefe_seguridad_suplente)
         has_admin_permissions = False
         if hasattr(user, 'hps_profile') and user.hps_profile and user.hps_profile.role:
             role_name = user.hps_profile.role.name
-            has_admin_permissions = role_name in ['admin', 'crypto']
+            has_admin_permissions = role_name in ['admin', 'crypto', 'jefe_seguridad', 'jefe_seguridad_suplente']
         # Fallback a is_superuser si no tiene perfil HPS (compatibilidad)
         if not has_admin_permissions:
             has_admin_permissions = user.is_superuser
@@ -2272,12 +2272,12 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
         dias = int(request.data.get('dias', 30))
         fecha_limite = timezone.now() - timedelta(days=dias)
         
-        # Solo el usuario puede limpiar sus propios registros, excepto admins/cryptos
-        # Verificar permisos basándose en el rol de HPS (admin o crypto)
+        # Solo el usuario puede limpiar sus propios registros, excepto admins/cryptos/jefes
+        # Verificar permisos basándose en el rol de HPS (admin, crypto, jefe_seguridad, jefe_seguridad_suplente)
         has_admin_permissions = False
         if hasattr(request.user, 'hps_profile') and request.user.hps_profile and request.user.hps_profile.role:
             role_name = request.user.hps_profile.role.name
-            has_admin_permissions = role_name in ['admin', 'crypto']
+            has_admin_permissions = role_name in ['admin', 'crypto', 'jefe_seguridad', 'jefe_seguridad_suplente']
         # Fallback a is_superuser si no tiene perfil HPS (compatibilidad)
         if not has_admin_permissions:
             has_admin_permissions = request.user.is_superuser
