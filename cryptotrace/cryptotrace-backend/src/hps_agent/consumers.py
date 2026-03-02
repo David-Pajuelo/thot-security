@@ -153,7 +153,23 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     'timestamp': datetime.now().isoformat()
                 }))
                 return
-            
+
+            # Manejar cambio de conversación tras Reset (evita depender de reconexión para la bienvenida)
+            if data.get('type') == 'use_conversation':
+                conv_id = data.get('conversation_id')
+                if conv_id and await self.chat_service.conversation_belongs_to_user(conv_id, str(self.user.id)):
+                    self.conversation_id = conv_id
+                    await self.send(text_data=json.dumps({
+                        'type': 'conversation_id',
+                        'conversation_id': conv_id,
+                        'timestamp': datetime.now().isoformat()
+                    }))
+                    await self._load_conversation_history()
+                    logger.info(f"✅ use_conversation: cambiado a {conv_id}, historial/bienvenida enviados")
+                else:
+                    logger.warning(f"⚠️ use_conversation ignorado: conv_id={conv_id} inválido o no pertenece al usuario")
+                return
+
             message = data.get('message', '').strip()
             
             if not message:

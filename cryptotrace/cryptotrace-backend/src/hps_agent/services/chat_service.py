@@ -58,7 +58,20 @@ class ChatService:
         except Exception as e:
             logger.error(f"Error creando conversación: {e}")
             return None
-    
+
+    @staticmethod
+    @database_sync_to_async
+    def conversation_belongs_to_user(conversation_id: str, user_id: str) -> bool:
+        """Comprobar si la conversación existe y pertenece al usuario (p. ej. tras reset)."""
+        try:
+            return ChatConversation.objects.filter(
+                id=conversation_id,
+                user_id=user_id
+            ).exists()
+        except Exception as e:
+            logger.warning(f"Error comprobando conversación: {e}")
+            return False
+
     @staticmethod
     @database_sync_to_async
     def log_user_message(

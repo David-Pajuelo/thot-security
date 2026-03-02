@@ -512,30 +512,37 @@ const Chat = () => {
         
         // Limpiar el chat actual
         clearChat();
-        
-        // Reconectar WebSocket para obtener nueva conversación
-        websocketService.disconnect();
-        
-        // Reconectar después de un breve delay
-        setTimeout(async () => {
-          try {
-            await websocketService.connect(token);
-            setIsConnected(true);
-            setConnectionStatus('Conectado');
-            
-            // Reconfigurar listener
-            if (listenerId.current) {
-              websocketService.removeListener(listenerId.current);
+        const newConversationId = data.conversation_id;
+
+        // Si el WebSocket está conectado, indicar al backend que use la nueva conversación
+        // para que envíe la bienvenida de inmediato (evita depender de reconexión)
+        if (websocketService.isConnected() && newConversationId) {
+          setConversationId(newConversationId);
+          websocketService.sendMessage({
+            type: 'use_conversation',
+            conversation_id: newConversationId
+          });
+          console.log('✅ use_conversation enviado, esperando bienvenida');
+        } else {
+          // Sin conexión: reconectar para que al conectar se cargue la nueva conversación
+          websocketService.disconnect();
+          setTimeout(async () => {
+            try {
+              await websocketService.connect(token);
+              setIsConnected(true);
+              setConnectionStatus('Conectado');
+              if (listenerId.current) {
+                websocketService.removeListener(listenerId.current);
+              }
+              listenerId.current = `chat-${Date.now()}`;
+              websocketService.addListener(listenerId.current, handleIncomingMessage);
+            } catch (error) {
+              const errorMsg = formatErrorForDisplay(error);
+              console.error('Error reconectando WebSocket:', errorMsg);
+              setConnectionStatus(`Error de reconexión: ${errorMsg}`);
             }
-            listenerId.current = `chat-${Date.now()}`;
-            websocketService.addListener(listenerId.current, handleIncomingMessage);
-          } catch (error) {
-            const errorMsg = formatErrorForDisplay(error);
-            console.error('Error reconectando WebSocket:', errorMsg);
-            setConnectionStatus(`Error de reconexión: ${errorMsg}`);
-          }
-        }, 1000);
-        
+          }, 1000);
+        }
         console.log('✅ Chat reseteado exitosamente');
       } else {
         const errorText = await response.text();
