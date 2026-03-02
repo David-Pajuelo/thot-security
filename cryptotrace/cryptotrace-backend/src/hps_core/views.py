@@ -1952,29 +1952,66 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='all')
     def all_conversations(self, request):
-        """Obtener todas las conversaciones (solo para administradores)"""
+        """
+        Obtener conversaciones paginadas y filtradas (solo administradores).
+        Query params: limit (default 20), offset (default 0), user_id, status, date_from, date_to.
+        Respuesta: { results, count, has_more }
+        """
         if not (request.user.is_staff or request.user.is_superuser):
             return Response(
                 {'detail': 'No tienes permiso para ver todas las conversaciones'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
-        limit = int(request.query_params.get('limit', 100))
-        conversations = models.ChatConversation.objects.select_related('user').order_by('-created_at')[:limit]
+        limit = max(1, min(100, int(request.query_params.get('limit', 20))))
+        offset = max(0, int(request.query_params.get('offset', 0)))
+        user_id = request.query_params.get('user_id')
+        status_filter = request.query_params.get('status')
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+
+        qs = models.ChatConversation.objects.select_related('user').order_by('-created_at')
+        if user_id:
+            qs = qs.filter(user_id=user_id)
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        if date_from:
+            try:
+                from django.utils.dateparse import parse_date
+                d = parse_date(date_from)
+                if d:
+                    qs = qs.filter(created_at__date__gte=d)
+            except (ValueError, TypeError):
+                pass
+        if date_to:
+            try:
+                from django.utils.dateparse import parse_date
+                d = parse_date(date_to)
+                if d:
+                    qs = qs.filter(created_at__date__lte=d)
+            except (ValueError, TypeError):
+                pass
+
+        total_count = qs.count()
+        conversations = qs[offset:offset + limit]
         serializer = self.get_serializer(conversations, many=True)
-        return Response(serializer.data)
+        return Response({
+            'results': serializer.data,
+            'count': total_count,
+            'has_more': (offset + len(conversations)) < total_count,
+        })
     
     @action(detail=False, methods=['post'], url_path='reset')
     def reset(self, request):
         """
         Resetear conversación: cerrar la conversación activa actual y crear una nueva.
-        Compatible con el frontend de hps-system.
+        Devuelve mensaje de bienvenida para mostrar de inmediato sin depender del WebSocket.
         
         POST /api/hps/chat/conversations/reset/
         """
         try:
             from django.utils import timezone
             import uuid
+            from hps_agent.services.role_config import RoleConfig
             
             # Cerrar todas las conversaciones activas del usuario
             active_conversations = models.ChatConversation.objects.filter(
@@ -1998,12 +2035,39 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
                 total_tokens_used=0
             )
             
+            # Obtener bienvenida para el usuario (mostrar de inmediato en frontend sin depender del WS)
+            profile = getattr(request.user, 'hps_profile', None) or models.HpsUserProfile.objects.filter(
+                user=request.user
+            ).select_related('role').first()
+            role_name = profile.role.name if profile and profile.role else 'member'
+            user_name = (request.user.first_name or request.user.email or 'Usuario').strip() or 'Usuario'
+            welcome_text = RoleConfig.get_welcome_message(role_name, user_name)
+            welcome_message = f"{welcome_text}\n\n**¿En qué puedo ayudarte hoy?** 😊"
+            suggestions = RoleConfig.get_suggestions_by_role(role_name)
+            
+            # Persistir bienvenida en la conversación (historial e idempotencia con WebSocket)
+            import json as _json
+            models.ChatMessage.objects.create(
+                conversation=new_conversation,
+                message_type='assistant',
+                content=welcome_message,
+                tokens_used=0,
+                response_time_ms=0,
+                is_error=False,
+                error_message='',
+                message_metadata=_json.dumps({'type': 'welcome', 'suggestions': suggestions or []})
+            )
+            new_conversation.total_messages = 1
+            new_conversation.save(update_fields=['total_messages'])
+            
             serializer = self.get_serializer(new_conversation)
             return Response({
                 'success': True,
                 'message': f'Conversación reseteada. {closed_count} conversación(es) cerrada(s).',
                 'conversation_id': str(new_conversation.id),
                 'session_id': new_session_id,
+                'welcome_message': welcome_message,
+                'suggestions': suggestions or [],
                 **serializer.data
             }, status=status.HTTP_200_OK)
             

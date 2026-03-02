@@ -188,13 +188,18 @@ const Chat = () => {
   // No necesitamos cargar desde el frontend
 
   const handleIncomingMessage = (data) => {
+    // Siempre leer estado actual del store (evita closures obsoletas tras Reset/reconexión)
+    const state = useChatStore.getState();
+    const currentMessages = Array.isArray(state.messages) ? state.messages : [];
+    const currentConversationId = state.conversationId;
+
     messageCountRef.current += 1;
     console.log(`Mensaje #${messageCountRef.current} recibido en Chat:`, data);
     console.log('Listener ID actual:', listenerId.current);
     console.log('Tipo de mensaje:', data.type);
     
     // Asegurar que el estado de conexión esté actualizado cuando recibimos mensajes
-    if (!isConnected && websocketService.isConnected()) {
+    if (!state.isConnected && websocketService.isConnected()) {
       console.log('✅ Actualizando estado de conexión desde mensaje recibido');
       setIsConnected(true);
       setConnectionStatus('Conectado');
@@ -209,8 +214,7 @@ const Chat = () => {
     if (data.type === 'conversation_id') {
       console.log('Recibido conversation_id:', data.conversation_id);
       setConversationId(data.conversation_id);
-      // Asegurar que estamos conectados cuando recibimos conversation_id
-      if (!isConnected) {
+      if (!state.isConnected) {
         setIsConnected(true);
         setConnectionStatus('Conectado');
       }
@@ -219,12 +223,12 @@ const Chat = () => {
     
     switch (data.type) {
       case 'user':
-        // Mensaje del usuario (del historial)
+        // Mensaje del usuario (del historial) — duplicados con estado actual
         const userMessageContent = data.message;
-        const existingUserMessage = messages.find(msg => 
+        const existingUserMessage = currentMessages.find(msg => 
           msg.content === userMessageContent && 
           msg.type === 'user' &&
-          Math.abs(new Date(msg.timestamp) - new Date(data.timestamp)) < 1000 // Dentro de 1 segundo
+          Math.abs(new Date(msg.timestamp) - new Date(data.timestamp)) < 1000
         );
         
         if (existingUserMessage) {
@@ -237,18 +241,18 @@ const Chat = () => {
           type: 'user',
           content: data.message,
           timestamp: new Date(data.timestamp),
-          conversationId: data.conversation_id || conversationId
+          conversationId: data.conversation_id || currentConversationId
         });
         break;
         
       case 'system':
       case 'assistant':
-        // Verificar si el mensaje ya existe para evitar duplicados
+        // Verificar duplicados con estado actual del store
         const messageContent = data.message;
-        const existingMessage = messages.find(msg => 
+        const existingMessage = currentMessages.find(msg => 
           msg.content === messageContent && 
           msg.type === data.type &&
-          Math.abs(new Date(msg.timestamp) - new Date(data.timestamp)) < 1000 // Dentro de 1 segundo
+          Math.abs(new Date(msg.timestamp) - new Date(data.timestamp)) < 1000
         );
         
         if (existingMessage) {
@@ -256,7 +260,6 @@ const Chat = () => {
           return;
         }
         
-        // Mensaje del sistema o asistente
         addMessage({
           id: Date.now(),
           type: data.type,
@@ -264,7 +267,7 @@ const Chat = () => {
           timestamp: new Date(data.timestamp),
           suggestions: data.suggestions || [],
           data: data.data || {},
-          conversationId: data.conversation_id || conversationId
+          conversationId: data.conversation_id || currentConversationId
         });
         
         // Desactivar indicador de "pensando" y limpiar timeout
@@ -288,12 +291,13 @@ const Chat = () => {
       case 'error':
         // Mensaje de error
         const errorContent = formatErrorForDisplay(data.message || data.error || data);
-        setMessages(prev => [...prev, {
+        addMessage({
           id: Date.now(),
           type: 'error',
           content: errorContent,
           timestamp: new Date(),
-        }]);
+          conversationId: data.conversation_id || currentConversationId
+        });
         
         // Desactivar indicador de "pensando" y limpiar timeout
         setIsTyping(false);
@@ -510,21 +514,32 @@ const Chat = () => {
         const data = await response.json();
         console.log('✅ Conversación reseteada:', data);
         
-        // Limpiar el chat actual
-        clearChat();
+        // Limpiar el chat actual (solo mensajes y conversationId; mantener estado de conexión)
+        setMessages([]);
         const newConversationId = data.conversation_id;
+        setConversationId(newConversationId);
 
-        // Si el WebSocket está conectado, indicar al backend que use la nueva conversación
-        // para que envíe la bienvenida de inmediato (evita depender de reconexión)
+        // Mostrar bienvenida de inmediato desde la respuesta (no depender del WebSocket)
+        if (data.welcome_message) {
+          addMessage({
+            id: Date.now(),
+            type: 'assistant',
+            content: data.welcome_message,
+            timestamp: new Date(),
+            suggestions: data.suggestions || [],
+            data: {},
+            conversationId: newConversationId
+          });
+        }
+
+        // Indicar al backend que use esta conversación (siguientes mensajes irán aquí)
         if (websocketService.isConnected() && newConversationId) {
-          setConversationId(newConversationId);
           websocketService.sendMessage({
             type: 'use_conversation',
             conversation_id: newConversationId
           });
-          console.log('✅ use_conversation enviado, esperando bienvenida');
+          console.log('✅ use_conversation enviado');
         } else {
-          // Sin conexión: reconectar para que al conectar se cargue la nueva conversación
           websocketService.disconnect();
           setTimeout(async () => {
             try {
@@ -646,14 +661,19 @@ const Chat = () => {
       {/* Header del Chat */}
       <div className="flex items-center justify-between p-3 sm:p-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50 rounded-t-lg">
         <div className="flex items-center space-x-3">
-          <div className="w-3 h-3 rounded-full flex-shrink-0 shadow-sm" 
-               style={{ backgroundColor: isConnected ? '#10B981' : '#EF4444' }}></div>
+          <div
+            className="w-3 h-3 rounded-full flex-shrink-0 shadow-sm transition-colors"
+            style={{
+              backgroundColor: isConnected ? '#10B981' : (connectionStatus === 'Conectando...' || (connectionStatus && connectionStatus.includes('Reconectando')) ? '#F59E0B' : '#EF4444')
+            }}
+            title={isConnected ? 'Conectado' : (connectionStatus === 'Conectando...' || (connectionStatus && connectionStatus.includes('Reconectando')) ? 'Reconectando…' : 'Desconectado')}
+          />
           <div>
             <h3 className="text-base sm:text-lg font-semibold text-gray-900">Asistente IA</h3>
             <p className={`text-xs sm:text-sm font-medium ${
-              isConnected ? 'text-green-600' : 'text-red-600'
+              isConnected ? 'text-green-600' : (connectionStatus === 'Conectando...' || (connectionStatus && connectionStatus.includes('Reconectando')) ? 'text-amber-600' : 'text-red-600')
             }`}>
-              {connectionStatus}
+              {connectionStatus || (isConnected ? 'Conectado' : 'Desconectado')}
             </p>
           </div>
         </div>
@@ -807,23 +827,22 @@ const Chat = () => {
         </div>
         
         {!isConnected && (
-          <div className="mt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between space-y-2 sm:space-y-0">
-            <p className="text-xs text-red-500">
+          <div className="mt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <p className="text-xs text-red-600 flex-1">
               Estado: {typeof connectionStatus === 'string' ? connectionStatus : formatErrorForDisplay(connectionStatus)}
               {reconnectAttempts > 0 && reconnectAttempts < 5 && (
                 <span className="ml-1">(Intento {reconnectAttempts}/5)</span>
               )}
             </p>
-            {reconnectAttempts >= 5 && (
+            {token && (
               <button
                 onClick={async () => {
                   setReconnectAttempts(0);
+                  setConnectionStatus('Conectando...');
                   try {
                     await websocketService.connect(token);
                     setIsConnected(true);
                     setConnectionStatus('Conectado');
-                    
-                    // Reconfigurar listener
                     if (listenerId.current) {
                       websocketService.removeListener(listenerId.current);
                     }
@@ -835,9 +854,9 @@ const Chat = () => {
                     setConnectionStatus(`Error de reconexión: ${errorMsg}`);
                   }
                 }}
-                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 transition-colors"
+                className="text-xs font-medium bg-blue-500 text-white px-3 py-1.5 rounded hover:bg-blue-600 transition-colors whitespace-nowrap"
               >
-                Reconectar
+                Reintentar conexión
               </button>
             )}
           </div>

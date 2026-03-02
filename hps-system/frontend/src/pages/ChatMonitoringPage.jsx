@@ -39,6 +39,11 @@ const ChatMonitoringPage = () => {
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const [showUserModal, setShowUserModal] = useState(false);
   const [showAllConversationsModal, setShowAllConversationsModal] = useState(false);
+  const [conversationsHasMore, setConversationsHasMore] = useState(false);
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false);
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
 
   useEffect(() => {
     if (canManageUsers) {
@@ -127,29 +132,93 @@ const ChatMonitoringPage = () => {
       const API_BASE_URL_FINAL = API_BASE_URL || 'http://localhost:8080';
       const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
       
-      // Cargar todas las conversaciones usando el nuevo endpoint
-      // TODO: Implementar endpoint en Django si es necesario
-      const response = await fetch(`${API_BASE_URL_FINAL}/api/hps/chat/conversations/all/?limit=100`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      // Construir query con paginación y filtros
+      const limit = 20;
+      const offset = 0;
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+      if (selectedUser) params.set('user_id', String(selectedUser));
+      if (filterStatus) params.set('status', filterStatus);
+      if (filterDateFrom) params.set('date_from', filterDateFrom);
+      if (filterDateTo) params.set('date_to', filterDateTo);
+      const response = await fetch(
+        `${API_BASE_URL_FINAL}/api/hps/chat/conversations/all/?${params.toString()}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         }
-      });
+      );
       
       if (response.ok) {
-        const conversations = await response.json();
+        const data = await response.json();
+        const conversations = data.results != null ? data.results : (Array.isArray(data) ? data : []);
         setAllConversations(conversations);
-        
-        // Extraer usuarios únicos
-        const users = [...new Set(conversations.map(conv => conv.user_id))];
-        setAllUsers(users);
+        setConversationsHasMore(Boolean(data.has_more));
+        // Extraer usuarios únicos desde las conversaciones cargadas
+        const byId = new Map();
+        conversations.forEach(c => {
+          if (c.user_id && !byId.has(c.user_id)) {
+            byId.set(c.user_id, {
+              id: c.user_id,
+              first_name: c.user_first_name,
+              last_name: c.user_last_name,
+              email: c.user_email
+            });
+          }
+        });
+        setAllUsers(Array.from(byId.values()));
       } else {
         console.error('Error cargando todas las conversaciones:', response.status);
         setAllConversations([]);
+        setConversationsHasMore(false);
       }
     } catch (error) {
       console.error('Error cargando todas las conversaciones:', error);
       setAllConversations([]);
+      setConversationsHasMore(false);
+    }
+  };
+
+  const loadMoreConversations = async () => {
+    const API_BASE_URL = process.env.REACT_APP_API_URL;
+    const API_BASE_URL_FINAL = API_BASE_URL || 'http://localhost:8080';
+    const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
+    if (!token || loadingMoreConversations || !conversationsHasMore) return;
+    setLoadingMoreConversations(true);
+    try {
+      const limit = 20;
+      const offset = allConversations.length;
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+      if (selectedUser) params.set('user_id', String(selectedUser));
+      if (filterStatus) params.set('status', filterStatus);
+      if (filterDateFrom) params.set('date_from', filterDateFrom);
+      if (filterDateTo) params.set('date_to', filterDateTo);
+      const response = await fetch(
+        `${API_BASE_URL_FINAL}/api/hps/chat/conversations/all/?${params.toString()}`,
+        { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        const nextResults = data.results != null ? data.results : [];
+        setAllConversations(prev => [...prev, ...nextResults]);
+        setConversationsHasMore(Boolean(data.has_more));
+        setAllUsers(prev => {
+          const byId = new Map((prev || []).map(u => [u.id, u]));
+          nextResults.forEach(c => {
+            if (c.user_id && !byId.has(c.user_id))
+              byId.set(c.user_id, { id: c.user_id, first_name: c.user_first_name, last_name: c.user_last_name, email: c.user_email });
+          });
+          return Array.from(byId.values());
+        });
+      } else {
+        setConversationsHasMore(false);
+      }
+    } catch (err) {
+      console.error('Error cargando más conversaciones:', err);
+      setConversationsHasMore(false);
+    } finally {
+      setLoadingMoreConversations(false);
     }
   };
 
@@ -566,15 +635,15 @@ const ChatMonitoringPage = () => {
                           
                           {/* Estado de la conversación */}
                           <div className="flex items-center space-x-2">
-                            {conversation.status === 'completed' ? (
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                <CheckCircleIcon className="h-3 w-3 mr-1" />
-                                Completada
-                              </span>
-                            ) : conversation.status === 'active' ? (
+                            {conversation.status === 'active' ? (
                               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                 <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse mr-1"></div>
                                 Activa
+                              </span>
+                            ) : conversation.status === 'archived' ? (
+                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                <XCircleIcon className="h-3 w-3 mr-1" />
+                                Archivada
                               </span>
                             ) : (
                               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
@@ -624,6 +693,18 @@ const ChatMonitoringPage = () => {
                 </div>
               )}
             </div>
+            {showAllConversations && conversationsHasMore && (
+              <div className="p-3 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+                <button
+                  type="button"
+                  onClick={loadMoreConversations}
+                  disabled={loadingMoreConversations}
+                  className="w-full py-2 text-sm font-medium text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed"
+                >
+                  {loadingMoreConversations ? 'Cargando…' : 'Cargar más conversaciones'}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Preguntas más frecuentes */}
@@ -883,6 +964,57 @@ const ChatMonitoringPage = () => {
                       </div>
                     </div>
                     
+                    {/* Filtros: estado y fechas */}
+                    <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                      <div>
+                        <label htmlFor="filter-status" className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+                        <select
+                          id="filter-status"
+                          value={filterStatus}
+                          onChange={(e) => setFilterStatus(e.target.value)}
+                          className="block w-full border border-gray-300 rounded-md shadow-sm py-1.5 px-2 text-sm"
+                        >
+                          <option value="">Todos</option>
+                          <option value="active">Activa</option>
+                          <option value="closed">Cerrada</option>
+                          <option value="archived">Archivada</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="filter-date-from" className="block text-sm font-medium text-gray-700 mb-1">Desde (fecha)</label>
+                        <input
+                          id="filter-date-from"
+                          type="date"
+                          value={filterDateFrom}
+                          onChange={(e) => setFilterDateFrom(e.target.value)}
+                          className="block w-full border border-gray-300 rounded-md shadow-sm py-1.5 px-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="filter-date-to" className="block text-sm font-medium text-gray-700 mb-1">Hasta (fecha)</label>
+                        <input
+                          id="filter-date-to"
+                          type="date"
+                          value={filterDateTo}
+                          onChange={(e) => setFilterDateTo(e.target.value)}
+                          className="block w-full border border-gray-300 rounded-md shadow-sm py-1.5 px-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setAllConversations([]);
+                            setConversationsHasMore(false);
+                            await loadAllConversations();
+                          }}
+                          className="w-full sm:w-auto inline-flex justify-center py-2 px-3 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                        >
+                          Aplicar filtros
+                        </button>
+                      </div>
+                    </div>
+                    
                     {/* Lista de conversaciones */}
                     <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-md">
                       <div className="divide-y divide-gray-200">
@@ -916,15 +1048,15 @@ const ChatMonitoringPage = () => {
                                     
                                     {/* Estado de la conversación */}
                                     <div className="flex items-center space-x-2">
-                                      {conversation.status === 'completed' ? (
-                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                          <CheckCircleIcon className="h-3 w-3 mr-1" />
-                                          Completada
-                                        </span>
-                                      ) : conversation.status === 'active' ? (
+                                      {conversation.status === 'active' ? (
                                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                           <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse mr-1"></div>
                                           Activa
+                                        </span>
+                                      ) : conversation.status === 'archived' ? (
+                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                          <XCircleIcon className="h-3 w-3 mr-1" />
+                                          Archivada
                                         </span>
                                       ) : (
                                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
@@ -971,6 +1103,18 @@ const ChatMonitoringPage = () => {
                           </div>
                         )}
                       </div>
+                      {conversationsHasMore && (
+                        <div className="p-2 border-t border-gray-200 bg-gray-50">
+                          <button
+                            type="button"
+                            onClick={loadMoreConversations}
+                            disabled={loadingMoreConversations}
+                            className="w-full py-2 text-sm font-medium text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+                          >
+                            {loadingMoreConversations ? 'Cargando…' : 'Cargar más'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
