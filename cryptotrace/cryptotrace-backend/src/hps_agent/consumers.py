@@ -449,17 +449,42 @@ class ChatConsumer(AsyncWebsocketConsumer):
             except Exception as welcome_error:
                 logger.error(f"❌ Error enviando mensaje de bienvenida de emergencia: {welcome_error}")
     
-    async def _send_welcome_message(self):
-        """Enviar mensaje de bienvenida - SIEMPRE se envía al frontend, incluso si falla al guardar"""
+    async def _conversation_has_welcome_message(self) -> bool:
+        """Comprueba si la conversación ya tiene un mensaje de bienvenida (evitar duplicados en reconexiones)."""
+        if not self.conversation_id:
+            return False
         try:
+            messages = await self.chat_service.get_conversation_messages(
+                self.conversation_id,
+                limit=10
+            )
+            welcome_marker = "¿En qué puedo ayudarte hoy?"
+            for msg in (messages or []):
+                meta = msg.get('metadata') or {}
+                if meta.get('type') == 'welcome':
+                    return True
+                if welcome_marker in (msg.get('message') or ''):
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"Al comprobar mensaje de bienvenida: {e}")
+            return False
+
+    async def _send_welcome_message(self):
+        """Enviar mensaje de bienvenida - solo si la conversación no tiene ya uno (evita duplicados en refresh/reconexión)."""
+        try:
+            if await self._conversation_has_welcome_message():
+                logger.info("Conversación ya tiene mensaje de bienvenida, no se reenvía")
+                return
+
             user_role = self.user_context.get('role', 'member')
             user_name = self.user_context.get('first_name', 'Usuario') or 'Usuario'
-            
+
             welcome_text = RoleConfig.get_welcome_message(user_role, user_name)
             suggestions = RoleConfig.get_suggestions_by_role(user_role)
-            
+
             welcome_message = f"{welcome_text}\n\n**¿En qué puedo ayudarte hoy?** 😊"
-            
+
             # CRÍTICO: Enviar mensaje al frontend PRIMERO (siempre debe llegar al usuario)
             await self.send(text_data=json.dumps({
                 'type': 'assistant',
