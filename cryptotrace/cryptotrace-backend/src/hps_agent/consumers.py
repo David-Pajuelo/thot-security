@@ -470,16 +470,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
             logger.warning(f"Al comprobar mensaje de bienvenida: {e}")
             return False
 
-    async def _send_welcome_message(self):
-        """Enviar mensaje de bienvenida - solo si la conversación o el usuario no tienen ya uno (evita duplicados en refresh/reconexión)."""
+    async def _send_welcome_message(self, force_after_reset: bool = False):
+        """Enviar mensaje de bienvenida. Si force_after_reset=True (p. ej. conversación vacía tras Reset), siempre se envía. Si no, se evita duplicado si la conversación o el usuario ya tienen uno."""
         try:
             if await self._conversation_has_welcome_message():
                 logger.info("Conversación ya tiene mensaje de bienvenida, no se reenvía")
                 return
-            user_id = str(self.user.id)
-            if await self.chat_service.user_has_welcome_in_any_conversation(user_id):
-                logger.info("Usuario ya tiene mensaje de bienvenida en alguna conversación, no se reenvía")
-                return
+            if not force_after_reset:
+                user_id = str(self.user.id)
+                if await self.chat_service.user_has_welcome_in_any_conversation(user_id):
+                    logger.info("Usuario ya tiene mensaje de bienvenida en alguna conversación, no se reenvía")
+                    return
 
             user_role = self.user_context.get('role', 'member')
             user_name = self.user_context.get('first_name', 'Usuario') or 'Usuario'
@@ -580,10 +581,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 # No enviar bienvenida si hay historial - solo se muestra en primera vez o después de reset
             else:
                 # Si no hay historial, enviar bienvenida (primera vez o después de reset)
-                logger.info("📜 No hay mensajes en el historial, enviando bienvenida")
-                await self._send_welcome_message()
+                logger.info("📜 No hay mensajes en el historial, enviando bienvenida (primera vez o post-reset)")
+                await self._send_welcome_message(force_after_reset=True)
                 
         except Exception as e:
             logger.error(f"❌ Error cargando historial: {e}")
             # Enviar bienvenida si hay error (por seguridad)
-            await self._send_welcome_message()
+            await self._send_welcome_message(force_after_reset=True)
