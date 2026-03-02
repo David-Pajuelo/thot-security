@@ -200,3 +200,20 @@ class ChatService:
             logger.error(f"Error obteniendo mensajes: {e}")
             return []
 
+    @staticmethod
+    @database_sync_to_async
+    def user_has_welcome_in_any_conversation(user_id: str) -> bool:
+        """True si el usuario tiene ya un mensaje de bienvenida en alguna conversación (evitar duplicados al reconectar)."""
+        try:
+            from django.db.models import Q
+            welcome_marker = "¿En qué puedo ayudarte hoy?"
+            has_welcome = ChatMessage.objects.filter(
+                conversation__user_id=user_id
+            ).filter(
+                Q(content__icontains=welcome_marker) | Q(message_metadata__icontains='"type":"welcome"')
+            ).exists()
+            return has_welcome
+        except Exception as e:
+            logger.warning(f"Error comprobando bienvenida por usuario: {e}")
+            return False
+

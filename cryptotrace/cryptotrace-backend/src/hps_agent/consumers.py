@@ -471,10 +471,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return False
 
     async def _send_welcome_message(self):
-        """Enviar mensaje de bienvenida - solo si la conversación no tiene ya uno (evita duplicados en refresh/reconexión)."""
+        """Enviar mensaje de bienvenida - solo si la conversación o el usuario no tienen ya uno (evita duplicados en refresh/reconexión)."""
         try:
             if await self._conversation_has_welcome_message():
                 logger.info("Conversación ya tiene mensaje de bienvenida, no se reenvía")
+                return
+            user_id = str(self.user.id)
+            if await self.chat_service.user_has_welcome_in_any_conversation(user_id):
+                logger.info("Usuario ya tiene mensaje de bienvenida en alguna conversación, no se reenvía")
                 return
 
             user_role = self.user_context.get('role', 'member')
