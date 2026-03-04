@@ -2,11 +2,20 @@ from django.contrib import admin
 from . import models
 
 
+@admin.register(models.HpsPermission)
+class HpsPermissionAdmin(admin.ModelAdmin):
+    list_display = ['codename', 'name', 'category']
+    search_fields = ['codename', 'name']
+    list_filter = ['category']
+    ordering = ['category', 'codename']
+
+
 @admin.register(models.HpsRole)
 class HpsRoleAdmin(admin.ModelAdmin):
     list_display = ['name', 'description', 'created_at']
     search_fields = ['name', 'description']
     list_filter = ['created_at']
+    filter_horizontal = ['granted_permissions']
 
 
 @admin.register(models.HpsTeam)

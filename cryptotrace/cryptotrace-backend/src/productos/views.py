@@ -23,6 +23,8 @@ from .serializers import (
 from django.db import models
 import json
 
+from hps_core.permissions import user_has_perm
+
 # Configurar logger
 logger = logging.getLogger(__name__)
 
@@ -1776,16 +1778,9 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        # Verificar permisos basándose en el rol de HPS (admin, crypto, jefe_seguridad, jefe_seguridad_suplente)
-        has_admin_permissions = False
-        if hasattr(user, 'hps_profile') and user.hps_profile and user.hps_profile.role:
-            role_name = user.hps_profile.role.name
-            has_admin_permissions = role_name in ['admin', 'crypto', 'jefe_seguridad', 'jefe_seguridad_suplente']
-        # Fallback a is_superuser si no tiene perfil HPS (compatibilidad)
-        if not has_admin_permissions:
-            has_admin_permissions = user.is_superuser
-        
-        base_queryset = LineaTemporalProducto.objects.all() if has_admin_permissions else LineaTemporalProducto.objects.filter(usuario=user)
+        # RBAC: permiso productos.ver_toda_linea_temporal (admin, crypto, jefes); si no, solo propios
+        can_see_all = user_has_perm(user, "productos.ver_toda_linea_temporal")
+        base_queryset = LineaTemporalProducto.objects.all() if can_see_all else LineaTemporalProducto.objects.filter(usuario=user)
         
         # Filtros opcionales por parámetros de consulta
         procesado = self.request.query_params.get('procesado', 'false').lower()
@@ -2272,17 +2267,9 @@ class LineaTemporalProductoViewSet(viewsets.ModelViewSet):
         dias = int(request.data.get('dias', 30))
         fecha_limite = timezone.now() - timedelta(days=dias)
         
-        # Solo el usuario puede limpiar sus propios registros, excepto admins/cryptos/jefes
-        # Verificar permisos basándose en el rol de HPS (admin, crypto, jefe_seguridad, jefe_seguridad_suplente)
-        has_admin_permissions = False
-        if hasattr(request.user, 'hps_profile') and request.user.hps_profile and request.user.hps_profile.role:
-            role_name = request.user.hps_profile.role.name
-            has_admin_permissions = role_name in ['admin', 'crypto', 'jefe_seguridad', 'jefe_seguridad_suplente']
-        # Fallback a is_superuser si no tiene perfil HPS (compatibilidad)
-        if not has_admin_permissions:
-            has_admin_permissions = request.user.is_superuser
-        
-        if has_admin_permissions:
+        # RBAC: permiso productos.limpiar_toda_linea_temporal para limpiar registros de todos
+        can_clean_all = user_has_perm(request.user, "productos.limpiar_toda_linea_temporal")
+        if can_clean_all:
             registros_antiguos = LineaTemporalProducto.objects.filter(
                 procesado=True,
                 created_at__lt=fecha_limite  # Asumiendo que tienes un campo created_at

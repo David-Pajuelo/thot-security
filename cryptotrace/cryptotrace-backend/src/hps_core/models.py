@@ -6,17 +6,43 @@ from django.db import models
 from django.utils import timezone
 
 
+class HpsPermission(models.Model):
+    """
+    Permiso RBAC: acción o recurso identificado por codename.
+    La autorización se basa en si el rol del usuario tiene este permiso asignado.
+    """
+
+    codename = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=255, help_text="Descripción legible del permiso")
+    category = models.CharField(max_length=50, blank=True, help_text="Ej: hps, productos, chat")
+
+    class Meta:
+        verbose_name = "Permiso HPS"
+        verbose_name_plural = "Permisos HPS"
+        ordering = ["category", "codename"]
+
+    def __str__(self) -> str:
+        return self.codename
+
+
 class HpsRole(models.Model):
     """
     Equivalente Django del modelo SQLAlchemy ``Role``.
 
     Mantiene permisos y metadatos específicos del dominio HPS sin interferir
     con los grupos/roles nativos de Django hasta completar la migración.
+    La fuente de verdad para autorización son los permisos en granted_permissions (M2M).
     """
 
     name = models.CharField(max_length=50, unique=True)
     description = models.TextField(blank=True)
-    permissions = models.JSONField(default=dict, blank=True)
+    permissions = models.JSONField(default=dict, blank=True)  # Legacy; no usado para autorización
+    granted_permissions = models.ManyToManyField(
+        "hps_core.HpsPermission",
+        related_name="roles",
+        blank=True,
+        verbose_name="Permisos concedidos",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

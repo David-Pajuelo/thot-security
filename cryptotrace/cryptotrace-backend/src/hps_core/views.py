@@ -13,21 +13,17 @@ logger = logging.getLogger(__name__)
 
 from . import models, serializers
 from .permissions import (
+    CanEditHpsProfileLedMember,
+    CanViewAuditLog,
     HasHpsProfile,
-    IsHpsAdmin,
-    IsHpsAdminOrSelf,
-    IsHpsAdminOrTeamLead,
-    IsHpsAdminOrTeamLeadEditingLedMember,
-    IsHpsAdminOrSecurityChief,
+    HasHpsPerm,
+    HasHpsPermAny,
+    user_has_perm,
 )
 from .services import HpsRequestService
 from .extension_service import ExtensionService
 from django.http import FileResponse, Http404
 import re
-
-
-ADMIN_ROLES = {"admin", "jefe_seguridad", "jefe_seguridad_suplente"}
-TEAM_ROLES = {"team_lead", "jefe_seguridad_suplente"}
 
 
 def is_user_team_lead(user):
@@ -41,55 +37,30 @@ def is_user_team_lead(user):
     return models.HpsTeam.objects.filter(team_lead=user, is_active=True).exists()
 
 
-def has_team_lead_permissions(user, profile=None):
-    """
-    Verificar si un usuario tiene permisos de líder de equipo.
-    Esto incluye:
-    - Usuarios con rol en TEAM_ROLES
-    - Usuarios que son líderes de algún equipo activo (independientemente de su rol)
-    """
-    if not profile:
-        profile = getattr(user, "hps_profile", None)
-    if not profile:
-        return False
-    
-    role_name = profile.role.name if profile.role else None
-    
-    # Verificar si tiene rol de líder
-    if role_name in TEAM_ROLES:
-        return True
-    
-    # Verificar si es líder de algún equipo activo
-    return is_user_team_lead(user)
-
-
 class HpsRoleViewSet(viewsets.ModelViewSet):
     queryset = models.HpsRole.objects.all()
     serializer_class = serializers.HpsRoleSerializer
-    permission_classes = [permissions.IsAuthenticated, IsHpsAdmin]
+    permission_classes = [permissions.IsAuthenticated, HasHpsPerm("hps.gestionar_roles")]
 
 
 class HpsTeamViewSet(viewsets.ModelViewSet):
     queryset = models.HpsTeam.objects.prefetch_related("memberships")
     serializer_class = serializers.HpsTeamSerializer
-    permission_classes = [permissions.IsAuthenticated, IsHpsAdminOrTeamLead]
+    permission_classes = [permissions.IsAuthenticated, HasHpsPermAny(["hps.ver_equipos_todos", "hps.ver_equipos_liderados"])]
 
     def get_queryset(self):
         """
-        Filtrar equipos: admins ven todos; team_lead solo los que lidera.
-        Por defecto solo activos, salvo include_inactive=true.
+        Filtrar equipos: quien tiene ver_equipos_todos ve todos; ver_equipos_liderados solo los que lidera.
         """
         qs = super().get_queryset()
         include_inactive = self.request.query_params.get('include_inactive', 'false').lower() == 'true'
         if not include_inactive:
             qs = qs.filter(is_active=True)
-        profile = getattr(self.request.user, "hps_profile", None)
-        role_name = profile.role.name if profile and profile.role else None
-        if role_name in ADMIN_ROLES:
+        if user_has_perm(self.request.user, "hps.ver_equipos_todos"):
             return qs
-        if has_team_lead_permissions(self.request.user, profile):
+        if user_has_perm(self.request.user, "hps.ver_equipos_liderados") and is_user_team_lead(self.request.user):
             return qs.filter(team_lead=self.request.user)
-        return qs
+        return qs.none()
 
     @action(detail=False, methods=["get"])
     def stats(self, request):
@@ -359,12 +330,9 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
         if not profile:
             return qs.none()
 
-        role_name = profile.role.name if profile.role else None
-        if role_name in ADMIN_ROLES:
+        if user_has_perm(self.request.user, "hps.ver_solicitudes_todas"):
             return qs
-
-        # Team lead: ver solo solicitudes de usuarios de los equipos que LIDERA (no todos los que integra)
-        if has_team_lead_permissions(self.request.user, profile):
+        if user_has_perm(self.request.user, "hps.ver_solicitudes_equipos") and is_user_team_lead(self.request.user):
             led_team_ids = list(
                 models.HpsTeam.objects.filter(
                     team_lead=self.request.user,
@@ -376,7 +344,6 @@ class HpsRequestViewSet(viewsets.ModelViewSet):
                     user__hps_team_memberships__team_id__in=led_team_ids,
                     user__hps_team_memberships__is_active=True,
                 ).distinct()
-
         return qs.filter(user=self.request.user)
 
     def perform_create(self, serializer):
@@ -893,19 +860,12 @@ class HpsTokenViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, HasHpsProfile]
     
     def get_permissions(self):
-        """
-        Solo admins y jefes de seguridad (incluyendo suplentes) pueden crear tokens.
-        La validación de tokens es pública.
-        """
+        """RBAC: crear_tokens para create; ver_todos_tokens para list/retrieve; validate público."""
         if self.action == 'create':
-            # Para crear tokens, se requiere ser admin o jefe de seguridad (incluyendo suplentes)
-            return [permissions.IsAuthenticated(), IsHpsAdminOrSecurityChief()]
-        elif self.action == 'validate_token':
-            # La validación de tokens es pública (AllowAny)
+            return [permissions.IsAuthenticated(), HasHpsPerm("hps.crear_tokens")]
+        if self.action == 'validate_token':
             return [permissions.AllowAny()]
-        else:
-            # Para otras acciones (list, retrieve, etc.), se requiere ser admin
-            return [permissions.IsAuthenticated(), IsHpsAdmin()]
+        return [permissions.IsAuthenticated(), HasHpsPerm("hps.ver_todos_tokens")]
     
     def perform_create(self, serializer):
         """Crear token HPS usando el método del modelo que genera automáticamente token y expires_at"""
@@ -978,7 +938,7 @@ class HpsTemplateViewSet(viewsets.ModelViewSet):
     """ViewSet para gestionar plantillas PDF de HPS"""
     queryset = models.HpsTemplate.objects.all()
     serializer_class = serializers.HpsTemplateSerializer
-    permission_classes = [permissions.IsAuthenticated, IsHpsAdminOrSecurityChief]
+    permission_classes = [permissions.IsAuthenticated, HasHpsPerm("hps.gestionar_plantillas")]
     
     def get_serializer_context(self):
         """Añadir request al contexto para generar URLs absolutas"""
@@ -1358,7 +1318,7 @@ class HpsTemplateViewSet(viewsets.ModelViewSet):
 class HpsAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = models.HpsAuditLog.objects.select_related("user")
     serializer_class = serializers.HpsAuditLogSerializer
-    permission_classes = [permissions.IsAuthenticated, IsHpsAdminOrSelf]
+    permission_classes = [permissions.IsAuthenticated, CanViewAuditLog]
 
 
 class HpsUserProfileViewSet(viewsets.ModelViewSet):
@@ -1373,18 +1333,11 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         profile = getattr(self.request.user, "hps_profile", None)
-        
         if not profile:
             return qs.none()
-        
-        role_name = profile.role.name if profile.role else None
-        
-        # Admins, jefes de seguridad y cryptos pueden ver todos los perfiles
-        if role_name in ADMIN_ROLES or role_name == "crypto":
+        if user_has_perm(self.request.user, "hps.ver_perfiles_todos"):
             return qs
-        
-        # Team lead: solo ve perfiles de usuarios de los equipos que LIDERA (esta vista es para admin/jefes).
-        if has_team_lead_permissions(self.request.user, profile):
+        if user_has_perm(self.request.user, "hps.ver_perfiles_equipos") and is_user_team_lead(self.request.user):
             led_team_ids = list(
                 models.HpsTeam.objects.filter(
                     team_lead=self.request.user,
@@ -1397,9 +1350,6 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
                     user__hps_team_memberships__is_active=True,
                 ).distinct()
             return qs.none()
-        
-        # Otros usuarios (members) pueden ver todos los usuarios también
-        # Según el requerimiento: todos los usuarios deben aparecer en la gestión
         return qs
     
     def get_serializer_context(self):
@@ -1409,23 +1359,20 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
         return context
     
     def get_permissions(self):
-        """
-        List/retrieve: HasHpsProfile (get_queryset filtra por led para team_lead).
-        Create: admin o team_lead (solo en equipos que lidera; se valida en perform_create).
-        Update/destroy/activate/deactivate: admin o team_lead solo sobre usuarios de equipos que lidera.
-        """
+        """RBAC: crear_perfil para create; CanEditHpsProfileLedMember para update/destroy/activate/deactivate."""
         if self.action == 'create':
-            return [permissions.IsAuthenticated(), IsHpsAdminOrTeamLead()]
+            return [permissions.IsAuthenticated(), HasHpsPerm("hps.crear_perfil")]
         if self.action in ['update', 'partial_update', 'destroy', 'activate', 'deactivate', 'permanent_delete']:
-            return [permissions.IsAuthenticated(), IsHpsAdminOrTeamLeadEditingLedMember()]
+            return [permissions.IsAuthenticated(), CanEditHpsProfileLedMember()]
         return [permissions.IsAuthenticated(), HasHpsProfile()]
     
     def perform_create(self, serializer):
-        """Team_lead solo puede crear usuarios en equipos que lidera."""
+        """Quien no tiene ver_perfiles_todos (admin) pero sí crear_perfil (team_lead) solo puede crear en equipos que lidera."""
         from rest_framework.exceptions import PermissionDenied
-        profile = getattr(self.request.user, "hps_profile", None)
-        role_name = profile.role.name if profile and profile.role else None
-        if role_name not in ADMIN_ROLES and has_team_lead_permissions(self.request.user, profile):
+        if user_has_perm(self.request.user, "hps.ver_perfiles_todos"):
+            serializer.save()
+            return
+        if user_has_perm(self.request.user, "hps.crear_perfil") and is_user_team_lead(self.request.user):
             led_ids = set(
                 models.HpsTeam.objects.filter(
                     team_lead=self.request.user,
@@ -1447,7 +1394,9 @@ class HpsUserProfileViewSet(viewsets.ModelViewSet):
                         raise PermissionDenied("Solo puedes crear usuarios en equipos que lideras.")
                 except (ValueError, TypeError):
                     raise PermissionDenied("Equipo no válido. Solo puedes crear en equipos que lideras.")
-        serializer.save()
+            serializer.save()
+            return
+        raise PermissionDenied("No tienes permiso para crear perfiles.")
     
     def get_object(self):
         """
@@ -1815,12 +1764,10 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        """Filtrar conversaciones por usuario autenticado, o todas si es admin/staff"""
+        """Filtrar conversaciones por usuario autenticado, o todas si tiene permiso RBAC o staff/superuser"""
         qs = super().get_queryset()
-        # Si es admin o staff, puede ver todas las conversaciones
-        if self.request.user.is_staff or self.request.user.is_superuser:
+        if user_has_perm(self.request.user, "chat.ver_todas_conversaciones") or self.request.user.is_staff or self.request.user.is_superuser:
             return qs
-        # Si no, solo sus propias conversaciones
         return qs.filter(user=self.request.user)
     
     def perform_create(self, serializer):
@@ -1935,7 +1882,7 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
         """Obtener conversación completa con todos los mensajes"""
         conversation = self.get_object()
         # Permitir acceso si es el dueño, admin o staff
-        if conversation.user != request.user and not (request.user.is_staff or request.user.is_superuser):
+        if conversation.user != request.user and not (user_has_perm(request.user, "chat.ver_todas_conversaciones") or request.user.is_staff or request.user.is_superuser):
             return Response(
                 {'detail': 'No tienes permiso para ver esta conversación'},
                 status=status.HTTP_403_FORBIDDEN
@@ -1957,7 +1904,7 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
         Query params: limit (default 20), offset (default 0), user_id, status, date_from, date_to.
         Respuesta: { results, count, has_more }
         """
-        if not (request.user.is_staff or request.user.is_superuser):
+        if not (user_has_perm(request.user, "chat.ver_todas_conversaciones") or request.user.is_staff or request.user.is_superuser):
             return Response(
                 {'detail': 'No tienes permiso para ver todas las conversaciones'},
                 status=status.HTTP_403_FORBIDDEN

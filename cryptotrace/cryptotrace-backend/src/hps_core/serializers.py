@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from . import models
+from .permissions import user_has_perm
 
 
 User = get_user_model()
@@ -672,31 +673,21 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         if role_writable:
             role_name = role_writable.strip() if isinstance(role_writable, str) else str(role_writable)
             
-            # Validar permisos para asignar el rol según el rol del usuario actual
+            # RBAC: solo quien tiene hps.asignar_rol puede elegir rol; reglas por rol (admin cualquier, jefes crypto/member, team_lead member)
             request = self.context.get('request')
             if request and request.user:
-                current_user = request.user
-                current_profile = getattr(current_user, 'hps_profile', None)
-                current_role_name = current_profile.role.name if current_profile and current_profile.role else None
-                
-                # Administrador puede asignar cualquier rol
-                if current_role_name == 'admin':
-                    pass  # Permitir cualquier rol
-                # Jefe de seguridad y jefe seguridad suplente solo pueden asignar 'crypto' y 'member'
-                elif current_role_name in ['jefe_seguridad', 'jefe_seguridad_suplente']:
-                    allowed_roles = ['crypto', 'member']
-                    if role_name not in allowed_roles:
-                        raise serializers.ValidationError({
-                            'role': 'Solo puedes asignar roles de crypto o miembro'
-                        })
-                elif current_role_name == 'team_lead':
-                    # Líderes de equipo no pueden crear usuarios con roles específicos
-                    # Por defecto asignar 'member'
+                if not user_has_perm(request.user, "hps.asignar_rol"):
                     role_name = 'member'
                 else:
-                    # Otros roles no pueden crear usuarios con roles específicos
-                    # Por defecto asignar 'member' o 'crypto'
-                    role_name = 'member'
+                    current_profile = getattr(request.user, 'hps_profile', None)
+                    current_role_name = current_profile.role.name if current_profile and current_profile.role else None
+                    if current_role_name == 'admin':
+                        pass
+                    elif current_role_name in ['jefe_seguridad', 'jefe_seguridad_suplente']:
+                        if role_name not in ['crypto', 'member']:
+                            raise serializers.ValidationError({'role': 'Solo puedes asignar roles de crypto o miembro'})
+                    else:
+                        role_name = 'member'
             
             try:
                 role = models.HpsRole.objects.get(name=role_name)
@@ -867,50 +858,25 @@ class HpsUserProfileSerializer(serializers.ModelSerializer):
         if role_writable and role_writable.strip():
             role_name = role_writable.strip()
             
-            # Validar permisos para asignar el rol según el rol del usuario actual
+            # RBAC: solo quien tiene hps.asignar_rol puede cambiar rol; reglas por rol (admin cualquier, jefes crypto/member, team_lead mantener actual)
             request = self.context.get('request')
-            logger.info(f"[ROLE UPDATE] request en context: {request is not None}, request.user: {request.user if request else None}")
             if request and request.user:
-                current_user = request.user
-                current_profile = getattr(current_user, 'hps_profile', None)
-                current_role_name = current_profile.role.name if current_profile and current_profile.role else None
-                
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"[ROLE VALIDATION] Usuario actual: {current_user.email}, Rol: {current_role_name}, Intentando asignar rol: {role_name}")
-                
-                # Administrador puede asignar cualquier rol
-                if current_role_name == 'admin':
-                    logger.info(f"[ROLE VALIDATION] Admin puede asignar cualquier rol")
-                    pass  # Permitir cualquier rol
-                # Jefe de seguridad y jefe seguridad suplente solo pueden asignar 'crypto' y 'member'
-                elif current_role_name in ['jefe_seguridad', 'jefe_seguridad_suplente']:
-                    allowed_roles = ['crypto', 'member']
-                    if role_name not in allowed_roles:
-                        logger.warning(f"[ROLE VALIDATION] Jefe de seguridad intentó asignar rol no permitido: {role_name}")
-                        raise serializers.ValidationError({
-                            'role': 'Solo puedes asignar roles de crypto o miembro'
-                        })
-                    logger.info(f"[ROLE VALIDATION] Jefe de seguridad puede asignar rol: {role_name}")
-                elif current_role_name == 'team_lead':
-                    # Líderes de equipo no pueden cambiar roles, pero pueden modificar otros datos
-                    # Si intentan cambiar el rol, no hacer nada (mantener el rol actual)
-                    logger.info(f"[ROLE VALIDATION] Líder de equipo intentó cambiar rol, ignorando cambio")
-                    role_name = instance.role.name if instance.role else None
-                    if not role_name:
-                        # Si no hay rol actual, asignar 'member' por defecto
-                        role_name = 'member'
+                if not user_has_perm(request.user, "hps.asignar_rol"):
+                    role_name = instance.role.name if instance.role else 'member'
                 else:
-                    # Otros roles no pueden cambiar roles
-                    logger.warning(f"[ROLE VALIDATION] Usuario sin permisos intentó cambiar rol: {current_role_name}")
-                    raise serializers.ValidationError({
-                        'role': 'No tienes permisos para cambiar roles de usuarios'
-                    })
+                    current_profile = getattr(request.user, 'hps_profile', None)
+                    current_role_name = current_profile.role.name if current_profile and current_profile.role else None
+                    logger.info(f"[ROLE VALIDATION] Usuario: {request.user.email}, Rol: {current_role_name}, Asignar: {role_name}")
+                    if current_role_name == 'admin':
+                        pass
+                    elif current_role_name in ['jefe_seguridad', 'jefe_seguridad_suplente']:
+                        if role_name not in ['crypto', 'member']:
+                            raise serializers.ValidationError({'role': 'Solo puedes asignar roles de crypto o miembro'})
+                    else:
+                        role_name = instance.role.name if instance.role else 'member'
             else:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"[ROLE VALIDATION] No se pudo obtener request o usuario del contexto")
-            
+                role_name = instance.role.name if instance.role else 'member'
+
             try:
                 role = models.HpsRole.objects.get(name=role_name)
                 instance.role = role

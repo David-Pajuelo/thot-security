@@ -132,6 +132,29 @@ Si en el repositorio están los cambios de **equipos liderados** (team_lead solo
 
 ---
 
+### Actualización: RBAC (permisos por roles)
+
+Si en el repositorio está la implementación de **RBAC** (modelo `HpsPermission`, permisos asignados a roles), en la VPS hay que aplicar las migraciones **0007** y **0008** de `hps_core` y reconstruir el backend. Guía detallada:
+
+- **Documento completo:** [ACTUALIZACION-VPS-RBAC.md](ACTUALIZACION-VPS-RBAC.md)
+
+**Pasos mínimos:**
+
+1. **Migrar:**
+   ```bash
+   cd /opt/thot-security/cryptotrace
+   docker compose -f docker-compose.prod.yml exec backend python manage.py migrate
+   ```
+
+2. **Reconstruir backend (y celery si usan la misma imagen):**
+   ```bash
+   docker compose -f docker-compose.prod.yml up -d --build backend
+   ```
+
+No se requieren nuevas variables de entorno.
+
+---
+
 ## 2. Archivos estáticos (si cambió el frontend)
 
 ```bash

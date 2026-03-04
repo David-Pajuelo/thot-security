@@ -1,19 +1,96 @@
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Set
 
 from rest_framework import permissions
 
 
-ADMIN_ROLES = {
-    "admin",
-    "jefe_seguridad",
-    "jefe_seguridad_suplente",
-}
+# -----------------------------------------------------------------------------
+# RBAC: helpers y clases basadas en permisos (HpsPermission / granted_permissions)
+# -----------------------------------------------------------------------------
 
-TEAM_LEADS = {
-    "team_lead",
-    "jefe_seguridad_suplente",
-}
+
+def user_has_perm(user, codename: str, use_superuser_bypass: bool = True) -> bool:
+    """
+    Comprueba si el usuario tiene el permiso indicado (vía rol HPS).
+    Si use_superuser_bypass es True, is_superuser tiene todos los permisos.
+    """
+    if not user or not user.is_authenticated:
+        return False
+    if use_superuser_bypass and getattr(user, "is_superuser", False):
+        return True
+    profile = getattr(user, "hps_profile", None)
+    if not profile or not getattr(profile, "role_id", None):
+        return False
+    role = getattr(profile, "role", None)
+    if not role:
+        return False
+    # Soporte para rol sin M2M (migraciones no aplicadas o roles legacy)
+    granted = getattr(role, "granted_permissions", None)
+    if granted is None:
+        return False
+    return granted.filter(codename=codename).exists()
+
+
+def get_user_permissions(user) -> Set[str]:
+    """Devuelve el conjunto de codenames de permisos del usuario (vía rol HPS)."""
+    if not user or not user.is_authenticated:
+        return set()
+    if getattr(user, "is_superuser", False):
+        # Opción: devolver todos los permisos conocidos; aquí devolvemos set sin cargar BD
+        from .models import HpsPermission
+        return set(HpsPermission.objects.values_list("codename", flat=True))
+    profile = getattr(user, "hps_profile", None)
+    if not profile or not getattr(profile, "role", None):
+        return set()
+    role = profile.role
+    granted = getattr(role, "granted_permissions", None)
+    if granted is None:
+        return set()
+    return set(granted.values_list("codename", flat=True))
+
+
+class HasHpsPerm(permissions.BasePermission):
+    """
+    Permite acceso si el usuario tiene el permiso (codename) indicado.
+    Uso: permission_classes = [IsAuthenticated, HasHpsPerm('hps.gestionar_roles')]
+    """
+
+    def __init__(self, codename: str, use_superuser_bypass: bool = True):
+        self.codename = codename
+        self.use_superuser_bypass = use_superuser_bypass
+
+    def has_permission(self, request, view):
+        return user_has_perm(request.user, self.codename, self.use_superuser_bypass)
+
+    def __repr__(self):
+        return f"HasHpsPerm({self.codename!r})"
+
+
+class HasHpsPermAny(permissions.BasePermission):
+    """
+    Permite acceso si el usuario tiene al menos uno de los permisos indicados.
+    Uso: permission_classes = [IsAuthenticated, HasHpsPermAny(['hps.ver_solicitudes_todas', 'hps.ver_solicitudes_equipos'])]
+    """
+
+    def __init__(self, codenames: Iterable[str], use_superuser_bypass: bool = True):
+        self.codenames = list(codenames)
+        self.use_superuser_bypass = use_superuser_bypass
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if self.use_superuser_bypass and getattr(request.user, "is_superuser", False):
+            return True
+        perms = get_user_permissions(request.user)
+        return any(c in perms for c in self.codenames)
+
+    def __repr__(self):
+        return f"HasHpsPermAny({self.codenames!r})"
+
+
+# -----------------------------------------------------------------------------
+# Contexto de perfil (usado por HasHpsProfile y por lógica que necesite role/team_ids)
+# -----------------------------------------------------------------------------
 
 
 @dataclass
@@ -64,95 +141,37 @@ class HasHpsProfile(permissions.BasePermission):
         return ctx.has_profile
 
 
-class IsHpsAdmin(permissions.BasePermission):
+# -----------------------------------------------------------------------------
+# Clases RBAC con object-level (audit log, editar perfil)
+# -----------------------------------------------------------------------------
+
+
+class CanViewAuditLog(permissions.BasePermission):
     """
-    Solo permite acceso completo a roles administradores de HPS.
+    RBAC: ver audit logs. Acceso a la vista si tiene ver_audit_logs_todos o ver_audit_logs_propios.
+    A nivel objeto: puede ver si tiene ver_audit_logs_todos o si el log es suyo.
     """
 
-    message = "Se requieren privilegios de administrador HPS."
+    message = "No tienes permiso para ver este registro de auditoría."
 
     def has_permission(self, request, view):
-        ctx = _extract_profile_context(request.user)
-        return ctx.has_profile and ctx.role_name in ADMIN_ROLES
-
-
-class IsHpsAdminOrTeamLead(permissions.BasePermission):
-    """
-    Permite acceso a administradores y líderes de equipo.
-    Un usuario es considerado líder si:
-    - Tiene rol "team_lead" o "jefe_seguridad_suplente"
-    - O es líder de algún equipo activo (independientemente de su rol)
-    """
-
-    message = "Solo administradores o líderes HPS pueden realizar esta acción."
-
-    def has_permission(self, request, view):
-        ctx = _extract_profile_context(request.user)
-        if not ctx.has_profile:
+        if not request.user or not request.user.is_authenticated:
             return False
-        
-        # Verificar si es admin
-        if ctx.role_name in ADMIN_ROLES:
-            return True
-        
-        # Verificar si tiene rol de líder
-        if ctx.role_name in TEAM_LEADS:
-            return True
-        
-        # Verificar si es líder de algún equipo activo (aunque su rol no sea team_lead)
-        from .models import HpsTeam
-        is_team_lead = HpsTeam.objects.filter(team_lead=request.user, is_active=True).exists()
-        return is_team_lead
-
-
-class IsHpsAdminOrSecurityChief(permissions.BasePermission):
-    """
-    Permite acceso a administradores y jefes de seguridad (incluyendo suplentes).
-    """
-
-    message = "Solo administradores o jefes de seguridad pueden realizar esta acción."
-
-    def has_permission(self, request, view):
-        ctx = _extract_profile_context(request.user)
-        if not ctx.has_profile:
-            return False
-        
-        # Verificar si es admin
-        if ctx.role_name in ADMIN_ROLES:
-            return True
-        
-        # Verificar si es jefe de seguridad o jefe de seguridad suplente
-        if ctx.role_name in {"jefe_seguridad", "jefe_seguridad_suplente"}:
-            return True
-        
-        return False
-
-
-class IsHpsAdminOrSelf(permissions.BasePermission):
-    """
-    Permite a administradores ver todo y al resto solo sus propias entidades.
-    ViewSets pueden usar este permiso en combinación con filtros.
-    """
-
-    message = "Solo puedes acceder a tus solicitudes HPS."
-
-    def has_permission(self, request, view):
-        ctx = _extract_profile_context(request.user)
-        return ctx.has_profile
+        return (
+            user_has_perm(request.user, "hps.ver_audit_logs_todos")
+            or user_has_perm(request.user, "hps.ver_audit_logs_propios")
+        )
 
     def has_object_permission(self, request, view, obj):
-        ctx = _extract_profile_context(request.user)
-        if ctx.role_name in ADMIN_ROLES:
+        if user_has_perm(request.user, "hps.ver_audit_logs_todos"):
             return True
         return getattr(obj, "user_id", None) == getattr(request.user, "id", None)
 
 
-class IsHpsAdminOrTeamLeadEditingLedMember(permissions.BasePermission):
+class CanEditHpsProfileLedMember(permissions.BasePermission):
     """
-    Para acciones de escritura sobre perfiles de usuario (update, destroy, activate, etc.):
-    - Admin: siempre permitido.
-    - Team lead: solo si el perfil pertenece a un usuario que está en al menos uno
-      de los equipos que el request.user LIDERA (no equipos donde solo es miembro).
+    RBAC: editar/activar/desactivar perfiles. Quien tiene ver_perfiles_todos (admin) puede todo;
+    quien tiene editar_perfil_equipo solo puede sobre usuarios de equipos que lidera.
     """
 
     message = "Solo puedes modificar usuarios de equipos que lideras."
@@ -165,10 +184,10 @@ class IsHpsAdminOrTeamLeadEditingLedMember(permissions.BasePermission):
 
         if not getattr(request.user, "hps_profile", None):
             return False
-        role_name = request.user.hps_profile.role.name if request.user.hps_profile.role else None
-        if role_name in ADMIN_ROLES:
+        if user_has_perm(request.user, "hps.ver_perfiles_todos"):
             return True
-        # Team lead: solo si el usuario del perfil está en un equipo que request.user lidera
+        if not user_has_perm(request.user, "hps.editar_perfil_equipo"):
+            return False
         led_team_ids = set(
             HpsTeam.objects.filter(
                 team_lead=request.user,
