@@ -171,24 +171,38 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 return
 
             message = data.get('message', '').strip()
-            
+
             if not message:
                 return
-            
+
             logger.info(f"📨 Mensaje recibido de {self.user.email}: {message[:100]}")
-            
+
+            # Crear conversación en BD solo al primer mensaje del usuario (no al conectar)
+            if not self.conversation_id:
+                user_id = str(self.user.id)
+                session_id = f"ws_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                new_conv_id = await self.chat_service.create_conversation(
+                    user_id, session_id, title=(message[:200].strip() or None)
+                )
+                if new_conv_id:
+                    self.conversation_id = new_conv_id
+                    await self.send(text_data=json.dumps({
+                        "type": "conversation_id",
+                        "conversation_id": new_conv_id,
+                        "timestamp": datetime.now().isoformat(),
+                    }))
+                    logger.info(f"✅ Conversación creada al primer mensaje: {new_conv_id}")
+
             # Inicializar start_time para calcular tiempo de respuesta
             start_time = datetime.now()
-            
-            # Guardar mensaje del usuario SIEMPRE (antes de procesar)
+
+            # Guardar mensaje del usuario (conversación ya existe o se acaba de crear)
             if self.conversation_id:
                 await self.chat_service.log_user_message(
                     self.conversation_id,
                     message
                 )
                 logger.info(f"✅ Mensaje del usuario guardado en conversación {self.conversation_id}")
-            else:
-                logger.warning("⚠️ No hay conversation_id, mensaje del usuario no guardado")
             
             # PRIMERO: Verificar si hay un flujo activo
             user_id = self.user_context.get("id")
@@ -394,72 +408,37 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return None
     
     async def _initialize_conversation(self):
-        """Inicializar o recuperar conversación"""
+        """
+        Solo recuperar conversación activa; no crear ninguna aquí.
+        La conversación se crea en BD cuando el usuario envía el primer mensaje.
+        La bienvenida se envía por WS pero no se guarda en BD.
+        """
         try:
             user_id = str(self.user.id)
-            session_id = f"ws_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            
             logger.info(f"🔍 Buscando conversación activa para usuario {user_id}")
-            
-            # Buscar conversación activa
+
             conversation_id = await self.chat_service.find_active_conversation(user_id)
             logger.info(f"🔍 Resultado búsqueda conversación: {conversation_id}")
-            
-            if not conversation_id:
-                logger.info(f"📝 Creando nueva conversación para usuario {user_id}")
-                # Crear nueva conversación
-                conversation_id = await self.chat_service.create_conversation(
-                    user_id,
-                    session_id,
-                    "Nueva conversación iniciada"
-                )
-                logger.info(f"✅ Nueva conversación creada: {conversation_id}")
-                
-                if conversation_id:
-                    # Establecer conversation_id ANTES de enviar mensaje de bienvenida
-                    self.conversation_id = conversation_id
-                    
-                    # Enviar conversation_id
-                    await self.send(text_data=json.dumps({
-                        'type': 'conversation_id',
-                        'conversation_id': conversation_id,
-                        'timestamp': datetime.now().isoformat()
-                    }))
-                    logger.info(f"✅ conversation_id enviado: {conversation_id}")
-                    
-                    # Enviar mensaje de bienvenida (ahora conversation_id está establecido)
-                    await self._send_welcome_message()
-                else:
-                    logger.warning("⚠️ No se pudo crear conversación, continuando sin ella")
-                    await self._send_welcome_message()
-            else:
+
+            if conversation_id:
                 logger.info(f"✅ Reutilizando conversación activa: {conversation_id}")
-                # Establecer conversation_id antes de cargar historial
                 self.conversation_id = conversation_id
-                
-                # Enviar conversation_id
                 await self.send(text_data=json.dumps({
-                    'type': 'conversation_id',
-                    'conversation_id': conversation_id,
-                    'timestamp': datetime.now().isoformat()
+                    "type": "conversation_id",
+                    "conversation_id": conversation_id,
+                    "timestamp": datetime.now().isoformat(),
                 }))
-                logger.info(f"✅ conversation_id enviado: {conversation_id}")
-                
-                # Cargar historial de mensajes (si no hay mensajes, enviará bienvenida)
                 await self._load_conversation_history()
-            
-            if conversation_id and not self.conversation_id:
-                # Fallback: asegurar que conversation_id esté establecido
-                self.conversation_id = conversation_id
-                logger.info(f"✅ Conversación inicializada: {conversation_id}")
             else:
-                logger.warning("⚠️ Continuando sin conversation_id")
-            
+                # No hay conversación activa: no crear en BD hasta que el usuario escriba.
+                self.conversation_id = None
+                logger.info("📭 Sin conversación activa; se creará al primer mensaje del usuario")
+                await self._send_welcome_message()
         except Exception as e:
             logger.error(f"❌ Error inicializando conversación: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            # Continuar sin conversación si hay error - enviar bienvenida de todas formas
+            self.conversation_id = None
             try:
                 await self._send_welcome_message()
             except Exception as welcome_error:
@@ -487,17 +466,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return False
 
     async def _send_welcome_message(self, force_after_reset: bool = False):
-        """Enviar mensaje de bienvenida. Si force_after_reset=True (p. ej. conversación vacía tras Reset), siempre se envía. Si no, se evita duplicado si la conversación o el usuario ya tienen uno."""
+        """Enviar mensaje de bienvenida solo por WebSocket (no se persiste en BD)."""
         try:
-            if await self._conversation_has_welcome_message():
-                logger.info("Conversación ya tiene mensaje de bienvenida, no se reenvía")
-                return
-            if not force_after_reset:
-                user_id = str(self.user.id)
-                if await self.chat_service.user_has_welcome_in_any_conversation(user_id):
-                    logger.info("Usuario ya tiene mensaje de bienvenida en alguna conversación, no se reenvía")
-                    return
-
             user_role = self.user_context.get('role', 'member')
             user_name = self.user_context.get('first_name', 'Usuario') or 'Usuario'
 
@@ -506,32 +476,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
             welcome_message = f"{welcome_text}\n\n**¿En qué puedo ayudarte hoy?** 😊"
 
-            # CRÍTICO: Enviar mensaje al frontend PRIMERO (siempre debe llegar al usuario)
+            # Enviar bienvenida solo por WebSocket; no se guarda en BD (solo se persisten mensajes de usuario y respuestas del bot)
             await self.send(text_data=json.dumps({
-                'type': 'assistant',
-                'message': welcome_message,
-                'timestamp': datetime.now().isoformat(),
-                'suggestions': suggestions,
-                'conversation_id': self.conversation_id
+                "type": "assistant",
+                "message": welcome_message,
+                "timestamp": datetime.now().isoformat(),
+                "suggestions": suggestions,
+                "conversation_id": self.conversation_id,
             }))
-            logger.info(f"✅ Mensaje de bienvenida enviado al frontend (conversation_id: {self.conversation_id})")
-            
-            # Intentar guardar mensaje de bienvenida en la base de datos (no crítico si falla)
-            if self.conversation_id:
-                try:
-                    await self.chat_service.log_assistant_message(
-                        self.conversation_id,
-                        welcome_message,
-                        tokens_used=0,
-                        response_time_ms=0,
-                        metadata={'type': 'welcome', 'suggestions': suggestions}
-                    )
-                    logger.info(f"✅ Mensaje de bienvenida guardado en conversación {self.conversation_id}")
-                except Exception as save_error:
-                    # No crítico: el mensaje ya se envió al frontend
-                    logger.warning(f"⚠️ No se pudo guardar mensaje de bienvenida en BD: {save_error}")
-            else:
-                logger.warning("⚠️ No hay conversation_id, mensaje de bienvenida no guardado (pero enviado al frontend)")
+            logger.info(f"✅ Mensaje de bienvenida enviado al frontend (no se persiste en BD)")
             
         except Exception as e:
             logger.error(f"❌ Error enviando mensaje de bienvenida: {e}")

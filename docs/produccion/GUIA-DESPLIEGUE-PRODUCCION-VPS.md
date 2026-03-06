@@ -491,8 +491,11 @@ docker compose -f docker-compose.prod.yml ps
 ### 6.2 Ejecutar Migraciones de Base de Datos (CryptoTrace)
 
 ```bash
-# Ejecutar migraciones
+# Ejecutar migraciones (incluye hps_core.0009_useraccesslog para registro de acceso)
 docker compose -f docker-compose.prod.yml exec backend python manage.py migrate
+
+# Ver estado de migraciones (opcional)
+docker compose -f docker-compose.prod.yml exec backend python manage.py showmigrations hps_core
 
 # Crear superusuario (opcional)
 docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
@@ -500,6 +503,8 @@ docker compose -f docker-compose.prod.yml exec backend python manage.py createsu
 # Recolectar archivos estáticos
 docker compose -f docker-compose.prod.yml exec backend python manage.py collectstatic --noinput
 ```
+
+**Migración de registro de acceso:** La migración `hps_core.0009_useraccesslog` crea la tabla de registro de accesos HTTP (UserAccessLog). Tras cada actualización de código que incluya nuevas migraciones, vuelve a ejecutar `migrate` (véase [Checklist de actualización VPS](CHECKLIST-ACTUALIZACION-VPS.md), sección «Migración 0009 – Registro de acceso»).
 
 ### 6.3 Construir y Levantar HPS System
 
@@ -775,7 +780,7 @@ docker compose -f docker-compose.prod.yml build
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-**Después de cada actualización de código**, seguir el **[Checklist de actualización VPS](CHECKLIST-ACTUALIZACION-VPS.md)** para ejecutar migraciones (p. ej. `python manage.py migrate` en el backend de CryptoTrace) y otros pasos necesarios.
+**Después de cada actualización de código**, seguir el **[Checklist de actualización VPS](CHECKLIST-ACTUALIZACION-VPS.md)** para ejecutar migraciones (p. ej. `python manage.py migrate` en el backend de CryptoTrace) y otros pasos necesarios. Incluye la migración **hps_core.0009_useraccesslog** (registro de acceso de usuarios); al aplicar `migrate` en la VPS se crea la tabla y el registro de accesos queda activo.
 
 ### 9.2 Ver Logs
 

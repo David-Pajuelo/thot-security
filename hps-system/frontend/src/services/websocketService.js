@@ -80,11 +80,8 @@ class WebSocketService {
           // Detener keepalive cuando se cierra la conexión
           this.stopKeepAlive();
           
-          // NO archivar conversación automáticamente en desconexiones no intencionales
-          // Solo archivar cuando es un cierre intencional (código 1000) o logout
-          // Esto evita perder el historial cuando el WebSocket se desconecta por timeout o error
-          if (event.code === 1000) {
-            // Cierre intencional (logout, etc.), archivar conversación
+          // Archivar solo en logout/cierre explícito, no cuando se cierra por "Nueva conexión" (reconexión)
+          if (event.code === 1000 && event.reason !== 'Nueva conexión') {
             this.archiveActiveConversation();
           }
           

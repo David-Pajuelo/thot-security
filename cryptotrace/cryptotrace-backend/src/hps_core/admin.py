@@ -1,5 +1,36 @@
+import csv
 from django.contrib import admin
+from django.http import HttpResponse
 from . import models
+
+
+class ExportCsvMixin:
+    """Mixin para exportar el queryset visible (o seleccionado) a CSV desde el admin."""
+
+    export_csv_columns = []  # Lista de (campo_o_atributo, cabecera_csv). Override en subclase.
+
+    @admin.action(description="Exportar a CSV")
+    def export_to_csv(self, request, queryset):
+        if not self.export_csv_columns:
+            self.message_user(request, "No hay columnas definidas para exportar.", level=40)
+            return
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = "attachment; filename=export.csv"
+        response.write("\ufeff")  # BOM para Excel UTF-8
+        writer = csv.writer(response, dialect="excel")
+        writer.writerow([h for _, h in self.export_csv_columns])
+        for obj in queryset:
+            row = []
+            for field_name, _ in self.export_csv_columns:
+                value = getattr(obj, field_name, None)
+                if value is None:
+                    row.append("")
+                elif hasattr(value, "isoformat"):
+                    row.append(value.isoformat())
+                else:
+                    row.append(str(value))
+            writer.writerow(row)
+        return response
 
 
 @admin.register(models.HpsPermission)
@@ -123,14 +154,102 @@ class HpsTokenAdmin(admin.ModelAdmin):
     is_valid.short_description = 'Válido'
 
 
+@admin.register(models.UserAccessLog)
+class UserAccessLogAdmin(ExportCsvMixin, admin.ModelAdmin):
+    list_display = ['created_at', 'user', 'method', 'path', 'status_code', 'ip_address', 'response_time_ms']
+    list_filter = ['method', 'status_code', 'created_at']
+    search_fields = ['path', 'user__email', 'ip_address']
+    raw_id_fields = ['user']
+    readonly_fields = ['user', 'path', 'method', 'status_code', 'ip_address', 'user_agent', 'response_time_ms', 'created_at']
+    date_hierarchy = 'created_at'
+    actions = ['export_to_csv']
+    export_csv_columns = [
+        ('created_at', 'Fecha'),
+        ('user_email', 'Usuario'),
+        ('method', 'Método'),
+        ('path', 'Ruta'),
+        ('status_code', 'Código'),
+        ('ip_address', 'IP'),
+        ('user_agent', 'User-Agent'),
+        ('response_time_ms', 'Tiempo (ms)'),
+    ]
+
+    def user_email(self, obj):
+        return obj.user.email if obj.user_id else ""
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def export_to_csv(self, request, queryset):
+        # Columnas con atributo derivado user_email
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = "attachment; filename=registro_acceso.csv"
+        response.write("\ufeff")
+        writer = csv.writer(response, dialect="excel")
+        writer.writerow([h for _, h in self.export_csv_columns])
+        for obj in queryset:
+            row = []
+            for field_name, _ in self.export_csv_columns:
+                if field_name == "user_email":
+                    value = obj.user.email if obj.user_id else ""
+                else:
+                    value = getattr(obj, field_name, None)
+                if value is None:
+                    row.append("")
+                elif hasattr(value, "isoformat"):
+                    row.append(value.isoformat())
+                else:
+                    row.append(str(value))
+            writer.writerow(row)
+        return response
+
+
 @admin.register(models.HpsAuditLog)
-class HpsAuditLogAdmin(admin.ModelAdmin):
+class HpsAuditLogAdmin(ExportCsvMixin, admin.ModelAdmin):
     list_display = ['action', 'user', 'table_name', 'created_at']
     list_filter = ['action', 'table_name', 'created_at']
     search_fields = ['action', 'table_name', 'user__username', 'user__email']
     raw_id_fields = ['user']
     readonly_fields = ['created_at']
     date_hierarchy = 'created_at'
+    actions = ['export_to_csv']
+    export_csv_columns = [
+        ('created_at', 'Fecha'),
+        ('user_email', 'Usuario'),
+        ('action', 'Acción'),
+        ('table_name', 'Tabla'),
+        ('record_id', 'ID Registro'),
+        ('ip_address', 'IP'),
+        ('user_agent', 'User-Agent'),
+    ]
+
+    def user_email(self, obj):
+        return obj.user.email if obj.user_id else ""
+
+    def export_to_csv(self, request, queryset):
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = "attachment; filename=audit_log.csv"
+        response.write("\ufeff")
+        writer = csv.writer(response, dialect="excel")
+        writer.writerow([h for _, h in self.export_csv_columns])
+        for obj in queryset:
+            row = []
+            for field_name, _ in self.export_csv_columns:
+                if field_name == "user_email":
+                    value = obj.user.email if obj.user_id else ""
+                else:
+                    value = getattr(obj, field_name, None)
+                if value is None:
+                    row.append("")
+                elif hasattr(value, "isoformat"):
+                    row.append(value.isoformat())
+                else:
+                    row.append(str(value))
+            writer.writerow(row)
+        return response
 
 
 @admin.register(models.HpsUserMapping)

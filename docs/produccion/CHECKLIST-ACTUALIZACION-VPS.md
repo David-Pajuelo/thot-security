@@ -132,6 +132,21 @@ Si en el repositorio están los cambios de **equipos liderados** (team_lead solo
 
 ---
 
+### Migración 0009 – Registro de acceso (UserAccessLog)
+
+Si en el repositorio está la migración **`hps_core.0009_useraccesslog`** (tabla de registro de acceso HTTP para logs de calidad y auditoría), en la VPS hay que aplicarla con el mismo `migrate` general:
+
+```bash
+cd /opt/thot-security/cryptotrace
+docker compose -f docker-compose.prod.yml exec backend python manage.py migrate
+# Verificar que hps_core 0009 esté aplicada (opcional):
+docker compose -f docker-compose.prod.yml exec backend python manage.py showmigrations hps_core
+```
+
+No requiere nuevas variables de entorno. El middleware de acceso ya está activo en el backend; tras la migración se empezará a registrar cada petición en **UserAccessLog** (visible y exportable desde el admin de Django).
+
+---
+
 ### Actualización: RBAC (permisos por roles)
 
 Si en el repositorio está la implementación de **RBAC** (modelo `HpsPermission`, permisos asignados a roles), en la VPS hay que aplicar las migraciones **0007** y **0008** de `hps_core` y reconstruir el backend. Guía detallada:
@@ -230,7 +245,7 @@ docker compose -f docker-compose.prod.yml exec backend python manage.py collects
 
 ## Resumen rápido
 
-1. **`migrate`** → obligatorio tras cambios en modelos o al subir migraciones nuevas (incl. HPS múltiples equipos y migración 0006 `default_team`).
+1. **`migrate`** → obligatorio tras cambios en modelos o al subir migraciones nuevas (incl. HPS múltiples equipos, migración 0006 `default_team`, 0009 registro de acceso UserAccessLog).
 2. **`collectstatic`** → si hubo cambios en estáticos (frontend CryptoTrace).
 3. **Reinicio/rebuild** → según cambios en env o en imágenes.
 4. **Actualización HPS (equipos liderados / equipo predeterminado):** además de `migrate`, reiniciar o reconstruir **backend CryptoTrace** y **reconstruir y levantar frontend HPS** (ver sección «Actualización: Equipos liderados y equipo predeterminado»).

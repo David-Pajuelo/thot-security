@@ -158,14 +158,12 @@ class ChatService:
         satisfaction_rating: Optional[int] = None,
         satisfaction_feedback: Optional[str] = None
     ) -> bool:
-        """Completar conversación"""
+        """Completar conversación (satisfaction_rating/feedback no están en el modelo; se ignoran)."""
         try:
+            from django.utils import timezone
             conversation = ChatConversation.objects.get(id=conversation_id)
             conversation.status = 'closed'
-            if satisfaction_rating is not None:
-                conversation.satisfaction_rating = satisfaction_rating
-            if satisfaction_feedback:
-                conversation.satisfaction_feedback = satisfaction_feedback
+            conversation.closed_at = timezone.now()
             conversation.save()
             logger.info(f"✅ Conversación completada: {conversation_id}")
             return True

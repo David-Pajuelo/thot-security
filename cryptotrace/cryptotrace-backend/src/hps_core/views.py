@@ -1992,21 +1992,7 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
             welcome_message = f"{welcome_text}\n\n**¿En qué puedo ayudarte hoy?** 😊"
             suggestions = RoleConfig.get_suggestions_by_role(role_name)
             
-            # Persistir bienvenida en la conversación (historial e idempotencia con WebSocket)
-            import json as _json
-            models.ChatMessage.objects.create(
-                conversation=new_conversation,
-                message_type='assistant',
-                content=welcome_message,
-                tokens_used=0,
-                response_time_ms=0,
-                is_error=False,
-                error_message='',
-                message_metadata=_json.dumps({'type': 'welcome', 'suggestions': suggestions or []})
-            )
-            new_conversation.total_messages = 1
-            new_conversation.save(update_fields=['total_messages'])
-            
+            # No persistir bienvenida: solo mensajes de usuario y respuestas del bot se guardan
             serializer = self.get_serializer(new_conversation)
             return Response({
                 'success': True,

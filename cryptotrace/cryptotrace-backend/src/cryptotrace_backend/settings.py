@@ -92,6 +92,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'hps_core.middleware.AccessLogMiddleware',  # Registro de accesos (UserAccessLog)
 ]
 
 # CORS_ALLOWED_ORIGINS debe venir de variable de entorno
@@ -218,6 +219,9 @@ LOGGING = {
             'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
             'style': '{',
         },
+        'json': {
+            '()': 'cryptotrace_backend.logging_formatters.JsonFormatter',
+        },
     },
     'handlers': {
         'console': {
@@ -231,25 +235,31 @@ LOGGING = {
             'filename': os.path.join(BASE_DIR, 'logs', 'django.log'),
             'formatter': 'verbose',
         },
+        'file_json': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'django_structured.json'),
+            'formatter': 'json',
+        },
     },
     'loggers': {
         'django': {
-            'handlers': ['console', 'file'],
+            'handlers': ['console', 'file', 'file_json'],
             'level': 'INFO',
             'propagate': True,
         },
         'hps_agent': {
-            'handlers': ['console', 'file'],
+            'handlers': ['console', 'file', 'file_json'],
             'level': 'INFO',
             'propagate': False,
         },
         'hps_core': {
-            'handlers': ['console', 'file'],
+            'handlers': ['console', 'file', 'file_json'],
             'level': 'INFO',
             'propagate': False,
         },
         'celery': {
-            'handlers': ['console', 'file'],
+            'handlers': ['console', 'file', 'file_json'],
             'level': 'INFO',
             'propagate': False,
         },
