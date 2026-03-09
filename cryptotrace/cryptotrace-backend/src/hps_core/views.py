@@ -2,7 +2,8 @@ import logging
 import uuid
 from datetime import datetime
 
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
+from django.contrib.auth import get_user_model
 from django.http import FileResponse
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
@@ -1796,34 +1797,64 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['post'], url_path='archive-active')
     def archive_active(self, request):
-        """Archivar conversación activa del usuario actual"""
+        """
+        Cerrar la conversación activa del usuario (p. ej. al cerrar pestaña o logout) y crear una nueva vacía.
+        Regla única: siempre hay como máximo una conversación activa por usuario; al cerrar esa, se crea otra (conv 3)
+        para que el usuario no acumule muchas conversaciones "huérfanas" y en monitorización se vea 1 activa + N cerradas.
+        """
         try:
+            from django.utils import timezone
+            import uuid
+
             conversation = models.ChatConversation.objects.filter(
                 user=request.user,
                 status='active'
             ).order_by('-created_at').first()
             
             if not conversation:
+                # Sin activa: crear una nueva para que siempre haya exactamente una
+                new_session_id = str(uuid.uuid4())
+                new_conversation = models.ChatConversation.objects.create(
+                    user=request.user,
+                    session_id=new_session_id,
+                    title='Nueva conversación',
+                    status='active',
+                    total_messages=0,
+                    total_tokens_used=0
+                )
                 return Response({
                     'success': True,
-                    'message': 'No hay conversación activa para archivar',
-                    'archived_conversation_id': None
+                    'message': 'No había conversación activa; creada una nueva.',
+                    'archived_conversation_id': None,
+                    'conversation_id': str(new_conversation.id),
                 }, status=status.HTTP_200_OK)
-            
-            conversation.status = 'archived'
-            conversation.closed_at = datetime.now()
+
+            conversation.status = 'closed'
+            conversation.closed_at = timezone.now()
             conversation.save()
-            
-            logger.info(f"Conversación {conversation.id} archivada para usuario {request.user.id}")
+            logger.info(f"Conversación {conversation.id} cerrada (archive-active) para usuario {request.user.id}")
+
+            # Crear nueva conversación activa (misma lógica que reset): conv 1+2 cerradas, conv 3 abierta
+            new_session_id = str(uuid.uuid4())
+            new_conversation = models.ChatConversation.objects.create(
+                user=request.user,
+                session_id=new_session_id,
+                title='Nueva conversación',
+                status='active',
+                total_messages=0,
+                total_tokens_used=0
+            )
+            logger.info(f"Conversación {new_conversation.id} creada como nueva activa para usuario {request.user.id}")
             
             return Response({
                 'success': True,
-                'message': 'Conversación archivada exitosamente',
-                'archived_conversation_id': str(conversation.id)
+                'message': 'Conversación cerrada exitosamente',
+                'archived_conversation_id': str(conversation.id),
+                'conversation_id': str(new_conversation.id),
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
-            logger.error(f"Error archivando conversación: {e}")
+            logger.error(f"Error en archive-active: {e}")
             return Response(
                 {'detail': 'Error interno del servidor'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -1879,19 +1910,24 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['get'], url_path='full')
     def full(self, request, pk=None):
-        """Obtener conversación completa con todos los mensajes"""
+        """Obtener conversación completa con todos los mensajes (sin mensajes de bienvenida)."""
         conversation = self.get_object()
-        # Permitir acceso si es el dueño, admin o staff
         if conversation.user != request.user and not (user_has_perm(request.user, "chat.ver_todas_conversaciones") or request.user.is_staff or request.user.is_superuser):
             return Response(
                 {'detail': 'No tienes permiso para ver esta conversación'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
-        messages = conversation.messages.all().order_by('created_at')
+        messages_qs = conversation.messages.all().order_by('created_at')
+        # Excluir mensajes de bienvenida (por datos legacy o si se guardaron en el pasado)
+        welcome_phrase = "¿En qué puedo ayudarte hoy?"
+        messages = [m for m in messages_qs if not (
+            m.message_type == 'assistant' and (
+                (m.content or '').strip().endswith(welcome_phrase) or
+                (m.message_metadata or '').find('"type":"welcome"') >= 0
+            )
+        )]
         message_serializer = serializers.ChatMessageSerializer(messages, many=True)
         conversation_serializer = self.get_serializer(conversation)
-        
         return Response({
             'conversation': conversation_serializer.data,
             'messages': message_serializer.data
@@ -1920,7 +1956,11 @@ class ChatConversationViewSet(viewsets.ModelViewSet):
         if user_id:
             qs = qs.filter(user_id=user_id)
         if status_filter:
-            qs = qs.filter(status=status_filter)
+            # 'closed' incluye también 'archived' (legacy) para que el admin vea todas las finalizadas
+            if status_filter == 'closed':
+                qs = qs.filter(status__in=['closed', 'archived'])
+            else:
+                qs = qs.filter(status=status_filter)
         if date_from:
             try:
                 from django.utils.dateparse import parse_date
@@ -2607,11 +2647,19 @@ def get_chat_analytics(request):
         
         historical_metrics = metrics_by_day
         
-        # Conversaciones recientes
-        recent_conversations = models.ChatConversation.objects.filter(
-            created_at__gte=start_date
-        ).select_related('user').order_by('-created_at')[:20]
-        
+        # Mensajes recientes: una sola vez cada usuario, con su última conversación (por updated_at)
+        all_recent = (
+            models.ChatConversation.objects.select_related("user")
+            .order_by("-updated_at")
+        )
+        seen_users = set()
+        recent_conversations = []
+        for c in all_recent:
+            if c.user_id not in seen_users:
+                seen_users.add(c.user_id)
+                recent_conversations.append(c)
+            if len(recent_conversations) >= 30:
+                break
         conversation_serializer = serializers.ChatConversationSerializer(recent_conversations, many=True)
         
         # Temas más frecuentes (simplificado - basado en palabras clave en mensajes)
@@ -2644,6 +2692,47 @@ def get_chat_analytics(request):
             {'detail': f'Error obteniendo análisis: {str(e)}'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_chat_users(request):
+    """
+    Lista de usuarios que tienen al menos una conversación de chat.
+    Para monitorización: "Ver todas" por usuario con buscador.
+    GET /api/hps/chat/users/?search=nombre
+    """
+    if not (user_has_perm(request.user, "chat.ver_todas_conversaciones") or request.user.is_staff or request.user.is_superuser):
+        return Response(
+            {'detail': 'No tienes permiso para ver este listado'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    User = get_user_model()
+    search = (request.query_params.get('search') or '').strip()
+    qs = User.objects.filter(
+        chat_conversations__isnull=False
+    ).annotate(
+        last_activity=Max('chat_conversations__updated_at'),
+        conversation_count=Count('chat_conversations', distinct=True)
+    ).distinct().order_by('-last_activity')
+    if search:
+        qs = qs.filter(
+            Q(first_name__icontains=search) |
+            Q(last_name__icontains=search) |
+            Q(email__icontains=search) |
+            Q(username__icontains=search)
+        )
+    users = []
+    for u in qs[:100]:
+        users.append({
+            'id': u.id,
+            'email': u.email or '',
+            'first_name': u.first_name or '',
+            'last_name': u.last_name or '',
+            'last_activity': u.last_activity.isoformat() if getattr(u, 'last_activity', None) else None,
+            'conversation_count': getattr(u, 'conversation_count', 0),
+        })
+    return Response(users, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])

@@ -57,6 +57,7 @@ const Chat = () => {
   const inputRef = useRef(null);
   const listenerId = useRef(null);
   const messageCountRef = useRef(0);
+  const welcomeFallbackDoneRef = useRef(false);
 
   // Store de autenticación
   const { user, token } = useAuthStore();
@@ -87,6 +88,7 @@ const Chat = () => {
             
             if (isPageReload) {
               console.log('🔄 Recarga de página detectada, limpiando mensajes del store');
+              welcomeFallbackDoneRef.current = false;
               // Limpiar mensajes pero mantener conversationId si existe
               const currentConversationId = useChatStore.getState().conversationId;
               setMessages([]);
@@ -120,15 +122,6 @@ const Chat = () => {
             console.log('✅ WebSocket ya está conectado');
             setIsConnected(true);
             setConnectionStatus('Conectado');
-            
-            // Si ya está conectado pero no hay mensajes, puede que se perdió el mensaje
-            // Esperar un momento y verificar
-            setTimeout(() => {
-              const currentMessages = useChatStore.getState().messages;
-              if (!currentMessages || currentMessages.length === 0) {
-                console.log('⚠️ WebSocket conectado pero sin mensajes, el backend debería enviar bienvenida');
-              }
-            }, 1000);
           }
           
         } catch (error) {
@@ -150,6 +143,27 @@ const Chat = () => {
       };
     }
   }, [token, user]);
+
+  // Fallback: si tras estar conectado seguimos con 0 mensajes, mostrar una bienvenida por defecto (una sola vez)
+  useEffect(() => {
+    if (!isConnected || welcomeFallbackDoneRef.current) return;
+    const t = setTimeout(() => {
+      const state = useChatStore.getState();
+      if ((!state.messages || state.messages.length === 0) && !welcomeFallbackDoneRef.current) {
+        welcomeFallbackDoneRef.current = true;
+        addMessage({
+          id: Date.now(),
+          type: 'assistant',
+          content: '¡Hola! 👋 Soy tu asistente de HPS. **¿En qué puedo ayudarte hoy?**',
+          timestamp: new Date(),
+          suggestions: [],
+          data: {},
+          conversationId: state.conversationId || null
+        });
+      }
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [isConnected, addMessage]);
 
   // Limpiar timeout al desmontar
   useEffect(() => {
@@ -247,16 +261,23 @@ const Chat = () => {
         
       case 'system':
       case 'assistant':
-        // Verificar duplicados con estado actual del store
         const messageContent = data.message;
+        const isWelcomeLike = (text) => (text || '').includes('¿En qué puedo ayudarte hoy?') || (text || '').toLowerCase().includes('en qué puedo ayudarte');
+        // Evitar bienvenidas duplicadas por reconexión / refresh de token: solo una bienvenida si ya hay mensajes
+        if (isWelcomeLike(messageContent) && currentMessages.length >= 1) {
+          console.log('Bienvenida duplicada por reconexión/refresh, ignorando');
+          setIsTyping(false);
+          if (typingTimeout) { clearTimeout(typingTimeout); setTypingTimeout(null); }
+          return;
+        }
+        // Verificar duplicados exactos (mismo contenido y tipo en ventana de 1s)
         const existingMessage = currentMessages.find(msg => 
           msg.content === messageContent && 
           msg.type === data.type &&
           Math.abs(new Date(msg.timestamp) - new Date(data.timestamp)) < 1000
         );
-        
         if (existingMessage) {
-          console.log('Mensaje duplicado detectado, ignorando:', messageContent);
+          console.log('Mensaje duplicado detectado, ignorando:', messageContent?.slice(0, 50));
           return;
         }
         
@@ -515,6 +536,7 @@ const Chat = () => {
         console.log('✅ Conversación reseteada:', data);
         
         // Limpiar el chat actual (solo mensajes y conversationId; mantener estado de conexión)
+        welcomeFallbackDoneRef.current = false;
         setMessages([]);
         const newConversationId = data.conversation_id;
         setConversationId(newConversationId);
@@ -536,9 +558,10 @@ const Chat = () => {
         if (websocketService.isConnected() && newConversationId) {
           websocketService.sendMessage({
             type: 'use_conversation',
-            conversation_id: newConversationId
+            conversation_id: newConversationId,
+            from_reset: true  // ya mostramos bienvenida desde la respuesta API; backend no debe reenviarla
           });
-          console.log('✅ use_conversation enviado');
+          console.log('✅ use_conversation enviado (from_reset)');
         } else {
           websocketService.disconnect();
           setTimeout(async () => {

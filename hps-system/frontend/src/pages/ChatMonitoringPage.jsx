@@ -44,6 +44,7 @@ const ChatMonitoringPage = () => {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [loadingAllConversationsModal, setLoadingAllConversationsModal] = useState(false);
 
   useEffect(() => {
     if (canManageUsers) {
@@ -56,6 +57,16 @@ const ChatMonitoringPage = () => {
       };
     }
   }, [canManageUsers, selectedTimeRange, autoRefresh]);
+
+  // Buscador por nombre en modal "Seleccionar usuario": refetch al backend con debounce
+  useEffect(() => {
+    if (!showUserModal) return;
+    const term = (userSearchTerm || '').trim();
+    const t = setTimeout(() => {
+      loadChatUsersForModal(term);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [showUserModal, userSearchTerm]); // loadChatUsersForModal estable
 
   // Prevenir scroll del body cuando el modal esté abierto
   useEffect(() => {
@@ -84,6 +95,18 @@ const ChatMonitoringPage = () => {
       document.body.style.overflow = 'unset';
     };
   }, [showUserModal, showAllConversationsModal]);
+
+  // Al abrir el modal "Todas las conversaciones" sin usuario, cargar la primera página de todas
+  useEffect(() => {
+    if (!showAllConversationsModal) return;
+    if (selectedUser) return; // Si ya hay usuario, la carga la hizo handleUserSelect
+    setLoadingAllConversationsModal(true);
+    let cancelled = false;
+    loadAllConversations(null)
+      .then(() => { if (!cancelled) setLoadingAllConversationsModal(false); })
+      .catch(() => { if (!cancelled) setLoadingAllConversationsModal(false); });
+    return () => { cancelled = true; };
+  }, [showAllConversationsModal, selectedUser]); // selectedUser: al limpiar filtro, recargar "todas"
 
   const loadChatData = async () => {
     setLoading(true);
@@ -119,7 +142,9 @@ const ChatMonitoringPage = () => {
     }
   };
 
-  const loadAllConversations = async () => {
+  const loadAllConversations = async (userIdOverride = undefined) => {
+    // undefined = "todas"; null o string = filtrar por ese user
+    const uid = userIdOverride !== undefined ? userIdOverride : selectedUser;
     try {
       const API_BASE_URL = process.env.REACT_APP_API_URL;
       if (!API_BASE_URL) {
@@ -132,11 +157,10 @@ const ChatMonitoringPage = () => {
       const API_BASE_URL_FINAL = API_BASE_URL || 'http://localhost:8080';
       const token = localStorage.getItem('accessToken') || localStorage.getItem('hps_token');
       
-      // Construir query con paginación y filtros
       const limit = 20;
       const offset = 0;
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-      if (selectedUser) params.set('user_id', String(selectedUser));
+      if (uid) params.set('user_id', String(uid));
       if (filterStatus) params.set('status', filterStatus);
       if (filterDateFrom) params.set('date_from', filterDateFrom);
       if (filterDateTo) params.set('date_to', filterDateTo);
@@ -155,19 +179,6 @@ const ChatMonitoringPage = () => {
         const conversations = data.results != null ? data.results : (Array.isArray(data) ? data : []);
         setAllConversations(conversations);
         setConversationsHasMore(Boolean(data.has_more));
-        // Extraer usuarios únicos desde las conversaciones cargadas
-        const byId = new Map();
-        conversations.forEach(c => {
-          if (c.user_id && !byId.has(c.user_id)) {
-            byId.set(c.user_id, {
-              id: c.user_id,
-              first_name: c.user_first_name,
-              last_name: c.user_last_name,
-              email: c.user_email
-            });
-          }
-        });
-        setAllUsers(Array.from(byId.values()));
       } else {
         console.error('Error cargando todas las conversaciones:', response.status);
         setAllConversations([]);
@@ -290,17 +301,12 @@ const ChatMonitoringPage = () => {
           messages: data.messages || []  // Agregar mensajes directamente
         };
         
-        // Si esta conversación está agrupada, cargar mensajes de todas las conversaciones del usuario
-        // Buscar si esta conversación pertenece a un grupo (por user_id)
-        const currentConv = allConversations.find(c => c.id === conversationId);
-        if (currentConv) {
-          const userId = currentConv.user_id || currentConv.user;
-          const groupedConv = getModalFilteredConversations().find(c => {
-            const cUserId = c.user_id || c.user;
-            return cUserId === userId && c.conversation_ids && c.conversation_ids.length > 1;
-          });
-          
-          if (groupedConv && groupedConv.conversation_ids && groupedConv.conversation_ids.length > 1) {
+        // Si esta conversación está agrupada (stack mismo día), cargar mensajes de todas las del grupo
+        const displayList = getDisplayConversations();
+        const groupedConv = displayList.find(c =>
+          c.id === conversationId || (c.conversation_ids && c.conversation_ids.includes(conversationId))
+        );
+        if (groupedConv && groupedConv.conversation_ids && groupedConv.conversation_ids.length > 1) {
           // Cargar mensajes de todas las conversaciones del usuario
           const allMessages = [];
           for (const convId of groupedConv.conversation_ids) {
@@ -321,13 +327,12 @@ const ChatMonitoringPage = () => {
               console.error(`Error cargando conversación ${convId}:`, e);
             }
           }
-            // Ordenar mensajes por fecha (más antiguo primero)
-            allMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-            conversation.messages = allMessages;
-            conversation.total_messages = allMessages.length;
-          }
+          // Ordenar mensajes por fecha (más antiguo primero)
+          allMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+          conversation.messages = allMessages;
+          conversation.total_messages = allMessages.length;
         }
-        
+
         setSelectedConversation(conversation);
         setShowConversationModal(true);
         
@@ -361,10 +366,22 @@ const ChatMonitoringPage = () => {
     return new Date(timestamp).toLocaleTimeString('es-ES');
   };
 
-  const handleShowAllConversations = async () => {
+  const loadChatUsersForModal = async (search = '') => {
+    try {
+      const users = await chatMonitoringService.getChatUsers(search);
+      setAllUsers(Array.isArray(users) ? users : []);
+    } catch (e) {
+      console.error('Error cargando usuarios con conversaciones:', e);
+      setAllUsers([]);
+    }
+  };
+
+  const handleShowAllConversations = () => {
     setShowAllConversationsModal(true);
-    await loadAllConversations();
-    await loadUsers();
+    setSelectedUser('');
+    setUserSearchTerm('');
+    loadChatUsersForModal('');
+    // La carga de conversaciones (sin filtro) la hace el useEffect al abrir el modal
   };
 
   const handleBackToRecent = () => {
@@ -377,42 +394,50 @@ const ChatMonitoringPage = () => {
     return chatData.recentConversations?.filter(conversation => conversation.total_messages > 0) || [];
   };
 
+  /** En "Ver todas": con usuario seleccionado, solo sus conversaciones; sin usuario, todas (ya cargadas). */
   const getModalFilteredConversations = () => {
-    let filtered = allConversations.filter(conversation => conversation.total_messages > 0);
-    
-    if (selectedUser) {
-      filtered = filtered.filter(conversation => conversation.user_id === selectedUser);
-    }
-    
-    // Agrupar conversaciones por usuario
-    const groupedByUser = {};
-    filtered.forEach(conv => {
-      const userId = conv.user_id || conv.user;
-      if (!groupedByUser[userId]) {
-        groupedByUser[userId] = {
-          ...conv,
-          // Mantener la conversación más reciente como base
-          id: conv.id,
-          created_at: conv.created_at,
-          total_messages: 0,
-          conversation_ids: [] // Guardar IDs de todas las conversaciones del usuario
-        };
-      }
-      // Agregar ID de esta conversación al grupo
-      groupedByUser[userId].conversation_ids.push(conv.id);
-      // Sumar mensajes
-      groupedByUser[userId].total_messages += conv.total_messages || 0;
-      // Actualizar fecha si es más reciente
-      if (new Date(conv.created_at) > new Date(groupedByUser[userId].created_at)) {
-        groupedByUser[userId].created_at = conv.created_at;
-        groupedByUser[userId].id = conv.id; // ID de la más reciente
-      }
+    const base = selectedUser
+      ? allConversations.filter(c => (c.user_id === selectedUser || c.user === selectedUser))
+      : allConversations;
+    return base
+      .filter(c => (c.total_messages || 0) > 0)
+      .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+  };
+
+  /**
+   * Lista para mostrar en el modal: conversaciones activas sueltas; cerradas del mismo usuario y mismo día
+   * agrupadas en una sola fila (stack) con conversation_ids para no acumular filas.
+   */
+  const getDisplayConversations = () => {
+    const list = getModalFilteredConversations();
+    const active = list.filter(c => c.status === 'active');
+    const closed = list.filter(c => c.status !== 'active');
+    const dayKey = (c) => {
+      const d = c.closed_at || c.updated_at || c.created_at;
+      if (!d) return '';
+      const date = new Date(d);
+      return `${c.user_id ?? c.user}_${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    };
+    const byDay = {};
+    closed.forEach(c => {
+      const key = dayKey(c);
+      if (!byDay[key]) byDay[key] = [];
+      byDay[key].push(c);
     });
-    
-    // Convertir a array y ordenar por fecha más reciente
-    return Object.values(groupedByUser).sort((a, b) => 
-      new Date(b.created_at) - new Date(a.created_at)
-    );
+    const stacked = Object.values(byDay).map(group => {
+      if (group.length === 1) return { ...group[0], id: group[0].id };
+      const sorted = [...group].sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+      const latest = sorted[0];
+      const totalMessages = group.reduce((s, c) => s + (c.total_messages || 0), 0);
+      return {
+        ...latest,
+        id: latest.id,
+        conversation_ids: group.map(c => c.id),
+        total_messages: totalMessages,
+        _stacked: true,
+      };
+    });
+    return [...active, ...stacked].sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
   };
 
   const getUserName = (userId) => {
@@ -423,11 +448,12 @@ const ChatMonitoringPage = () => {
 
   const getFilteredUsers = () => {
     if (!Array.isArray(allUsers)) return [];
+    const term = (userSearchTerm || '').toLowerCase();
+    if (!term) return allUsers;
     return allUsers.filter(user => {
-      const fullName = `${user.first_name} ${user.last_name}`.toLowerCase();
-      const email = user.email.toLowerCase();
-      const searchTerm = userSearchTerm.toLowerCase();
-      return fullName.includes(searchTerm) || email.includes(searchTerm);
+      const fullName = `${user.first_name || ''} ${user.last_name || ''}`.toLowerCase();
+      const email = (user.email || '').toLowerCase();
+      return fullName.includes(term) || email.includes(term);
     });
   };
 
@@ -435,6 +461,7 @@ const ChatMonitoringPage = () => {
     setSelectedUser(userId);
     setUserSearchTerm('');
     setShowUserModal(false);
+    loadAllConversations(userId);
   };
 
   const handleUserSearchChange = (e) => {
@@ -977,7 +1004,6 @@ const ChatMonitoringPage = () => {
                           <option value="">Todos</option>
                           <option value="active">Activa</option>
                           <option value="closed">Cerrada</option>
-                          <option value="archived">Archivada</option>
                         </select>
                       </div>
                       <div>
@@ -1018,9 +1044,14 @@ const ChatMonitoringPage = () => {
                     {/* Lista de conversaciones */}
                     <div className="max-h-96 overflow-y-auto border border-gray-200 rounded-md">
                       <div className="divide-y divide-gray-200">
-                        {getModalFilteredConversations().length > 0 ? (
-                          getModalFilteredConversations().map((conversation, index) => (
-                            <div key={conversation.id} className={`p-4 hover:bg-gray-50 transition-colors duration-200 ${index > 0 ? 'border-t border-gray-100' : ''}`}>
+                        {loadingAllConversationsModal ? (
+                          <div className="p-8 text-center text-gray-500">
+                            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-3"></div>
+                            <p>Cargando conversaciones…</p>
+                          </div>
+                        ) : getDisplayConversations().length > 0 ? (
+                          getDisplayConversations().map((conversation, index) => (
+                            <div key={conversation.conversation_ids ? conversation.conversation_ids.join('-') : conversation.id} className={`p-4 hover:bg-gray-50 transition-colors duration-200 ${index > 0 ? 'border-t border-gray-100' : ''}`}>
                               <div className="flex items-start justify-between">
                                 <div className="flex-1 min-w-0">
                                   {/* Header con usuario y estado */}
@@ -1039,9 +1070,14 @@ const ChatMonitoringPage = () => {
                                             ? `${conversation.user_first_name} ${conversation.user_last_name}`
                                             : conversation.user_email || 'Usuario'
                                           }
+                                          {conversation.conversation_ids && conversation.conversation_ids.length > 1 && (
+                                            <span className="text-gray-500 font-normal ml-1">
+                                              ({conversation.conversation_ids.length} conversaciones mismo día)
+                                            </span>
+                                          )}
                                         </p>
                                         <p className="text-xs text-gray-500">
-                                          {formatTime(conversation.created_at)}
+                                          {formatTime(conversation.updated_at || conversation.created_at)}
                                         </p>
                                       </div>
                                     </div>
@@ -1100,6 +1136,18 @@ const ChatMonitoringPage = () => {
                             <p className="text-sm">
                               {selectedUser ? 'Este usuario no tiene conversaciones activas' : 'Las conversaciones vacías se han filtrado automáticamente'}
                             </p>
+                            {!selectedUser && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setLoadingAllConversationsModal(true);
+                                  loadAllConversations(null).finally(() => setLoadingAllConversationsModal(false));
+                                }}
+                                className="mt-3 text-sm text-blue-600 hover:text-blue-800 font-medium"
+                              >
+                                Reintentar
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
