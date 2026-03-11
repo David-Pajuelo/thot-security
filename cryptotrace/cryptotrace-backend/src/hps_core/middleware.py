@@ -51,7 +51,7 @@ class AccessLogMiddleware(MiddlewareMixin):
             response_time_ms = int((time.time() - start) * 1000)
 
         try:
-            UserAccessLog = __import__("hps_core.models", fromlist=["UserAccessLog"]).UserAccessLog
+            UserAccessLog = __import__("monitorizacion.models", fromlist=["UserAccessLog"]).UserAccessLog
             user = getattr(request, "user", None)
             if user and not user.is_authenticated:
                 user = None

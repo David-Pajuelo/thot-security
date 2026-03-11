@@ -154,59 +154,6 @@ class HpsTokenAdmin(admin.ModelAdmin):
     is_valid.short_description = 'Válido'
 
 
-@admin.register(models.UserAccessLog)
-class UserAccessLogAdmin(ExportCsvMixin, admin.ModelAdmin):
-    list_display = ['created_at', 'user', 'method', 'path', 'status_code', 'ip_address', 'response_time_ms']
-    list_filter = ['method', 'status_code', 'created_at']
-    search_fields = ['path', 'user__email', 'ip_address']
-    raw_id_fields = ['user']
-    readonly_fields = ['user', 'path', 'method', 'status_code', 'ip_address', 'user_agent', 'response_time_ms', 'created_at']
-    date_hierarchy = 'created_at'
-    actions = ['export_to_csv']
-    export_csv_columns = [
-        ('created_at', 'Fecha'),
-        ('user_email', 'Usuario'),
-        ('method', 'Método'),
-        ('path', 'Ruta'),
-        ('status_code', 'Código'),
-        ('ip_address', 'IP'),
-        ('user_agent', 'User-Agent'),
-        ('response_time_ms', 'Tiempo (ms)'),
-    ]
-
-    def user_email(self, obj):
-        return obj.user.email if obj.user_id else ""
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def export_to_csv(self, request, queryset):
-        # Columnas con atributo derivado user_email
-        response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = "attachment; filename=registro_acceso.csv"
-        response.write("\ufeff")
-        writer = csv.writer(response, dialect="excel")
-        writer.writerow([h for _, h in self.export_csv_columns])
-        for obj in queryset:
-            row = []
-            for field_name, _ in self.export_csv_columns:
-                if field_name == "user_email":
-                    value = obj.user.email if obj.user_id else ""
-                else:
-                    value = getattr(obj, field_name, None)
-                if value is None:
-                    row.append("")
-                elif hasattr(value, "isoformat"):
-                    row.append(value.isoformat())
-                else:
-                    row.append(str(value))
-            writer.writerow(row)
-        return response
-
-
 @admin.register(models.HpsAuditLog)
 class HpsAuditLogAdmin(ExportCsvMixin, admin.ModelAdmin):
     list_display = ['action', 'user', 'table_name', 'created_at']

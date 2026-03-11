@@ -48,7 +48,7 @@ ACCESS_LOG_ENABLED = False
 
 ### Registro de acceso (UserAccessLog)
 
-1. Entrar en **Admin de Django** → **Registros de acceso** (o "User access logs").
+1. Entrar en **Admin de Django** → sección **Monitorización** → **Registros de acceso**.
 2. Aplicar filtros si se desea (fecha, método, código de respuesta, etc.).
 3. Seleccionar los registros a exportar (o "Seleccionar todo" con el filtro aplicado).
 4. En "Acción" elegir **Exportar a CSV** y pulsar "Ejecutar".

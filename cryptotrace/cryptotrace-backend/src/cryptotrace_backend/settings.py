@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     'productos',       # Nuestra nueva aplicación
     'django_extensions',  # Agregar esta línea
     "corsheaders",
+    "monitorizacion",
     "hps_core",
     'channels',  # Django Channels para WebSocket
     'hps_agent',  # Agente IA integrado en Django

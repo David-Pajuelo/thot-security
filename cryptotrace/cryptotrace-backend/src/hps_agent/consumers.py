@@ -120,12 +120,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 logger.error(f"❌ Error inicializando conversación: {conv_error}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
-                # Continuar de todas formas - la conexión está establecida
-                # Enviar mensaje de bienvenida de emergencia
-                try:
-                    await self._send_welcome_message()
-                except Exception as welcome_error:
-                    logger.error(f"❌ Error enviando mensaje de bienvenida de emergencia: {welcome_error}")
+                # No enviar bienvenida aquí para evitar duplicado (puede que ya se haya enviado)
             
         except Exception as e:
             logger.error(f"❌ Error en connect: {e}")
@@ -154,9 +149,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 }))
                 return
 
-            # Manejar cambio de conversación tras Reset (evita depender de reconexión para la bienvenida)
+            # Manejar cambio de conversación tras Reset o selección manual
             if data.get('type') == 'use_conversation':
                 conv_id = data.get('conversation_id')
+                from_reset = data.get('from_reset', False)  # True = frontend ya mostró bienvenida del API
                 if conv_id and await self.chat_service.conversation_belongs_to_user(conv_id, str(self.user.id)):
                     self.conversation_id = conv_id
                     await self.send(text_data=json.dumps({
@@ -164,8 +160,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         'conversation_id': conv_id,
                         'timestamp': datetime.now().isoformat()
                     }))
-                    await self._load_conversation_history()
-                    logger.info(f"✅ use_conversation: cambiado a {conv_id}, historial/bienvenida enviados")
+                    await self._load_conversation_history(from_reset=from_reset)
+                    logger.info(f"✅ use_conversation: cambiado a {conv_id} (from_reset={from_reset})")
                 else:
                     logger.warning(f"⚠️ use_conversation ignorado: conv_id={conv_id} inválido o no pertenece al usuario")
                 return
@@ -439,10 +435,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             self.conversation_id = None
-            try:
-                await self._send_welcome_message()
-            except Exception as welcome_error:
-                logger.error(f"❌ Error enviando mensaje de bienvenida de emergencia: {welcome_error}")
+            # No reenviar bienvenida (evitar duplicado si ya se envió en el branch anterior)
     
     async def _conversation_has_welcome_message(self) -> bool:
         """Comprueba si la conversación ya tiene un mensaje de bienvenida (evitar duplicados en reconexiones)."""
@@ -503,19 +496,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
             except Exception as fallback_error:
                 logger.error(f"❌ Error crítico: no se pudo enviar mensaje de bienvenida de emergencia: {fallback_error}")
     
-    async def _load_conversation_history(self):
-        """Cargar historial de conversación"""
+    async def _load_conversation_history(self, from_reset: bool = False):
+        """
+        Cargar historial. Si no hay conversation_id o hay 0 mensajes, enviar bienvenida
+        (salvo si from_reset=True: el frontend ya mostró la bienvenida del API).
+        Así siempre hay al menos un mensaje de bienvenida (refresco, primera vez, reconexión).
+        """
         try:
             if not self.conversation_id:
-                # Si no hay conversation_id, enviar bienvenida (primera vez)
                 await self._send_welcome_message()
                 return
-            
+
             messages = await self.chat_service.get_conversation_messages(
                 self.conversation_id,
                 limit=50
             )
-            
+
             if messages and len(messages) > 0:
                 logger.info(f"📜 Cargando {len(messages)} mensajes del historial")
                 last_message_has_suggestions = False
@@ -547,13 +543,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             'conversation_id': self.conversation_id,
                             'suggestions': suggestions
                         }))
-                # No enviar bienvenida si hay historial - solo se muestra en primera vez o después de reset
             else:
-                # Si no hay historial, enviar bienvenida (primera vez o después de reset)
-                logger.info("📜 No hay mensajes en el historial, enviando bienvenida (primera vez o post-reset)")
-                await self._send_welcome_message(force_after_reset=True)
-                
+                # Conversación vacía: enviar bienvenida salvo si viene de reset (frontend ya la mostró)
+                if from_reset:
+                    logger.info("📜 Conversación vacía tras reset; no enviar bienvenida por WS (ya en frontend)")
+                else:
+                    await self._send_welcome_message()
+                    logger.info("📜 Conversación vacía; enviada bienvenida por WS")
+
         except Exception as e:
             logger.error(f"❌ Error cargando historial: {e}")
-            # Enviar bienvenida si hay error (por seguridad)
-            await self._send_welcome_message(force_after_reset=True)

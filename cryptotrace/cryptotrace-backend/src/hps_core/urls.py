@@ -233,6 +233,7 @@ urlpatterns = router.urls + [
     path('hps/chat/metrics/realtime/', views.get_chat_realtime_metrics, name='chat-metrics-realtime'),
     path('hps/chat/metrics/historical/', views.get_chat_historical_metrics, name='chat-metrics-historical'),
     path('hps/chat/analytics/', views.get_chat_analytics, name='chat-analytics'),
+    path('hps/chat/users/', views.get_chat_users, name='chat-users'),
     path('hps/chat/performance/', views.get_chat_performance, name='chat-performance'),
     path('hps/chat/topics/', views.get_chat_topics, name='chat-topics'),
 ]

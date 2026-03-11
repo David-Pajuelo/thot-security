@@ -72,6 +72,23 @@ class ChatMonitoringService {
   }
 
   /**
+   * Lista de usuarios con al menos una conversación (para monitorización "Ver todas").
+   * GET /api/hps/chat/users/?search=nombre
+   */
+  async getChatUsers(search = '') {
+    try {
+      const params = new URLSearchParams();
+      if (search && search.trim()) params.set('search', search.trim());
+      const url = params.toString() ? `${CHAT_API_BASE}/users?${params}` : `${CHAT_API_BASE}/users`;
+      const response = await apiUtils.get(url);
+      return Array.isArray(response.data) ? response.data : (response.data?.results || []);
+    } catch (error) {
+      console.error('Error obteniendo usuarios con conversaciones:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Obtener conversaciones del usuario actual
    */
   async getUserConversations(limit = 50, offset = 0) {
